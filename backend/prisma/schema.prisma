@@ -1,0 +1,197 @@
+generator client {
+  provider = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------
+// Organization Hierarchy
+// -----------------------------------------------------------------------
+
+model Department {
+  id             Int        @id @default(autoincrement())
+  name           String     @unique
+  divisions      Division[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model Division {
+  id             Int        @id @default(autoincrement())
+  name           String
+  departmentId   Int
+  department     Department @relation(fields: [departmentId], references: [id])
+  users          User[]
+  targetedTasks  Task[]     @relation("TaskTargetDivision")
+  targetedFinds  Finding[]  @relation("FindingTargetDivision")
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+// -----------------------------------------------------------------------
+// User & Roles
+// -----------------------------------------------------------------------
+
+model Role {
+  id             Int        @id @default(autoincrement())
+  name           String     @unique // e.g. Director, Manager, Group Leader, Staff
+  users          User[]
+}
+
+model User {
+  id                 Int        @id @default(autoincrement())
+  name               String
+  email              String     @unique
+  passwordHash       String
+  
+  divisionId         Int
+  division           Division   @relation(fields: [divisionId], references: [id])
+  
+  roleId             Int
+  role               Role       @relation(fields: [roleId], references: [id])
+  
+  assignedTasks      Task[]     @relation("TaskAssignedTo")
+  reportedFindings   Finding[]  @relation("FindingReportedBy")
+  
+  aircraftAuths      UserAircraftAuthorization[]
+  jobAuths           UserJobAuthorization[]
+  
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+}
+
+model AircraftType {
+  id             Int        @id @default(autoincrement())
+  code           String     @unique // e.g. B737, A320
+  description    String?
+  authorizations UserAircraftAuthorization[]
+}
+
+model UserAircraftAuthorization {
+  id             Int        @id @default(autoincrement())
+  userId         Int
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aircraftTypeId Int
+  aircraftType   AircraftType @relation(fields: [aircraftTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, aircraftTypeId])
+}
+
+model AuthorizationType {
+  id             Int        @id @default(autoincrement())
+  code           String     @unique // e.g. INSPECTOR, MECHANIC
+  description    String?
+  authorizations UserJobAuthorization[]
+}
+
+model UserJobAuthorization {
+  id                   Int        @id @default(autoincrement())
+  userId               Int
+  user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  authorizationTypeId  Int
+  authorizationType    AuthorizationType @relation(fields: [authorizationTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, authorizationTypeId])
+}
+
+// -----------------------------------------------------------------------
+// Templates & Tasks
+// -----------------------------------------------------------------------
+
+model Template {
+  id               Int        @id @default(autoincrement())
+  title            String
+  description      String?
+  requiresApproval Boolean    @default(false)
+  allowsFindings   Boolean    @default(true)
+  formSchema       Json       // JSON document for complex branching and field definitions
+  
+  tasks            Task[]
+  
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+}
+
+model Task {
+  id                 Int        @id @default(autoincrement())
+  templateId         Int
+  template           Template   @relation(fields: [templateId], references: [id])
+  
+  status             String     @default("Assigned") // Assigned, InProgress, Review, Approved, Rejected
+  
+  assignedToUserId   Int?
+  assignedToUser     User?      @relation("TaskAssignedTo", fields: [assignedToUserId], references: [id])
+  
+  // The division being audited/surveilled
+  targetDivisionId   Int?
+  targetDivision     Division?  @relation("TaskTargetDivision", fields: [targetDivisionId], references: [id])
+  
+  // If this task is a follow-up action to a finding
+  parentFindingId    Int?
+  parentFinding      Finding?   @relation("FindingFollowUpTask", fields: [parentFindingId], references: [id])
+  
+  taskData           TaskData?
+  sourceFindings     Finding[]  @relation("FindingSourceTask")
+  
+  createdAt          DateTime   @default(now())
+  completedAt        DateTime?
+  updatedAt          DateTime   @updatedAt
+}
+
+model TaskData {
+  id                 Int        @id @default(autoincrement())
+  taskId             Int        @unique
+  task               Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  data               Json       // The actual answers/inputs matching formSchema
+  
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+}
+
+// -----------------------------------------------------------------------
+// Findings System
+// -----------------------------------------------------------------------
+
+model Finding {
+  id                 Int        @id @default(autoincrement())
+  severity           String     // Low, Medium, High, Critical
+  category           String     // Safety, Documentation, Tools, etc.
+  description        String
+  status             String     @default("Open") // Open, Closed
+  
+  sourceTaskId       Int?
+  sourceTask         Task?      @relation("FindingSourceTask", fields: [sourceTaskId], references: [id])
+  
+  reportedByUserId   Int
+  reportedByUser     User       @relation("FindingReportedBy", fields: [reportedByUserId], references: [id])
+  
+  targetDivisionId   Int?
+  targetDivision     Division?  @relation("FindingTargetDivision", fields: [targetDivisionId], references: [id])
+  
+  followUpTasks      Task[]     @relation("FindingFollowUpTask")
+  
+  createdAt          DateTime   @default(now())
+  closedAt           DateTime?
+  updatedAt          DateTime   @updatedAt
+}
+
+// -----------------------------------------------------------------------
+// Audit & Accountability
+// -----------------------------------------------------------------------
+
+model AuditLog {
+  id                 Int        @id @default(autoincrement())
+  actionType         String     // TASK_REASSIGNED, TASK_REJECTED, FINDING_RAISED, etc.
+  entityType         String     // Task, Finding
+  entityId           Int        
+  
+  performedByUserId  Int
+  
+  comment            String?    // User's reasoning or feedback
+  details            Json?      // Technical JSON payload of the change
+  
+  timestamp          DateTime   @default(now())
+}
