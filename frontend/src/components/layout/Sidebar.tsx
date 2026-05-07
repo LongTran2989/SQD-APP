@@ -15,7 +15,7 @@ import {
 export default function Sidebar() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
-  const roleName = user?.role?.name;
+  const roleName = user?.role;
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },

@@ -7,7 +7,7 @@ export interface User {
   id: number;
   name: string;
   email: string;
-  role: Role;
+  role: string; // The backend returns the role name as a string
   divisionId: number | null;
 }
 

@@ -108,6 +108,8 @@ model Template {
   id               Int        @id @default(autoincrement())
   title            String
   description      String?
+  status           String     @default("Draft") // Draft, Published, Archived
+  revision         Int        @default(1)
   requiresApproval Boolean    @default(false)
   allowsFindings   Boolean    @default(true)
   formSchema       Json       // JSON document for complex branching and field definitions
@@ -116,6 +118,7 @@ model Template {
   
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
+  publishedAt      DateTime?
 }
 
 model Task {

@@ -10,6 +10,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 
 import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
+import templateRoutes from './routes/template.routes';
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/templates', templateRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {
