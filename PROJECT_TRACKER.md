@@ -10,19 +10,19 @@ This document serves as the persistent log for our project. It tracks what we ar
 
 ## Milestones & Roadmap
 
-### [ ] Phase 1: Foundation (Backend & Database)
-- [ ] Define Workflow and Database Schema (Pending User Approval)
-- [ ] Initialize Node.js & Express Backend
-- [ ] Connect backend to local PostgreSQL using Prisma ORM
-- [ ] Generate and migrate the database schema
+### [x] Phase 1: Foundation (Backend & Database)
+- [x] Define Workflow and Database Schema (Pending User Approval)
+- [x] Initialize Node.js & Express Backend
+- [x] Connect backend to local PostgreSQL using Prisma ORM
+- [x] Generate and migrate the database schema
 
-### [ ] Phase 2: Security & Roles
-- [ ] Implement JWT Authentication (Login/Register)
-- [ ] Implement Role-Based Access Control (RBAC) middleware
+### [x] Phase 2: Security & Roles
+- [x] Implement JWT Authentication (Login/Register)
+- [x] Implement Role-Based Access Control (RBAC) middleware
 
-### [ ] Phase 3: Frontend Scaffolding
-- [ ] Initialize React (Vite) application
-- [ ] Set up routing and basic UI layout/navigation
+### [x] Phase 3: Frontend Scaffolding
+- [x] Initialize Next.js application
+- [x] Set up routing and basic UI layout/navigation
 
 ### [ ] Phase 4: Core Features
 - [ ] Build Template Builder UI and Backend API
@@ -38,7 +38,9 @@ This document serves as the persistent log for our project. It tracks what we ar
 ---
 
 ## Achievements
-*   *2026-05-06:* Project initialized. Git repository created. `.gitignore` set up. Architecture stack (Node, React, PostgreSQL) agreed upon.
+*   *2026-05-06:* Project initialized. Git repository created. `.gitignore` set up. Architecture stack (Node, Next.js, PostgreSQL) agreed upon.
 *   *2026-05-06:* Refined Workflow and Database Schema to support Quality System requirements (Findings system, JSON-based branching templates, complex User authorizations).
 *   *2026-05-06:* Finalized Architecture to include immutable `AuditLog` tracking and strict Data Visibility (RBAC) filtering rules.
 *   *2026-05-06:* Added Department/Division hierarchy for external audit metrics, and hierarchical task assignment/transfer capabilities.
+*   *2026-05-06:* Completed Phase 1 & 2. Implemented automated Jest test suite for security endpoints.
+*   *2026-05-07:* Completed Phase 3. Scaffolded Next.js App Router frontend with Tailwind v4, Zustand, and Axios.

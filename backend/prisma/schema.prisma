@@ -46,6 +46,9 @@ model User {
   name               String
   email              String     @unique
   passwordHash       String
+  forcePasswordChange Boolean   @default(true)
+  resetPasswordToken  String?
+  resetPasswordExpires DateTime?
   
   divisionId         Int
   division           Division   @relation(fields: [divisionId], references: [id])

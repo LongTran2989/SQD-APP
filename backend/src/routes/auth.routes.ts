@@ -1,12 +1,15 @@
 import { Router } from 'express';
-import { login, register } from '../controllers/auth.controller';
+import { login, register, updatePassword, forgotPassword, resetPassword } from '../controllers/auth.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { authorizeRoles } from '../middleware/rbac.middleware';
 
 const router = Router();
 
 router.post('/login', login);
-// Protecting register route so only Admins and Directors can create new users
 router.post('/register', authenticateJWT, authorizeRoles('Director', 'Admin'), register);
+
+router.post('/update-password', authenticateJWT, updatePassword);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password', resetPassword);
 
 export default router;

@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "nodemon src/index.ts",
     "test": "dotenv -e .env.test -- jest --runInBand",
     "test:setup": "dotenv -e .env.test -- npx prisma db push --accept-data-loss"
   },
