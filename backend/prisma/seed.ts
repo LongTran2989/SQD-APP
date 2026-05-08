@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
+import * as bcrypt from 'bcrypt';
 import * as dotenv from 'dotenv';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
