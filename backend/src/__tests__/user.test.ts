@@ -28,15 +28,15 @@ describe('User RBAC Endpoints', () => {
     const division = await prisma.division.create({ data: { name: 'RBAC Div', code: 'RBAC', departmentId: department.id } });
 
     const adminUser = await prisma.user.create({
-      data: { name: 'Admin', email: 'adminrbac@sqd.com', passwordHash: 'hash', divisionId: division.id, roleId: adminRole!.id }
+      data: { name: 'Admin', email: 'adminrbac@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId: division.id, roleId: adminRole!.id }
     });
 
     const staffUser = await prisma.user.create({
-      data: { name: 'Staff', email: 'staffrbac@sqd.com', passwordHash: 'hash', divisionId: division.id, roleId: staffRole!.id }
+      data: { name: 'Staff', email: 'staffrbac@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId: division.id, roleId: staffRole!.id }
     });
 
     const targetUser = await prisma.user.create({
-      data: { name: 'Target', email: 'target@sqd.com', passwordHash: 'hash', divisionId: division.id, roleId: staffRole!.id }
+      data: { name: 'Target', email: 'target@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId: division.id, roleId: staffRole!.id }
     });
     targetUserId = targetUser.id;
 

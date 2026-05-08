@@ -33,6 +33,7 @@ describe('Auth Endpoints', () => {
         name: 'Test Admin',
         email: 'testadmin@sqd.com',
         passwordHash: await bcrypt.hash('password123', 10),
+        forcePasswordChange: false,
         divisionId: division.id,
         roleId: adminRole!.id
       }
