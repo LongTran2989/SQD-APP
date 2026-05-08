@@ -22,9 +22,11 @@ model Department {
 model Division {
   id             Int        @id @default(autoincrement())
   name           String
+  code           String     @unique // e.g. QA, QCH, QCS, SQ — used for templateId generation
   departmentId   Int
   department     Department @relation(fields: [departmentId], references: [id])
   users          User[]
+  templates      Template[] @relation("TemplateDivision")
   targetedTasks  Task[]     @relation("TaskTargetDivision")
   targetedFinds  Finding[]  @relation("FindingTargetDivision")
   createdAt      DateTime   @default(now())
@@ -59,6 +61,11 @@ model User {
   assignedTasks      Task[]     @relation("TaskAssignedTo")
   reportedFindings   Finding[]  @relation("FindingReportedBy")
   
+  // Templates this user revised or locked
+  revisedTemplates       Template[]               @relation("TemplateRevisedBy")
+  lockedTemplates        Template[]               @relation("TemplateLockedBy")
+  revisionArchives       TemplateRevisionArchive[] @relation("ArchiveRevisedBy")
+  
   aircraftAuths      UserAircraftAuthorization[]
   jobAuths           UserJobAuthorization[]
   
@@ -66,11 +73,29 @@ model User {
   updatedAt          DateTime   @updatedAt
 }
 
+// -----------------------------------------------------------------------
+// Aircraft (Authorization + Registration)
+// -----------------------------------------------------------------------
+
 model AircraftType {
   id             Int        @id @default(autoincrement())
-  code           String     @unique // e.g. B737, A320
-  description    String?
+  iataCode       String     @unique // e.g. 737, 320
+  icaoCode       String     @unique // e.g. B737, A320
+  manufacturer   String                // e.g. Boeing, Airbus
+  model          String                // e.g. 737-800, A320neo
+  registrations  AircraftRegistration[]
   authorizations UserAircraftAuthorization[]
+  createdAt      DateTime   @default(now())
+}
+
+model AircraftRegistration {
+  id             Int          @id @default(autoincrement())
+  registration   String       @unique  // e.g. VN-A361
+  operator       String                // e.g. Vietnam Airlines
+  authority      String                // e.g. CAAV
+  aircraftTypeId Int
+  aircraftType   AircraftType @relation(fields: [aircraftTypeId], references: [id])
+  createdAt      DateTime     @default(now())
 }
 
 model UserAircraftAuthorization {
@@ -106,19 +131,49 @@ model UserJobAuthorization {
 
 model Template {
   id               Int        @id @default(autoincrement())
+  templateId       String     @unique // Auto-generated: [DivisionCode]-[3-digit seq], e.g. QA-001
   title            String
   description      String?
   status           String     @default("Draft") // Draft, Published, Archived
   revision         Int        @default(1)
   requiresApproval Boolean    @default(false)
   allowsFindings   Boolean    @default(true)
-  formSchema       Json       // JSON document for complex branching and field definitions
+  formSchema       Json       // JSON document for field definitions
+  
+  // Division ownership (determines templateId prefix)
+  divisionId       Int
+  division         Division   @relation("TemplateDivision", fields: [divisionId], references: [id])
+  
+  // Revision tracking
+  revisedByUserId  Int?
+  revisedByUser    User?      @relation("TemplateRevisedBy", fields: [revisedByUserId], references: [id])
+  revisedAt        DateTime?
+  
+  // Pessimistic locking (lock is valid if lockedAt is within last 30 minutes)
+  lockedByUserId   Int?
+  lockedByUser     User?      @relation("TemplateLockedBy", fields: [lockedByUserId], references: [id])
+  lockedAt         DateTime?
   
   tasks            Task[]
+  revisionArchives TemplateRevisionArchive[]
   
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
   publishedAt      DateTime?
+}
+
+model TemplateRevisionArchive {
+  id               Int        @id @default(autoincrement())
+  templateId       Int
+  template         Template   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  revision         Int
+  formSchema       Json       // Snapshot of the formSchema at this revision
+  publishedAt      DateTime
+  
+  revisedByUserId  Int
+  revisedByUser    User       @relation("ArchiveRevisedBy", fields: [revisedByUserId], references: [id])
+  
+  createdAt        DateTime   @default(now())
 }
 
 model Task {

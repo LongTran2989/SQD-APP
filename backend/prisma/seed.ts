@@ -11,79 +11,141 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  console.log('Seeding database...');
+  console.log('🌱 Seeding SQD-APP database...\n');
 
-  // Create Department
-  const department = await prisma.department.upsert({
-    where: { name: 'Engineering' },
+  // ─── 1. Department ─────────────────────────────────────────────────
+  const dept = await prisma.department.upsert({
+    where: { name: 'Quality System Division' },
     update: {},
-    create: {
-      name: 'Engineering',
-    },
+    create: { name: 'Quality System Division' },
   });
+  console.log(`✔ Department: ${dept.name}`);
 
-  // Create Division
-  const division = await prisma.division.upsert({
-    where: { id: 1 }, // Assuming ID 1 for initial division or we can query by name if it had a unique constraint
-    update: {},
-    create: {
-      name: 'Quality Assurance',
-      departmentId: department.id,
-    },
-  });
+  // ─── 2. Divisions (with code for templateId generation) ────────────
+  const divisionData = [
+    { name: 'QA',     code: 'QA' },
+    { name: 'QC HAN', code: 'QCH' },
+    { name: 'QC SGN', code: 'QCS' },
+    { name: 'SQ',     code: 'SQ' },
+  ];
 
-  // Create Roles
-  const roles = ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'];
-  for (const roleName of roles) {
-    await prisma.role.upsert({
+  const divisions: Record<string, any> = {};
+  for (const d of divisionData) {
+    const div = await prisma.division.upsert({
+      where: { code: d.code },
+      update: { name: d.name },
+      create: { name: d.name, code: d.code, departmentId: dept.id },
+    });
+    divisions[d.code] = div;
+  }
+  console.log(`✔ Divisions: ${divisionData.map(d => d.code).join(', ')}`);
+
+  // ─── 3. Roles ──────────────────────────────────────────────────────
+  const roleNames = ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'];
+  const roles: Record<string, any> = {};
+  for (const roleName of roleNames) {
+    const role = await prisma.role.upsert({
       where: { name: roleName },
       update: {},
       create: { name: roleName },
     });
+    roles[roleName] = role;
   }
+  console.log(`✔ Roles: ${roleNames.join(', ')}`);
 
-  const directorRole = await prisma.role.findUnique({ where: { name: 'Director' } });
-
-  if (!directorRole) {
-    throw new Error('Director role could not be created or found.');
-  }
-
-  // Create Director User
+  // ─── 4. Users ──────────────────────────────────────────────────────
   const passwordHash = await bcrypt.hash('password123', 10);
-  const directorUser = await prisma.user.upsert({
-    where: { email: 'director@sqd.com' },
-    update: {},
-    create: {
-      name: 'System Director',
-      email: 'director@sqd.com',
-      passwordHash: passwordHash,
-      divisionId: division.id,
-      roleId: directorRole.id,
-    },
-  });
+  const users = [
+    { name: 'System Director',  email: 'director@sqd.com',       role: 'Director',     division: 'QA'  },
+    { name: 'QA Admin',         email: 'admin.qa@sqd.com',       role: 'Admin',        division: 'QA'  },
+    { name: 'Manager QC HAN',   email: 'manager.qch@sqd.com',    role: 'Manager',      division: 'QCH' },
+    { name: 'Manager QC SGN',   email: 'manager.qcs@sqd.com',    role: 'Manager',      division: 'QCS' },
+    { name: 'Group Leader QA',  email: 'gl.qa@sqd.com',          role: 'Group Leader', division: 'QA'  },
+    { name: 'Nguyen Van An',    email: 'nguyen.van.an@sqd.com',  role: 'Staff',        division: 'QA'  },
+    { name: 'Tran Thi Bich',    email: 'tran.thi.bich@sqd.com',  role: 'Staff',        division: 'QA'  },
+    { name: 'Le Quoc Hung',     email: 'le.quoc.hung@sqd.com',   role: 'Staff',        division: 'QCH' },
+    { name: 'Pham Minh Duc',    email: 'pham.minh.duc@sqd.com',  role: 'Staff',        division: 'QCH' },
+    { name: 'Hoang Thi Lan',    email: 'hoang.thi.lan@sqd.com',  role: 'Staff',        division: 'QCS' },
+    { name: 'Vo Thanh Liem',    email: 'vo.thanh.liem@sqd.com',  role: 'Staff',        division: 'QCS' },
+  ];
 
-  const adminRole = await prisma.role.findUnique({ where: { name: 'Admin' } });
-
-  if (!adminRole) {
-    throw new Error('Admin role could not be created or found.');
+  for (const u of users) {
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: {},
+      create: {
+        name: u.name,
+        email: u.email,
+        passwordHash,
+        forcePasswordChange: false,
+        divisionId: divisions[u.division].id,
+        roleId: roles[u.role].id,
+      },
+    });
   }
+  console.log(`✔ Users: ${users.length} accounts created`);
 
-  // Create Admin User
-  const adminUser = await prisma.user.upsert({
-    where: { email: 'admin@sqd.com' },
-    update: {},
-    create: {
-      name: 'System Administrator',
-      email: 'admin@sqd.com',
-      passwordHash: passwordHash,
-      divisionId: division.id,
-      roleId: adminRole.id,
-    },
-  });
+  // ─── 5. Aircraft Types (IATA/ICAO) ────────────────────────────────
+  const aircraftTypes = [
+    { iataCode: '321', icaoCode: 'A321', manufacturer: 'Airbus',  model: 'A321-200' },
+    { iataCode: '350', icaoCode: 'A350', manufacturer: 'Airbus',  model: 'A350-900' },
+    { iataCode: '787', icaoCode: 'B787', manufacturer: 'Boeing',  model: '787-9 Dreamliner' },
+    { iataCode: '77W', icaoCode: 'B77W', manufacturer: 'Boeing',  model: '777-200ER' },
+  ];
 
-  console.log(`Database has been seeded. 🌱`);
-  console.log(`Director Account created: ${directorUser.email} / password123`);
-  console.log(`Admin Account created: ${adminUser.email} / password123`);
+  for (const at of aircraftTypes) {
+    await prisma.aircraftType.upsert({
+      where: { iataCode: at.iataCode },
+      update: {},
+      create: at,
+    });
+  }
+  console.log(`✔ Aircraft Types: ${aircraftTypes.map(a => a.icaoCode).join(', ')}`);
+
+  // ─── 6. Aircraft Registrations ─────────────────────────────────────
+  const a321 = await prisma.aircraftType.findUnique({ where: { iataCode: '321' } });
+  const a350 = await prisma.aircraftType.findUnique({ where: { iataCode: '350' } });
+  const b787 = await prisma.aircraftType.findUnique({ where: { iataCode: '787' } });
+
+  const registrations = [
+    { registration: 'VN-A361', operator: 'Vietnam Airlines', authority: 'CAAV', aircraftTypeId: a321!.id },
+    { registration: 'VN-A362', operator: 'Vietnam Airlines', authority: 'CAAV', aircraftTypeId: a321!.id },
+    { registration: 'VN-A891', operator: 'Vietnam Airlines', authority: 'CAAV', aircraftTypeId: a350!.id },
+    { registration: 'VN-A892', operator: 'Vietnam Airlines', authority: 'CAAV', aircraftTypeId: a350!.id },
+    { registration: 'VN-A868', operator: 'Vietnam Airlines', authority: 'CAAV', aircraftTypeId: b787!.id },
+  ];
+
+  for (const reg of registrations) {
+    await prisma.aircraftRegistration.upsert({
+      where: { registration: reg.registration },
+      update: {},
+      create: reg,
+    });
+  }
+  console.log(`✔ Aircraft Registrations: ${registrations.length} airframes`);
+
+  // ─── 7. Authorization Types ────────────────────────────────────────
+  const authTypes = [
+    { code: 'INSPECTOR', description: 'Qualified QA Inspector' },
+    { code: 'MECHANIC',  description: 'Certifying Staff / Mechanic' },
+    { code: 'AVIONICS',  description: 'Avionics Specialist' },
+  ];
+
+  for (const auth of authTypes) {
+    await prisma.authorizationType.upsert({
+      where: { code: auth.code },
+      update: {},
+      create: auth,
+    });
+  }
+  console.log(`✔ Authorization Types: ${authTypes.map(a => a.code).join(', ')}`);
+
+  // ─── Done ──────────────────────────────────────────────────────────
+  console.log('\n🎉 Database seeded successfully!');
+  console.log('\nLogin credentials (all passwords: password123):');
+  for (const u of users) {
+    console.log(`  ${u.role.padEnd(14)} | ${u.email.padEnd(28)} | ${u.division}`);
+  }
 }
 
 main()

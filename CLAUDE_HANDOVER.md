@@ -35,9 +35,11 @@ Build a robust, role-based system for aircraft maintenance surveillance.
 - Implemented `forcePasswordChange` flag logic.
 - Implemented backend endpoints for `update-password`, `forgot-password`, and `reset-password`.
 
-### Phase 4.3: JSON Template Builder (IN PROGRESS)
-- **Status:** Backend API is built (`template.controller.ts`). Database schema updated with `status`, `revision`, and `publishedAt`.
-- **Current Task:** Building the visual Form Builder UI in the frontend.
+### Phase 4.3: JSON Template Builder (COMPLETED)
+- **Backend:** Full CRUD API implemented in `template.controller.ts`.
+- **Frontend Builder:** Visual drag-and-drop style builder in `/dashboard/templates/new`.
+- **Dynamic Data:** `GET /api/datasources` endpoint added to allow dropdowns to pull from DB (Departments, Aircraft, etc.).
+- **Revisions:** Revision incrementing and Draft/Publish status logic fully functional.
 
 ## 4. Connection & Environment Details
 - **Backend Port:** 5000 (Set in `backend/.env`)
@@ -47,12 +49,9 @@ Build a robust, role-based system for aircraft maintenance surveillance.
 - **JWT Secret:** `super-secret-development-key-12345` (in `.env`).
 
 ## 5. Immediate Next Steps for Claude Code
-1. **Frontend Types:** Update `frontend/src/types/index.ts` to include the `Template` and `FormField` interfaces.
-2. **Template List:** Build `frontend/src/app/dashboard/templates/page.tsx` to list existing templates from `GET /api/templates`.
-3. **Linear Form Builder:** Build `frontend/src/app/dashboard/templates/new/page.tsx`. 
-    - Must support adding fields (Text, Number, Select, Checkbox).
-    - Select fields must support "Dynamic Data Sources" (e.g., fetching a list of Departments).
-    - Must support "Save as Draft" vs "Publish".
+1. **Task Assignment Logic:** Implement the backend and frontend for assigning a `Template` to a `User` or `Division` (creating a `Task` record).
+2. **Task Execution UI:** Build the interface for Staff to fill out a `Task` based on the `formSchema`.
+3. **Audit Log Integration:** Ensure that when a task status changes, an `AuditLog` entry is created.
 
 ## 6. Known "Gotchas"
 - **Prisma Generation:** Always run `npx prisma generate` in `/backend` after schema changes to update the types.

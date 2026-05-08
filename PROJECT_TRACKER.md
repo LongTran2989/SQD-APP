@@ -3,8 +3,8 @@
 This document serves as the persistent log for our project. It tracks what we are working on, what we have achieved, and our future plans.
 
 ## Current Status
-- **Phase:** Phase 2 (Security & Roles)
-- **Current Task:** Ready to begin Phase 2.
+- **Phase:** Phase 4 (Core Features)
+- **Current Task:** Phase 4.3 (Template Builder) Completed. Moving to Task Assignment.
 
 ---
 
@@ -24,8 +24,8 @@ This document serves as the persistent log for our project. It tracks what we ar
 - [x] Initialize Next.js application
 - [x] Set up routing and basic UI layout/navigation
 
-### [ ] Phase 4: Core Features
-- [ ] Build Template Builder UI and Backend API
+### [/] Phase 4: Core Features
+- [x] Build Template Builder UI and Backend API
 - [ ] Build Task Assignment UI and Backend API
 - [ ] Build Task Execution interface for Staff
 - [ ] Build Review/Approval dashboard for Managers
@@ -44,3 +44,5 @@ This document serves as the persistent log for our project. It tracks what we ar
 *   *2026-05-06:* Added Department/Division hierarchy for external audit metrics, and hierarchical task assignment/transfer capabilities.
 *   *2026-05-06:* Completed Phase 1 & 2. Implemented automated Jest test suite for security endpoints.
 *   *2026-05-07:* Completed Phase 3. Scaffolded Next.js App Router frontend with Tailwind v4, Zustand, and Axios.
+*   *2026-05-08:* Completed Phase 4.3 (Template Builder). Built visual form builder UI, dynamic data source API, and template CRUD.
+*   *2026-05-08:* Major schema overhaul: Division codes, template auto-ID generation (QA-001), pessimistic locking, revision archiving, AircraftType IATA/ICAO redesign, AircraftRegistration model. Seeded 11 users, 4 divisions, 4 aircraft types, 5 registrations.

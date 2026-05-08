@@ -25,7 +25,7 @@ describe('Auth Endpoints', () => {
     
     // Create a department and division for testing
     const department = await prisma.department.create({ data: { name: 'Test Dept' } });
-    const division = await prisma.division.create({ data: { name: 'Test Div', departmentId: department.id } });
+    const division = await prisma.division.create({ data: { name: 'Test Div', code: 'TST', departmentId: department.id } });
 
     // Create an initial admin user to test the login
     await prisma.user.create({

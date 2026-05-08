@@ -45,12 +45,12 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
       }
       case 'aircrafts': {
         const aircrafts = await prisma.aircraftType.findMany({
-          select: { id: true, code: true, description: true },
-          orderBy: { code: 'asc' }
+          select: { id: true, icaoCode: true, manufacturer: true, model: true },
+          orderBy: { icaoCode: 'asc' }
         });
         res.json(aircrafts.map(a => ({
           value: String(a.id),
-          label: `${a.code}${a.description ? ' — ' + a.description : ''}`
+          label: `${a.icaoCode} — ${a.manufacturer} ${a.model}`
         })));
         return;
       }
