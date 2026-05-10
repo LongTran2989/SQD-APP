@@ -34,7 +34,10 @@ export interface Template {
   title: string;
   description: string | null;
   status: 'Draft' | 'Published' | 'Archived';
+  templateId: string;
   revision: number;
+  revisedBy?: { name: string } | null;
+  revisedAt?: string | null;
   requiresApproval: boolean;
   allowsFindings: boolean;
   formSchema: FormField[];

@@ -311,9 +311,27 @@ export default function EditTemplatePage() {
                 <StatusIcon className="w-3 h-3" />
                 {currentStatus}
               </span>
-              <span className="text-xs text-slate-400 font-medium">Rev {template?.revision}</span>
+              {template?.templateId && (
+                <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  {template.templateId}
+                </span>
+              )}
+              <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                Rev. {template?.revision}
+              </span>
             </div>
-            <p className="text-sm text-slate-500">Modify your QA audit form</p>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-sm text-slate-500">Modify your QA audit form</p>
+              {template?.revisedBy && (
+                <>
+                  <span className="text-slate-300">•</span>
+                  <p className="text-xs text-slate-400 italic">
+                    Last revised by <span className="font-medium text-slate-500">{template.revisedBy.name}</span> on{' '}
+                    {template.revisedAt ? new Date(template.revisedAt).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'Unknown'}
+                  </p>
+                </>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
