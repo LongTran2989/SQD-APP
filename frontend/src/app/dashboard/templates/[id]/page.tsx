@@ -75,6 +75,11 @@ export default function EditTemplatePage() {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [pendingNavUrl, setPendingNavUrl] = useState<string | null>(null);
 
+  // ── Pessimistic locking ───────────────────────────────────────────
+  const [isReadOnly, setIsReadOnly] = useState(false);
+  const [lockedByName, setLockedByName] = useState<string | null>(null);
+  const [lockedAtTime, setLockedAtTime] = useState<string | null>(null);
+
   useEffect(() => {
     const fetchTemplate = async () => {
       try {
@@ -93,6 +98,27 @@ export default function EditTemplatePage() {
       }
     };
     fetchTemplate();
+  }, [templateId]);
+
+  // ── Lock on mount, unlock on unmount ──────────────────────────────
+  useEffect(() => {
+    const acquireLock = async () => {
+      try {
+        await apiClient.post(`/templates/${templateId}/lock`);
+      } catch (err: any) {
+        if (err.response?.status === 409) {
+          setIsReadOnly(true);
+          setLockedByName(err.response.data?.lockedBy || 'another user');
+          const raw = err.response.data?.lockedAt;
+          setLockedAtTime(raw ? new Date(raw).toLocaleTimeString() : null);
+        }
+      }
+    };
+    acquireLock();
+    return () => {
+      // Fire-and-forget unlock on unmount
+      apiClient.post(`/templates/${templateId}/unlock`).catch(() => {});
+    };
   }, [templateId]);
 
   // ── beforeunload guard (browser tab close / refresh) ─────────────
@@ -256,6 +282,19 @@ export default function EditTemplatePage() {
   return (
     <>
     <div className="max-w-7xl mx-auto space-y-6">
+      {/* ── Read-Only Lock Banner ────────────────────────────────── */}
+      {isReadOnly && (
+        <div className="flex items-start gap-3 px-5 py-4 bg-amber-50 border border-amber-300 rounded-xl text-sm text-amber-800">
+          <span className="text-lg leading-none mt-0.5">🔒</span>
+          <p>
+            <span className="font-semibold">Read-only mode.</span>{' '}
+            This template is currently being edited by{' '}
+            <span className="font-semibold">{lockedByName}</span>
+            {lockedAtTime && <> since <span className="font-semibold">{lockedAtTime}</span></>}.
+            {' '}Your changes cannot be saved until the lock is released.
+          </p>
+        </div>
+      )}
       {/* Top Bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -297,23 +336,24 @@ export default function EditTemplatePage() {
           </button>
           <button
             onClick={handleDelete}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-semibold rounded-xl text-sm transition-all"
+            disabled={isReadOnly}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-semibold rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Trash2 className="w-4 h-4" />
             Delete
           </button>
           <button
             onClick={() => handleSave('Draft')}
-            disabled={saving}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all"
+            disabled={saving || isReadOnly}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Save className="w-4 h-4" />
             Save Draft
           </button>
           <button
             onClick={() => handleSave('Published')}
-            disabled={saving}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm text-sm transition-all"
+            disabled={saving || isReadOnly}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Send className="w-4 h-4" />
             Publish
@@ -380,19 +420,19 @@ export default function EditTemplatePage() {
               </h2>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Title</label>
-                <input type="text" placeholder="e.g. B737 Line Maintenance Audit" className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={title} onChange={(e) => { setTitle(e.target.value); setIsDirty(true); }} />
+                <input type="text" placeholder="e.g. B737 Line Maintenance Audit" disabled={isReadOnly} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" value={title} onChange={(e) => { setTitle(e.target.value); setIsDirty(true); }} />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Description</label>
-                <textarea placeholder="Describe the purpose of this template..." rows={2} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none" value={description} onChange={(e) => { setDescription(e.target.value); setIsDirty(true); }} />
+                <textarea placeholder="Describe the purpose of this template..." disabled={isReadOnly} rows={2} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" value={description} onChange={(e) => { setDescription(e.target.value); setIsDirty(true); }} />
               </div>
               <div className="flex gap-6">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={requiresApproval} onChange={(e) => { setRequiresApproval(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  <input type="checkbox" disabled={isReadOnly} checked={requiresApproval} onChange={(e) => { setRequiresApproval(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed" />
                   <span className="text-sm text-slate-700">Requires Approval</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={allowsFindings} onChange={(e) => { setAllowsFindings(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  <input type="checkbox" disabled={isReadOnly} checked={allowsFindings} onChange={(e) => { setAllowsFindings(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed" />
                   <span className="text-sm text-slate-700">Allow Findings</span>
                 </label>
               </div>
@@ -480,7 +520,7 @@ export default function EditTemplatePage() {
                 {fieldTypeConfig.map((config) => {
                   const Icon = config.icon;
                   return (
-                    <button key={config.type} onClick={() => addField(config.type)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 hover:text-blue-700 text-slate-600 transition-all text-left group border border-transparent hover:border-blue-200">
+                    <button key={config.type} onClick={() => addField(config.type)} disabled={isReadOnly} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 hover:text-blue-700 text-slate-600 transition-all text-left group border border-transparent hover:border-blue-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-transparent">
                       <div className="p-2 bg-slate-50 group-hover:bg-blue-100 rounded-lg transition-colors"><Icon className="w-4 h-4" /></div>
                       <div>
                         <span className="block text-sm font-medium">{config.label}</span>
