@@ -24,8 +24,10 @@ import {
   Settings2,
   Clock,
   CheckCircle2,
-  Archive
+  Archive,
+  History
 } from 'lucide-react';
+import RevisionHistoryPanel from '../../../../components/templates/RevisionHistoryPanel';
 
 const fieldTypeConfig: { type: FieldType; label: string; icon: any; description: string }[] = [
   { type: 'text', label: 'Text Input', icon: Type, description: 'Short text answer' },
@@ -74,6 +76,9 @@ export default function EditTemplatePage() {
   const [isDirty, setIsDirty] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [pendingNavUrl, setPendingNavUrl] = useState<string | null>(null);
+
+  // ── Revision history panel ──────────────────────────────────────
+  const [showHistory, setShowHistory] = useState(false);
 
   // ── Pessimistic locking ───────────────────────────────────────────
   const [isReadOnly, setIsReadOnly] = useState(false);
@@ -341,6 +346,14 @@ export default function EditTemplatePage() {
               ● Unsaved Changes
             </span>
           )}
+          {/* ── History Button ── */}
+          <button
+            onClick={() => setShowHistory(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+          >
+            <History className="w-4 h-4" />
+            History
+          </button>
           <button
             onClick={() => setShowPreview(!showPreview)}
             className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border ${
@@ -590,6 +603,14 @@ export default function EditTemplatePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* \u2500\u2500 Revision History Panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+      {showHistory && (
+        <RevisionHistoryPanel
+          templateId={templateId}
+          onClose={() => setShowHistory(false)}
+        />
       )}
     </>
   );
