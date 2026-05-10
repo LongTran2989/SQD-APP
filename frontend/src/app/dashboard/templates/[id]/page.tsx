@@ -70,6 +70,11 @@ export default function EditTemplatePage() {
   const [error, setError] = useState('');
   const [showPreview, setShowPreview] = useState(false);
 
+  // ── Unsaved changes tracking ──────────────────────────────────────
+  const [isDirty, setIsDirty] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [pendingNavUrl, setPendingNavUrl] = useState<string | null>(null);
+
   useEffect(() => {
     const fetchTemplate = async () => {
       try {
@@ -90,6 +95,31 @@ export default function EditTemplatePage() {
     fetchTemplate();
   }, [templateId]);
 
+  // ── beforeunload guard (browser tab close / refresh) ─────────────
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
+
+  // ── Intercept programmatic Next.js navigation ─────────────────────
+  const safeNavigate = (url: string) => {
+    if (isDirty) {
+      setPendingNavUrl(url);
+      setShowLeaveModal(true);
+    } else {
+      router.push(url);
+    }
+  };
+
+  const handleDiscardAndLeave = () => {
+    setIsDirty(false);
+    setShowLeaveModal(false);
+    if (pendingNavUrl) router.push(pendingNavUrl);
+  };
+
   const addField = useCallback((type: FieldType) => {
     const newField: FormField = {
       id: generateId(),
@@ -101,15 +131,18 @@ export default function EditTemplatePage() {
     };
     setFields((prev) => [...prev, newField]);
     setActiveFieldId(newField.id);
+    setIsDirty(true); // mark dirty
   }, []);
 
   const updateField = useCallback((id: string, updates: Partial<FormField>) => {
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
+    setIsDirty(true); // mark dirty
   }, []);
 
   const removeField = useCallback((id: string) => {
     setFields((prev) => prev.filter((f) => f.id !== id));
     if (activeFieldId === id) setActiveFieldId(null);
+    setIsDirty(true); // mark dirty
   }, [activeFieldId]);
 
   const moveField = useCallback((index: number, direction: 'up' | 'down') => {
@@ -120,6 +153,7 @@ export default function EditTemplatePage() {
       [newFields[index], newFields[targetIndex]] = [newFields[targetIndex], newFields[index]];
       return newFields;
     });
+    setIsDirty(true); // mark dirty
   }, []);
 
   const addOption = useCallback((fieldId: string) => {
@@ -177,6 +211,8 @@ export default function EditTemplatePage() {
         requiresApproval,
         allowsFindings,
       });
+      setIsDirty(false); // clear dirty on successful save
+      setShowLeaveModal(false);
       router.push('/dashboard/templates');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to save template');
@@ -218,16 +254,17 @@ export default function EditTemplatePage() {
   const StatusIcon = statusConfig[currentStatus]?.icon || Clock;
 
   return (
+    <>
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Top Bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard/templates"
+          <button
+            onClick={() => safeNavigate('/dashboard/templates')}
             className="p-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-500"
           >
             <ArrowLeft className="w-5 h-5" />
-          </Link>
+          </button>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold text-slate-800">Edit Template</h1>
@@ -241,6 +278,12 @@ export default function EditTemplatePage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {/* ── Unsaved Changes Badge ── */}
+          {isDirty && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300 animate-pulse">
+              ● Unsaved Changes
+            </span>
+          )}
           <button
             onClick={() => setShowPreview(!showPreview)}
             className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border ${
@@ -337,19 +380,19 @@ export default function EditTemplatePage() {
               </h2>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Title</label>
-                <input type="text" placeholder="e.g. B737 Line Maintenance Audit" className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={title} onChange={(e) => setTitle(e.target.value)} />
+                <input type="text" placeholder="e.g. B737 Line Maintenance Audit" className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={title} onChange={(e) => { setTitle(e.target.value); setIsDirty(true); }} />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Description</label>
-                <textarea placeholder="Describe the purpose of this template..." rows={2} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none" value={description} onChange={(e) => setDescription(e.target.value)} />
+                <textarea placeholder="Describe the purpose of this template..." rows={2} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none" value={description} onChange={(e) => { setDescription(e.target.value); setIsDirty(true); }} />
               </div>
               <div className="flex gap-6">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={requiresApproval} onChange={(e) => setRequiresApproval(e.target.checked)} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  <input type="checkbox" checked={requiresApproval} onChange={(e) => { setRequiresApproval(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                   <span className="text-sm text-slate-700">Requires Approval</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={allowsFindings} onChange={(e) => setAllowsFindings(e.target.checked)} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  <input type="checkbox" checked={allowsFindings} onChange={(e) => { setAllowsFindings(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                   <span className="text-sm text-slate-700">Allow Findings</span>
                 </label>
               </div>
@@ -452,5 +495,44 @@ export default function EditTemplatePage() {
         </div>
       )}
     </div>
+
+      {/* ── Unsaved Changes Modal ─────────────────────────────────── */}
+      {showLeaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLeaveModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 border border-slate-100">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="text-2xl">⚠️</span>
+              <h2 className="text-lg font-bold text-slate-800">Unsaved Changes</h2>
+            </div>
+            <p className="text-slate-500 text-sm mb-6">You have unsaved changes. What would you like to do?</p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => handleSave('Draft')}
+                disabled={saving}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all"
+              >
+                <Save className="w-4 h-4" />
+                Save Draft
+              </button>
+              <button
+                onClick={() => handleSave('Published')}
+                disabled={saving}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm transition-all"
+              >
+                <Send className="w-4 h-4" />
+                Publish
+              </button>
+              <button
+                onClick={handleDiscardAndLeave}
+                className="w-full inline-flex items-center justify-center px-4 py-3 text-red-600 hover:bg-red-50 font-medium rounded-xl text-sm transition-all border border-transparent hover:border-red-100"
+              >
+                Discard &amp; Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
