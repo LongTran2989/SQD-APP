@@ -88,9 +88,10 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
 
     // Auto-generate templateId atomically
     const template = await prisma.$transaction(async (tx) => {
-      // Get the division code
-      const division = await tx.division.findUnique({ where: { id: targetDivisionId } });
-      if (!division) throw new Error('Division not found');
+      // Get the division code and lock the row to serialize concurrent creations for the same division
+      const divRaw = await tx.$queryRaw<{id: number, code: string}[]>`SELECT id, code FROM "Division" WHERE id = ${targetDivisionId} FOR UPDATE`;
+      if (divRaw.length === 0) throw new Error('Division not found');
+      const division = divRaw[0];
 
       // Find the highest sequence number for this division
       const lastTemplate = await tx.template.findFirst({
