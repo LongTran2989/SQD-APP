@@ -38,7 +38,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const payload = {
       userId: user.id,
       role: user.role.name,
-      divisionId: user.divisionId
+      divisionId: user.divisionId,
+      forcePasswordChange: user.forcePasswordChange
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', {
@@ -135,7 +136,8 @@ export const updatePassword = async (req: Request, res: Response): Promise<void>
     const payload = {
       userId: updatedUser.id,
       role: updatedUser.role.name,
-      divisionId: updatedUser.divisionId
+      divisionId: updatedUser.divisionId,
+      forcePasswordChange: updatedUser.forcePasswordChange
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', {

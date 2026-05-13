@@ -5,8 +5,7 @@ import {
   createTemplate,
   updateTemplate,
   publishTemplate,
-  lockTemplate,
-  unlockTemplate,
+  transferOwnership,
   deleteTemplate
 } from '../controllers/template.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
@@ -26,8 +25,7 @@ router.delete('/:id', authenticateJWT, authorizeRoles('Admin', 'Director', 'Mana
 // Publish (archive + revision bump)
 router.post('/:id/publish', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), publishTemplate);
 
-// Pessimistic locking
-router.post('/:id/lock', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), lockTemplate);
-router.post('/:id/unlock', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), unlockTemplate);
+// Ownership transfer
+router.post('/:id/transfer', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), transferOwnership);
 
 export default router;

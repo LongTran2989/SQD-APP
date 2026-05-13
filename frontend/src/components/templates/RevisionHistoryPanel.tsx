@@ -10,12 +10,12 @@ interface RevisionEntry {
   id: number;
   revision: number;
   publishedAt: string;
-  revisedBy: { name: string };
+  revisedByUser: { name: string };
   formSchema: FormField[];
 }
 
 interface RevisionHistoryPanelProps {
-  templateId: string;
+  revisions: RevisionEntry[];
   onClose: () => void;
 }
 
@@ -96,25 +96,8 @@ function SnapshotModal({
 }
 
 // ── Main Panel ─────────────────────────────────────────────────────────
-export default function RevisionHistoryPanel({ templateId, onClose }: RevisionHistoryPanelProps) {
-  const [revisions, setRevisions] = useState<RevisionEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+export default function RevisionHistoryPanel({ revisions, onClose }: RevisionHistoryPanelProps) {
   const [snapshot, setSnapshot] = useState<{ revision: number; schema: FormField[] } | null>(null);
-
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const res = await apiClient.get(`/templates/${templateId}/revisions`);
-        setRevisions(res.data);
-      } catch {
-        setError('Failed to load revision history.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetch();
-  }, [templateId]);
 
   return (
     <>
@@ -143,17 +126,7 @@ export default function RevisionHistoryPanel({ templateId, onClose }: RevisionHi
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-4 py-4">
-          {loading && (
-            <div className="flex justify-center py-12">
-              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-          )}
-
-          {error && (
-            <p className="text-sm text-red-500 text-center py-8">{error}</p>
-          )}
-
-          {!loading && !error && revisions.length === 0 && (
+          {revisions.length === 0 && (
             <div className="text-center py-12">
               <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
               <p className="text-sm text-slate-400">No published revisions yet.</p>
@@ -161,7 +134,7 @@ export default function RevisionHistoryPanel({ templateId, onClose }: RevisionHi
             </div>
           )}
 
-          {!loading && !error && revisions.length > 0 && (
+          {revisions.length > 0 && (
             <ol className="relative border-l border-slate-200 ml-2 space-y-1">
               {revisions.map((rev) => (
                 <li key={rev.id} className="ml-4 pb-5">
@@ -176,7 +149,7 @@ export default function RevisionHistoryPanel({ templateId, onClose }: RevisionHi
                         <p className="text-sm font-bold text-slate-700">Rev. {rev.revision}</p>
                         <div className="flex items-center gap-1 mt-0.5">
                           <User className="w-3 h-3 text-slate-400 flex-shrink-0" />
-                          <p className="text-xs text-slate-500 truncate">{rev.revisedBy.name}</p>
+                          <p className="text-xs text-slate-500 truncate">{rev.revisedByUser?.name || 'Unknown'}</p>
                         </div>
                         <div className="flex items-center gap-1 mt-0.5">
                           <Clock className="w-3 h-3 text-slate-400 flex-shrink-0" />

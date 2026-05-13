@@ -41,7 +41,11 @@ export interface Template {
   requiresApproval: boolean;
   allowsFindings: boolean;
   formSchema: FormField[];
+  draftSchema?: any;
   createdAt: string;
   updatedAt: string;
   publishedAt: string | null;
+  ownerId: number;
+  owner?: { id: number; name: string } | null;
+  revisionArchives?: any[];
 }

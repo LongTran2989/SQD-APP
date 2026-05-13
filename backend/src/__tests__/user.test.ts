@@ -24,8 +24,8 @@ describe('User RBAC Endpoints', () => {
     const adminRole = await prisma.role.findUnique({ where: { name: 'Admin' } });
     const staffRole = await prisma.role.findUnique({ where: { name: 'Staff' } });
     
-    const department = await prisma.department.create({ data: { name: 'RBAC Dept' } });
-    const division = await prisma.division.create({ data: { name: 'RBAC Div', code: 'RBAC', departmentId: department.id } });
+    const department = await prisma.department.upsert({ where: { name: 'RBAC Dept' }, update: {}, create: { name: 'RBAC Dept' } });
+    const division = await prisma.division.upsert({ where: { code: 'RBC2' }, update: {}, create: { name: 'RBAC Div 2', code: 'RBC2', departmentId: department.id } });
 
     const adminUser = await prisma.user.create({
       data: { name: 'Admin', email: 'adminrbac@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId: division.id, roleId: adminRole!.id }

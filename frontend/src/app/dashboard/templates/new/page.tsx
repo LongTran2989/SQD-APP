@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '../../../../api/client';
 import { FormField, FieldType, DataSource } from '../../../../types';
@@ -55,6 +55,20 @@ export default function NewTemplatePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [showPreview, setShowPreview] = useState(false);
+  const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
+  const [divisionId, setDivisionId] = useState<string>('');
+
+  useEffect(() => {
+    const fetchDivisions = async () => {
+      try {
+        const res = await apiClient.get('/datasources/divisions');
+        setDivisions(res.data);
+      } catch (err) {
+        console.error('Failed to fetch divisions', err);
+      }
+    };
+    fetchDivisions();
+  }, []);
 
   const addField = useCallback((type: FieldType) => {
     const newField: FormField = {
@@ -143,6 +157,7 @@ export default function NewTemplatePage() {
         status,
         requiresApproval,
         allowsFindings,
+        divisionId: divisionId ? parseInt(divisionId) : undefined,
       });
       router.push('/dashboard/templates');
     } catch (err: any) {
@@ -284,6 +299,23 @@ export default function NewTemplatePage() {
                   onChange={(e) => setDescription(e.target.value)}
                 />
               </div>
+              {divisions.length > 0 && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Division (for ID Generation)</label>
+                  <select
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none"
+                    value={divisionId}
+                    onChange={(e) => setDivisionId(e.target.value)}
+                  >
+                    <option value="">Default (Your Division)</option>
+                    {divisions.map((div) => (
+                      <option key={div.value} value={div.value}>
+                        {div.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex gap-6">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input

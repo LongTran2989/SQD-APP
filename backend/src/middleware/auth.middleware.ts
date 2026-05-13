@@ -5,6 +5,7 @@ export interface AuthPayload {
   userId: number;
   role: string;
   divisionId: number;
+  forcePasswordChange?: boolean;
 }
 
 declare global {
@@ -29,10 +30,18 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
     
     jwt.verify(token, secret, (err, decoded) => {
       if (err) {
-        res.status(403).json({ message: 'Forbidden: Invalid token' });
+        res.status(401).json({ message: 'Unauthorized: Invalid token' });
         return;
       }
-      req.user = decoded as AuthPayload;
+      const authPayload = decoded as AuthPayload;
+      
+      // Enforce password change policy
+      if (authPayload.forcePasswordChange && req.path !== '/update-password') {
+        res.status(403).json({ message: 'Forbidden: Password change required' });
+        return;
+      }
+      
+      req.user = authPayload;
       next();
     });
   } else {

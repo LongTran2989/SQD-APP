@@ -1,18 +1,11 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
-
-const LOCK_DURATION_MS = 30 * 60 * 1000; // 30 minutes
-
-function isLockValid(lockedAt: Date | null): boolean {
-  if (!lockedAt) return false;
-  return Date.now() - new Date(lockedAt).getTime() < LOCK_DURATION_MS;
-}
 
 // ─── GET /api/templates ──────────────────────────────────────────────
 export const getTemplates = async (req: Request, res: Response): Promise<void> => {
@@ -22,17 +15,37 @@ export const getTemplates = async (req: Request, res: Response): Promise<void> =
       include: {
         division: { select: { name: true, code: true } },
         revisedByUser: { select: { id: true, name: true } },
-        lockedByUser: { select: { id: true, name: true } },
+        owner: { select: { id: true, name: true } },
       }
     });
 
-    const result = templates.map(t => ({
-      ...t,
-      isLocked: !!t.lockedByUserId && isLockValid(t.lockedAt),
-      lockedByName: t.lockedByUser?.name || null,
-    }));
+    const userId = req.user!.userId;
+    const userRole = req.user!.role;
+    const isAdminOrDirector = ['Admin', 'Director'].includes(userRole);
 
-    res.json(result);
+    const mappedTemplates = templates.map(t => {
+      // For anyone else, do not leak draftSchema
+      let returnedTemplate = { ...t, draftSchema: undefined };
+
+      if (t.draftSchema && (t.ownerId === userId || isAdminOrDirector)) {
+        returnedTemplate = {
+          ...returnedTemplate,
+          status: 'Draft',
+          ...(Array.isArray(t.draftSchema) 
+            ? { formSchema: t.draftSchema as any } 
+            : {
+                title: (t.draftSchema as any).title,
+                description: (t.draftSchema as any).description,
+                formSchema: (t.draftSchema as any).formSchema,
+                requiresApproval: (t.draftSchema as any).requiresApproval,
+                allowsFindings: (t.draftSchema as any).allowsFindings,
+              })
+        };
+      }
+      return returnedTemplate;
+    });
+
+    res.json(mappedTemplates);
   } catch (error) {
     console.error('Error fetching templates:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -48,7 +61,7 @@ export const getTemplateById = async (req: Request, res: Response): Promise<void
       include: {
         division: { select: { name: true, code: true } },
         revisedByUser: { select: { id: true, name: true } },
-        lockedByUser: { select: { id: true, name: true } },
+        owner: { select: { id: true, name: true } },
         revisionArchives: {
           orderBy: { revision: 'desc' },
           include: { revisedByUser: { select: { name: true } } }
@@ -61,11 +74,28 @@ export const getTemplateById = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    res.json({
-      ...template,
-      isLocked: !!template.lockedByUserId && isLockValid(template.lockedAt),
-      lockedByName: template.lockedByUser?.name || null,
-    });
+    const userId = req.user!.userId;
+    const userRole = req.user!.role;
+    const isAdminOrDirector = ['Admin', 'Director'].includes(userRole);
+
+    let responseTemplate: any = { ...template, draftSchema: undefined };
+    if (template.draftSchema && (template.ownerId === userId || isAdminOrDirector)) {
+      responseTemplate = {
+        ...responseTemplate,
+        status: 'Draft',
+        ...(Array.isArray(template.draftSchema) 
+          ? { formSchema: template.draftSchema } 
+          : {
+              title: (template.draftSchema as any).title,
+              description: (template.draftSchema as any).description,
+              formSchema: (template.draftSchema as any).formSchema,
+              requiresApproval: (template.draftSchema as any).requiresApproval,
+              allowsFindings: (template.draftSchema as any).allowsFindings,
+            })
+      };
+    }
+
+    res.json(responseTemplate);
   } catch (error) {
     console.error('Error fetching template:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -89,9 +119,9 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
     // Auto-generate templateId atomically
     const template = await prisma.$transaction(async (tx) => {
       // Get the division code and lock the row to serialize concurrent creations for the same division
-      const divRaw = await tx.$queryRaw<{id: number, code: string}[]>`SELECT id, code FROM "Division" WHERE id = ${targetDivisionId} FOR UPDATE`;
+      const divRaw = await tx.$queryRaw<{ id: number, code: string }[]>`SELECT id, code FROM "Division" WHERE id = ${targetDivisionId} FOR UPDATE`;
       if (divRaw.length === 0) throw new Error('Division not found');
-      const division = divRaw[0];
+      const division = divRaw[0]!;
 
       // Find the highest sequence number for this division
       const lastTemplate = await tx.template.findFirst({
@@ -122,6 +152,7 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
           revisedByUserId: userId,
           revisedAt: new Date(),
           publishedAt: status === 'Published' ? new Date() : null,
+          ownerId: userId, // Assign ownership to creator
         },
         include: {
           division: { select: { name: true, code: true } },
@@ -141,35 +172,75 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
   try {
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
+    const userRole = req.user!.role;
     const { title, description, formSchema, requiresApproval, allowsFindings } = req.body;
 
     const existingTemplate = await prisma.template.findUnique({ where: { id } });
-    
+
     if (!existingTemplate) {
       res.status(404).json({ message: 'Template not found' });
       return;
     }
 
-    // Check lock: if locked by another user and lock is still valid, reject
-    if (existingTemplate.lockedByUserId && existingTemplate.lockedByUserId !== userId && isLockValid(existingTemplate.lockedAt)) {
-      res.status(409).json({ message: 'Template is currently locked by another user.' });
+    // Check ownership
+    if (existingTemplate.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
+      res.status(403).json({ message: 'Only the template owner can modify this template.' });
       return;
     }
 
-    const updatedTemplate = await prisma.template.update({
-      where: { id },
-      data: {
+    let dataToUpdate: any = {
+      revisedByUserId: userId,
+      revisedAt: new Date(),
+    };
+
+    if (existingTemplate.status === 'Published') {
+      dataToUpdate.draftSchema = {
         title,
         description,
         formSchema,
         requiresApproval: requiresApproval !== undefined ? requiresApproval : existingTemplate.requiresApproval,
         allowsFindings: allowsFindings !== undefined ? allowsFindings : existingTemplate.allowsFindings,
-        revisedByUserId: userId,
-        revisedAt: new Date(),
+      };
+    } else {
+      dataToUpdate.title = title;
+      dataToUpdate.description = description;
+      dataToUpdate.formSchema = formSchema;
+      dataToUpdate.requiresApproval = requiresApproval !== undefined ? requiresApproval : existingTemplate.requiresApproval;
+      dataToUpdate.allowsFindings = allowsFindings !== undefined ? allowsFindings : existingTemplate.allowsFindings;
+    }
+
+    const updatedTemplate = await prisma.template.update({
+      where: { id },
+      data: dataToUpdate,
+      include: {
+        division: { select: { name: true, code: true } },
+        revisedByUser: { select: { id: true, name: true } },
+        owner: { select: { id: true, name: true } },
+        revisionArchives: {
+          orderBy: { revision: 'desc' },
+          include: { revisedByUser: { select: { name: true } } }
+        },
       }
     });
 
-    res.json(updatedTemplate);
+    let responseTemplate: any = { ...updatedTemplate, draftSchema: undefined };
+    if (updatedTemplate.draftSchema && (updatedTemplate.ownerId === userId || ['Admin', 'Director'].includes(userRole))) {
+      responseTemplate = {
+        ...responseTemplate,
+        status: 'Draft',
+        ...(Array.isArray(updatedTemplate.draftSchema) 
+          ? { formSchema: updatedTemplate.draftSchema } 
+          : {
+              title: (updatedTemplate.draftSchema as any).title,
+              description: (updatedTemplate.draftSchema as any).description,
+              formSchema: (updatedTemplate.draftSchema as any).formSchema,
+              requiresApproval: (updatedTemplate.draftSchema as any).requiresApproval,
+              allowsFindings: (updatedTemplate.draftSchema as any).allowsFindings,
+            })
+      };
+    }
+
+    res.json(responseTemplate);
   } catch (error) {
     console.error('Error updating template:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -181,10 +252,16 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
   try {
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
+    const userRole = req.user!.role;
 
     const result = await prisma.$transaction(async (tx) => {
       const template = await tx.template.findUnique({ where: { id } });
       if (!template) throw new Error('Template not found');
+
+      // Check ownership
+      if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
+        throw new Error('Only the template owner can publish this template.');
+      }
 
       // If already published, archive the current version before overwriting
       if (template.status === 'Published' && template.publishedAt) {
@@ -202,17 +279,47 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
       // Determine new revision number
       const newRevision = template.status === 'Published' ? template.revision + 1 : template.revision;
 
-      // Publish and release lock
+      // The new schema is either the draftSchema (if publishing pending changes) or the current formSchema
+      let dataToPublish: any = {
+        status: 'Published',
+        revision: newRevision,
+        publishedAt: new Date(),
+        revisedByUserId: userId,
+        revisedAt: new Date(),
+        draftSchema: Prisma.DbNull,
+      };
+
+      if (template.draftSchema) {
+        const draft = template.draftSchema as any;
+        if (Array.isArray(draft)) {
+          dataToPublish.formSchema = draft;
+        } else {
+          dataToPublish.title = draft.title;
+          dataToPublish.description = draft.description;
+          dataToPublish.formSchema = draft.formSchema;
+          dataToPublish.requiresApproval = draft.requiresApproval;
+          dataToPublish.allowsFindings = draft.allowsFindings;
+        }
+      } else {
+        dataToPublish.formSchema = template.formSchema;
+      }
+
+      if (!dataToPublish.formSchema || (Array.isArray(dataToPublish.formSchema) && dataToPublish.formSchema.length === 0)) {
+        throw new Error('Cannot publish a template with an empty formSchema');
+      }
+
+      // Publish
       return tx.template.update({
         where: { id },
-        data: {
-          status: 'Published',
-          revision: newRevision,
-          publishedAt: new Date(),
-          revisedByUserId: userId,
-          revisedAt: new Date(),
-          lockedByUserId: null,
-          lockedAt: null,
+        data: dataToPublish,
+        include: {
+          division: { select: { name: true, code: true } },
+          revisedByUser: { select: { id: true, name: true } },
+          owner: { select: { id: true, name: true } },
+          revisionArchives: {
+            orderBy: { revision: 'desc' },
+            include: { revisedByUser: { select: { name: true } } }
+          },
         }
       });
     });
@@ -223,86 +330,60 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
       res.status(404).json({ message: 'Template not found' });
       return;
     }
+    if (error.message === 'Only the template owner can publish this template.') {
+      res.status(403).json({ message: error.message });
+      return;
+    }
+    if (error.message === 'Cannot publish a template with an empty formSchema') {
+      res.status(400).json({ message: error.message });
+      return;
+    }
     console.error('Error publishing template:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
 
-// ─── POST /api/templates/:id/lock ────────────────────────────────────
-export const lockTemplate = async (req: Request, res: Response): Promise<void> => {
+// ─── POST /api/templates/:id/transfer ────────────────────────────────
+export const transferOwnership = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
+    const userRole = req.user!.role;
+    const { newOwnerId } = req.body;
 
-    const template = await prisma.template.findUnique({
-      where: { id },
-      include: { lockedByUser: { select: { name: true } } }
-    });
+    if (!newOwnerId || isNaN(parseInt(newOwnerId))) {
+      res.status(400).json({ message: 'Valid newOwnerId is required' });
+      return;
+    }
 
+    const template = await prisma.template.findUnique({ where: { id } });
     if (!template) {
       res.status(404).json({ message: 'Template not found' });
       return;
     }
 
-    // If already locked by another user and lock is still valid
-    if (template.lockedByUserId && template.lockedByUserId !== userId && isLockValid(template.lockedAt)) {
-      res.status(409).json({
-        message: `Template is locked by ${template.lockedByUser?.name}. Try again later.`,
-        lockedBy: template.lockedByUser?.name,
-        lockedAt: template.lockedAt,
-      });
+    // Only owner or privileged user can transfer
+    if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
+      res.status(403).json({ message: 'Only the template owner or an Admin can transfer ownership.' });
+      return;
+    }
+
+    // Check if new owner exists
+    const newOwner = await prisma.user.findUnique({ where: { id: parseInt(newOwnerId) } });
+    if (!newOwner) {
+      res.status(404).json({ message: 'New owner user not found' });
       return;
     }
 
     const updated = await prisma.template.update({
       where: { id },
-      data: {
-        lockedByUserId: userId,
-        lockedAt: new Date(),
-      }
+      data: { ownerId: parseInt(newOwnerId) },
+      include: { owner: { select: { id: true, name: true } } }
     });
 
-    res.json({ message: 'Template locked successfully.', lockedAt: updated.lockedAt });
+    res.json({ message: 'Ownership transferred successfully', owner: updated.owner });
   } catch (error) {
-    console.error('Error locking template:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// ─── POST /api/templates/:id/unlock ──────────────────────────────────
-export const unlockTemplate = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const id = parseInt(req.params.id as string);
-    const userId = req.user!.userId;
-    const userRole = req.user!.role;
-
-    const template = await prisma.template.findUnique({ where: { id } });
-
-    if (!template) {
-      res.status(404).json({ message: 'Template not found' });
-      return;
-    }
-
-    // Only the lock owner or Admin/Director can unlock
-    const isOwner = template.lockedByUserId === userId;
-    const isPrivileged = ['Admin', 'Director'].includes(userRole);
-
-    if (!isOwner && !isPrivileged) {
-      res.status(403).json({ message: 'Only the lock owner or an Admin/Director can unlock this template.' });
-      return;
-    }
-
-    await prisma.template.update({
-      where: { id },
-      data: {
-        lockedByUserId: null,
-        lockedAt: null,
-      }
-    });
-
-    res.json({ message: 'Template unlocked successfully.' });
-  } catch (error) {
-    console.error('Error unlocking template:', error);
+    console.error('Error transferring ownership:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -311,6 +392,19 @@ export const unlockTemplate = async (req: Request, res: Response): Promise<void>
 export const deleteTemplate = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id as string);
+    const userId = req.user!.userId;
+    const userRole = req.user!.role;
+
+    const template = await prisma.template.findUnique({ where: { id } });
+    if (!template) {
+      res.status(404).json({ message: 'Template not found' });
+      return;
+    }
+
+    if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
+      res.status(403).json({ message: 'Only the template owner can delete this template.' });
+      return;
+    }
 
     const tasksCount = await prisma.task.count({ where: { templateId: id } });
     if (tasksCount > 0) {

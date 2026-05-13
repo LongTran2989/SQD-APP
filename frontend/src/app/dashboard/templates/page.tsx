@@ -145,6 +145,9 @@ export default function TemplateListPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-2">
+                      <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-bold font-mono border border-slate-200">
+                        {template.templateId}
+                      </span>
                       <h3 className="text-lg font-semibold text-slate-800 truncate">{template.title}</h3>
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full border ${config.color}`}>
                         <StatusIcon className="w-3 h-3" />
@@ -159,6 +162,7 @@ export default function TemplateListPage() {
                     </p>
                     <div className="flex items-center gap-4 mt-3 text-xs text-slate-400">
                       <span>{(template.formSchema as any[])?.length || 0} fields</span>
+                      {template.division && <span>{template.division.name}</span>}
                       <span>Updated {new Date(template.updatedAt).toLocaleDateString()}</span>
                       {template.requiresApproval && (
                         <span className="text-blue-500 font-medium">Requires Approval</span>

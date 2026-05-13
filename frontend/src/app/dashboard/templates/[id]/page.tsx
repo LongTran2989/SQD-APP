@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '../../../../api/client';
 import { FormField, FieldType, DataSource, Template } from '../../../../types';
+import { useAuthStore } from '../../../../store/authStore';
 import {
   ArrowLeft,
   Plus,
@@ -25,7 +26,8 @@ import {
   Clock,
   CheckCircle2,
   Archive,
-  History
+  History,
+  UserPlus
 } from 'lucide-react';
 import RevisionHistoryPanel from '../../../../components/templates/RevisionHistoryPanel';
 
@@ -59,6 +61,7 @@ export default function EditTemplatePage() {
   const router = useRouter();
   const params = useParams();
   const templateId = params.id as string;
+  const { user } = useAuthStore();
 
   const [template, setTemplate] = useState<Template | null>(null);
   const [title, setTitle] = useState('');
@@ -80,10 +83,10 @@ export default function EditTemplatePage() {
   // ── Revision history panel ──────────────────────────────────────
   const [showHistory, setShowHistory] = useState(false);
 
-  // ── Pessimistic locking ───────────────────────────────────────────
-  const [isReadOnly, setIsReadOnly] = useState(false);
-  const [lockedByName, setLockedByName] = useState<string | null>(null);
-  const [lockedAtTime, setLockedAtTime] = useState<string | null>(null);
+  // ── Transfer Ownership ──────────────────────────────────────────
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferUserId, setTransferUserId] = useState('');
+  const [usersList, setUsersList] = useState<{ value: string; label: string }[]>([]);
 
   useEffect(() => {
     const fetchTemplate = async () => {
@@ -95,7 +98,8 @@ export default function EditTemplatePage() {
         setDescription(data.description || '');
         setRequiresApproval(data.requiresApproval);
         setAllowsFindings(data.allowsFindings);
-        setFields(Array.isArray(data.formSchema) ? data.formSchema : []);
+        const schemaToLoad = data.draftSchema || data.formSchema;
+        setFields(Array.isArray(schemaToLoad) ? schemaToLoad : []);
       } catch (err: any) {
         setError(err.response?.data?.message || 'Failed to load template');
       } finally {
@@ -105,26 +109,16 @@ export default function EditTemplatePage() {
     fetchTemplate();
   }, [templateId]);
 
-  // ── Lock on mount, unlock on unmount ──────────────────────────────
+  // Ownership derived state
+  const isOwner = user?.id === template?.ownerId;
+  const isAdminOrDirector = ['Admin', 'Director'].includes(user?.role || '');
+  const isReadOnly = template && !isOwner && !isAdminOrDirector;
+
   useEffect(() => {
-    const acquireLock = async () => {
-      try {
-        await apiClient.post(`/templates/${templateId}/lock`);
-      } catch (err: any) {
-        if (err.response?.status === 409) {
-          setIsReadOnly(true);
-          setLockedByName(err.response.data?.lockedBy || 'another user');
-          const raw = err.response.data?.lockedAt;
-          setLockedAtTime(raw ? new Date(raw).toLocaleTimeString() : null);
-        }
-      }
-    };
-    acquireLock();
-    return () => {
-      // Fire-and-forget unlock on unmount
-      apiClient.post(`/templates/${templateId}/unlock`).catch(() => {});
-    };
-  }, [templateId]);
+    if (showTransferModal && usersList.length === 0) {
+      apiClient.get('/datasources/users').then(res => setUsersList(res.data)).catch(console.error);
+    }
+  }, [showTransferModal, usersList.length]);
 
   // ── beforeunload guard (browser tab close / refresh) ─────────────
   useEffect(() => {
@@ -234,14 +228,27 @@ export default function EditTemplatePage() {
 
     setSaving(true);
     try {
-      await apiClient.put(`/templates/${templateId}`, {
+      const payload = {
         title: title.trim(),
         description: description.trim() || null,
         formSchema: fields,
-        status,
         requiresApproval,
         allowsFindings,
-      });
+      };
+
+      if (status === 'Draft') {
+        const res = await apiClient.put(`/templates/${templateId}`, payload);
+        setTemplate(res.data);
+      } else {
+        // Publish: Save first, then publish
+        await apiClient.put(`/templates/${templateId}`, payload);
+        const res = await apiClient.post(`/templates/${templateId}/publish`);
+
+        // Publish returns the updated template in res.data, wait let's check backend
+        // publishTemplate returns the template, so we can update state
+        setTemplate(res.data);
+      }
+
       setIsDirty(false); // clear dirty on successful save
       setShowLeaveModal(false);
       router.push('/dashboard/templates');
@@ -249,6 +256,17 @@ export default function EditTemplatePage() {
       setError(err.response?.data?.message || 'Failed to save template');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTransferOwnership = async () => {
+    if (!transferUserId) return;
+    try {
+      const res = await apiClient.post(`/templates/${templateId}/transfer`, { newOwnerId: transferUserId });
+      setTemplate(prev => prev ? { ...prev, ownerId: parseInt(transferUserId), owner: res.data.owner } : null);
+      setShowTransferModal(false);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to transfer ownership');
     }
   };
 
@@ -286,286 +304,294 @@ export default function EditTemplatePage() {
 
   return (
     <>
-    <div className="max-w-7xl mx-auto space-y-6">
-      {/* ── Read-Only Lock Banner ────────────────────────────────── */}
-      {isReadOnly && (
-        <div className="flex items-start gap-3 px-5 py-4 bg-amber-50 border border-amber-300 rounded-xl text-sm text-amber-800">
-          <span className="text-lg leading-none mt-0.5">🔒</span>
-          <p>
-            <span className="font-semibold">Read-only mode.</span>{' '}
-            This template is currently being edited by{' '}
-            <span className="font-semibold">{lockedByName}</span>
-            {lockedAtTime && <> since <span className="font-semibold">{lockedAtTime}</span></>}.
-            {' '}Your changes cannot be saved until the lock is released.
-          </p>
-        </div>
-      )}
-      {/* Top Bar */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => safeNavigate('/dashboard/templates')}
-            className="p-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-500"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-slate-800">Edit Template</h1>
-              <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full ${statusConfig[currentStatus]?.color}`}>
-                <StatusIcon className="w-3 h-3" />
-                {currentStatus}
-              </span>
-              {template?.templateId && (
-                <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                  {template.templateId}
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* ── Read-Only Banner ────────────────────────────────── */}
+        {isReadOnly && (
+          <div className="flex items-start gap-3 px-5 py-4 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-700">
+            <span className="text-lg leading-none mt-0.5">🔒</span>
+            <p>
+              <span className="font-semibold">Read-only mode.</span>{' '}
+              This template is owned by{' '}
+              <span className="font-semibold">{template?.owner?.name || 'another user'}</span>.
+              {' '}Only the owner or an Admin can modify it. Please ask the owner to transfer ownership if you need to edit.
+            </p>
+          </div>
+        )}
+        {/* Top Bar */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => safeNavigate('/dashboard/templates')}
+              className="p-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-500"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <div className="flex items-center flex-wrap gap-2">
+                <h1 className="text-2xl font-bold text-slate-800">Edit Template</h1>
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full ${statusConfig[currentStatus]?.color}`}>
+                  <StatusIcon className="w-3 h-3" />
+                  {currentStatus}
                 </span>
-              )}
-              <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                Rev. {template?.revision}
+                {template?.templateId && (
+                  <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                    {template.templateId}
+                  </span>
+                )}
+                <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  Rev. {template?.revision}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-sm text-slate-500">Modify your QA audit form</p>
+                {template?.revisedByUser && (
+                  <>
+                    <span className="text-slate-300">•</span>
+                    <p className="text-xs text-slate-400 italic">
+                      Last revised by <span className="font-medium text-slate-500">{template.revisedByUser.name}</span> on{' '}
+                      {template.revisedAt ? new Date(template.revisedAt).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'Unknown'}
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center flex-wrap gap-3">
+            {/* ── Unsaved Changes Badge ── */}
+            {isDirty && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300 animate-pulse">
+                ● Unsaved Changes
               </span>
-            </div>
-            <div className="flex items-center gap-2 mt-1">
-              <p className="text-sm text-slate-500">Modify your QA audit form</p>
-              {template?.revisedBy && (
-                <>
-                  <span className="text-slate-300">•</span>
-                  <p className="text-xs text-slate-400 italic">
-                    Last revised by <span className="font-medium text-slate-500">{template.revisedBy.name}</span> on{' '}
-                    {template.revisedAt ? new Date(template.revisedAt).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'Unknown'}
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* ── Unsaved Changes Badge ── */}
-          {isDirty && (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300 animate-pulse">
-              ● Unsaved Changes
-            </span>
-          )}
-          {/* ── History Button ── */}
-          <button
-            onClick={() => setShowHistory(true)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-          >
-            <History className="w-4 h-4" />
-            History
-          </button>
-          <button
-            onClick={() => setShowPreview(!showPreview)}
-            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border ${
-              showPreview
-                ? 'bg-blue-50 text-blue-700 border-blue-200'
-                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            {showPreview ? <Pencil className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            {showPreview ? 'Editor' : 'Preview'}
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={isReadOnly}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-semibold rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Trash2 className="w-4 h-4" />
-            Delete
-          </button>
-          <button
-            onClick={() => handleSave('Draft')}
-            disabled={saving || isReadOnly}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Save className="w-4 h-4" />
-            Save Draft
-          </button>
-          <button
-            onClick={() => handleSave('Published')}
-            disabled={saving || isReadOnly}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Send className="w-4 h-4" />
-            Publish
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="p-4 bg-red-50 border-l-4 border-red-500 rounded-r">
-          <p className="text-sm text-red-700">{error}</p>
-        </div>
-      )}
-
-      {showPreview ? (
-        <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div className="mb-8">
-              <h2 className="text-xl font-bold text-slate-800">{title || 'Untitled Template'}</h2>
-              {description && <p className="text-slate-500 mt-1">{description}</p>}
-            </div>
-            {fields.length === 0 ? (
-              <p className="text-slate-400 text-center py-8">No fields added yet.</p>
-            ) : (
-              fields.map((field) => (
-                <div key={field.id} className="space-y-1.5">
-                  <label className="block text-sm font-semibold text-slate-700">
-                    {field.label || 'Unlabeled Field'}
-                    {field.required && <span className="text-red-500 ml-1">*</span>}
-                  </label>
-                  {field.type === 'text' && (
-                    <input type="text" disabled placeholder={field.placeholder || 'Enter text...'} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400" />
-                  )}
-                  {field.type === 'textarea' && (
-                    <textarea disabled placeholder={field.placeholder || 'Enter details...'} rows={3} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400 resize-none" />
-                  )}
-                  {field.type === 'number' && (
-                    <input type="number" disabled placeholder={field.placeholder || '0'} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400" />
-                  )}
-                  {field.type === 'select' && (
-                    <select disabled className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400 appearance-none">
-                      <option>Select an option...</option>
-                      {field.dataSource === 'custom' && field.options?.filter(Boolean).map((opt, i) => <option key={i}>{opt}</option>)}
-                      {field.dataSource && field.dataSource !== 'custom' && <option>— Loaded from {dataSourceLabels[field.dataSource]} —</option>}
-                    </select>
-                  )}
-                  {field.type === 'checkbox' && (
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" disabled className="w-4 h-4 rounded border-slate-300" />
-                      <span className="text-sm text-slate-400">{field.label || 'Check this option'}</span>
-                    </div>
-                  )}
-                </div>
-              ))
             )}
+            {/* ── Ownership Button ── */}
+            {(isOwner || isAdminOrDirector) && (
+              <button
+                onClick={() => setShowTransferModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              >
+                <UserPlus className="w-4 h-4" />
+                Transfer
+              </button>
+            )}
+            {/* ── History Button ── */}
+            <button
+              onClick={() => setShowHistory(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+            >
+              <History className="w-4 h-4" />
+              History
+            </button>
+            <button
+              onClick={() => setShowPreview(!showPreview)}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border ${showPreview
+                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+            >
+              {showPreview ? <Pencil className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {showPreview ? 'Editor' : 'Preview'}
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={isReadOnly}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-semibold rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </button>
+            <button
+              onClick={() => handleSave('Draft')}
+              disabled={saving || isReadOnly}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Save className="w-4 h-4" />
+              Save Draft
+            </button>
+            <button
+              onClick={() => handleSave('Published')}
+              disabled={saving || isReadOnly}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Send className="w-4 h-4" />
+              Publish
+            </button>
           </div>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
-            {/* Template Metadata */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
-              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                <Settings2 className="w-4 h-4" /> Template Details
-              </h2>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Title</label>
-                <input type="text" placeholder="e.g. B737 Line Maintenance Audit" disabled={isReadOnly} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" value={title} onChange={(e) => { setTitle(e.target.value); setIsDirty(true); }} />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Description</label>
-                <textarea placeholder="Describe the purpose of this template..." disabled={isReadOnly} rows={2} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" value={description} onChange={(e) => { setDescription(e.target.value); setIsDirty(true); }} />
-              </div>
-              <div className="flex gap-6">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" disabled={isReadOnly} checked={requiresApproval} onChange={(e) => { setRequiresApproval(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed" />
-                  <span className="text-sm text-slate-700">Requires Approval</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" disabled={isReadOnly} checked={allowsFindings} onChange={(e) => { setAllowsFindings(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed" />
-                  <span className="text-sm text-slate-700">Allow Findings</span>
-                </label>
-              </div>
-            </div>
 
-            {/* Fields */}
-            <div className="space-y-3">
-              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Form Fields ({fields.length})</h2>
-              {fields.length === 0 && (
-                <div className="bg-white p-8 rounded-2xl shadow-sm border border-dashed border-slate-300 text-center">
-                  <p className="text-slate-400">No fields yet. Use the panel on the right to add fields.</p>
-                </div>
-              )}
-              {fields.map((field, index) => {
-                const typeConfig = fieldTypeConfig.find((c) => c.type === field.type);
-                const TypeIcon = typeConfig?.icon || Type;
-                const isActive = activeFieldId === field.id;
-                return (
-                  <div key={field.id} className={`bg-white rounded-2xl shadow-sm border transition-all ${isActive ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-100'}`}>
-                    <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setActiveFieldId(isActive ? null : field.id)}>
-                      <GripVertical className="w-4 h-4 text-slate-300 flex-shrink-0" />
-                      <div className="p-1.5 bg-slate-50 rounded-lg"><TypeIcon className="w-4 h-4 text-slate-500" /></div>
-                      <div className="flex-1 min-w-0"><span className="text-sm font-medium text-slate-700 truncate block">{field.label || `Untitled ${typeConfig?.label}`}</span></div>
-                      {field.required && <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium">Required</span>}
-                      <div className="flex items-center gap-1">
-                        <button onClick={(e) => { e.stopPropagation(); moveField(index, 'up'); }} disabled={index === 0} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 disabled:opacity-30 transition-colors"><ChevronUp className="w-4 h-4" /></button>
-                        <button onClick={(e) => { e.stopPropagation(); moveField(index, 'down'); }} disabled={index === fields.length - 1} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 disabled:opacity-30 transition-colors"><ChevronDown className="w-4 h-4" /></button>
-                        <button onClick={(e) => { e.stopPropagation(); removeField(field.id); }} className="p-1 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
-                      </div>
-                    </div>
-                    {isActive && (
-                      <div className="px-4 pb-4 pt-0 border-t border-slate-100 space-y-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 mb-1">Label</label>
-                            <input type="text" placeholder="e.g. Inspector Name" className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.label} onChange={(e) => updateField(field.id, { label: e.target.value })} autoFocus />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 mb-1">Placeholder</label>
-                            <input type="text" placeholder="e.g. Enter name" className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.placeholder || ''} onChange={(e) => updateField(field.id, { placeholder: e.target.value })} />
-                          </div>
-                        </div>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" checked={field.required} onChange={(e) => updateField(field.id, { required: e.target.checked })} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                          <span className="text-sm text-slate-700">Required field</span>
-                        </label>
-                        {field.type === 'select' && (
-                          <div className="space-y-3 p-4 bg-slate-50 rounded-xl">
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1">Data Source</label>
-                              <select className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.dataSource || 'custom'} onChange={(e) => updateField(field.id, { dataSource: e.target.value as DataSource })}>
-                                {Object.entries(dataSourceLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                              </select>
-                            </div>
-                            {field.dataSource === 'custom' && (
-                              <div className="space-y-2">
-                                <label className="block text-xs font-semibold text-slate-500">Options</label>
-                                {(field.options || []).map((opt, i) => (
-                                  <div key={i} className="flex items-center gap-2">
-                                    <input type="text" placeholder={`Option ${i + 1}`} className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={opt} onChange={(e) => updateOption(field.id, i, e.target.value)} />
-                                    <button onClick={() => removeOption(field.id, i)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                                  </div>
-                                ))}
-                                <button onClick={() => addOption(field.id)} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add Option</button>
-                              </div>
-                            )}
-                            {field.dataSource && field.dataSource !== 'custom' && (
-                              <p className="text-xs text-slate-500 italic">Options will be loaded dynamically from the {dataSourceLabels[field.dataSource]} table when the form is used.</p>
-                            )}
-                          </div>
-                        )}
+        {error && (
+          <div className="p-4 bg-red-50 border-l-4 border-red-500 rounded-r">
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+
+        {showPreview ? (
+          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+            <div className="max-w-2xl mx-auto space-y-6">
+              <div className="mb-8">
+                <h2 className="text-xl font-bold text-slate-800">{title || 'Untitled Template'}</h2>
+                {description && <p className="text-slate-500 mt-1">{description}</p>}
+              </div>
+              {fields.length === 0 ? (
+                <p className="text-slate-400 text-center py-8">No fields added yet.</p>
+              ) : (
+                fields.map((field) => (
+                  <div key={field.id} className="space-y-1.5">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      {field.label || 'Unlabeled Field'}
+                      {field.required && <span className="text-red-500 ml-1">*</span>}
+                    </label>
+                    {field.type === 'text' && (
+                      <input type="text" disabled placeholder={field.placeholder || 'Enter text...'} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400" />
+                    )}
+                    {field.type === 'textarea' && (
+                      <textarea disabled placeholder={field.placeholder || 'Enter details...'} rows={3} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400 resize-none" />
+                    )}
+                    {field.type === 'number' && (
+                      <input type="number" disabled placeholder={field.placeholder || '0'} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400" />
+                    )}
+                    {field.type === 'select' && (
+                      <select disabled className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400 appearance-none">
+                        <option>Select an option...</option>
+                        {field.dataSource === 'custom' && field.options?.filter(Boolean).map((opt, i) => <option key={i}>{opt}</option>)}
+                        {field.dataSource && field.dataSource !== 'custom' && <option>— Loaded from {dataSourceLabels[field.dataSource]} —</option>}
+                      </select>
+                    )}
+                    {field.type === 'checkbox' && (
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" disabled className="w-4 h-4 rounded border-slate-300" />
+                        <span className="text-sm text-slate-400">{field.label || 'Check this option'}</span>
                       </div>
                     )}
                   </div>
-                );
-              })}
+                ))
+              )}
             </div>
           </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              {/* Template Metadata */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                  <Settings2 className="w-4 h-4" /> Template Details
+                </h2>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Title</label>
+                  <input type="text" placeholder="e.g. B737 Line Maintenance Audit" disabled={isReadOnly} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" value={title} onChange={(e) => { setTitle(e.target.value); setIsDirty(true); }} />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Description</label>
+                  <textarea placeholder="Describe the purpose of this template..." disabled={isReadOnly} rows={2} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" value={description} onChange={(e) => { setDescription(e.target.value); setIsDirty(true); }} />
+                </div>
+                <div className="flex gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" disabled={isReadOnly} checked={requiresApproval} onChange={(e) => { setRequiresApproval(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed" />
+                    <span className="text-sm text-slate-700">Requires Approval</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" disabled={isReadOnly} checked={allowsFindings} onChange={(e) => { setAllowsFindings(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed" />
+                    <span className="text-sm text-slate-700">Allow Findings</span>
+                  </label>
+                </div>
+              </div>
 
-          {/* Right: Add Field Panel */}
-          <div className="space-y-4">
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 sticky top-6">
-              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Add Field</h2>
-              <div className="space-y-2">
-                {fieldTypeConfig.map((config) => {
-                  const Icon = config.icon;
+              {/* Fields */}
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Form Fields ({fields.length})</h2>
+                {fields.length === 0 && (
+                  <div className="bg-white p-8 rounded-2xl shadow-sm border border-dashed border-slate-300 text-center">
+                    <p className="text-slate-400">No fields yet. Use the panel on the right to add fields.</p>
+                  </div>
+                )}
+                {fields.map((field, index) => {
+                  const typeConfig = fieldTypeConfig.find((c) => c.type === field.type);
+                  const TypeIcon = typeConfig?.icon || Type;
+                  const isActive = activeFieldId === field.id;
                   return (
-                    <button key={config.type} onClick={() => addField(config.type)} disabled={isReadOnly} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 hover:text-blue-700 text-slate-600 transition-all text-left group border border-transparent hover:border-blue-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-transparent">
-                      <div className="p-2 bg-slate-50 group-hover:bg-blue-100 rounded-lg transition-colors"><Icon className="w-4 h-4" /></div>
-                      <div>
-                        <span className="block text-sm font-medium">{config.label}</span>
-                        <span className="block text-xs text-slate-400 group-hover:text-blue-500">{config.description}</span>
+                    <div key={field.id} className={`bg-white rounded-2xl shadow-sm border transition-all ${isActive ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-100'}`}>
+                      <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setActiveFieldId(isActive ? null : field.id)}>
+                        <GripVertical className="w-4 h-4 text-slate-300 flex-shrink-0" />
+                        <div className="p-1.5 bg-slate-50 rounded-lg"><TypeIcon className="w-4 h-4 text-slate-500" /></div>
+                        <div className="flex-1 min-w-0"><span className="text-sm font-medium text-slate-700 truncate block">{field.label || `Untitled ${typeConfig?.label}`}</span></div>
+                        {field.required && <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium">Required</span>}
+                        <div className="flex items-center gap-1">
+                          <button onClick={(e) => { e.stopPropagation(); moveField(index, 'up'); }} disabled={index === 0 || isReadOnly} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 disabled:opacity-30 transition-colors"><ChevronUp className="w-4 h-4" /></button>
+                          <button onClick={(e) => { e.stopPropagation(); moveField(index, 'down'); }} disabled={index === fields.length - 1 || isReadOnly} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 disabled:opacity-30 transition-colors"><ChevronDown className="w-4 h-4" /></button>
+                          <button onClick={(e) => { e.stopPropagation(); removeField(field.id); }} disabled={isReadOnly} className="p-1 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"><Trash2 className="w-4 h-4" /></button>
+                        </div>
                       </div>
-                    </button>
+                      {isActive && !isReadOnly && (
+                        <div className="px-4 pb-4 pt-0 border-t border-slate-100 space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1">Label</label>
+                              <input type="text" placeholder="e.g. Inspector Name" className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.label} onChange={(e) => updateField(field.id, { label: e.target.value })} autoFocus />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1">Placeholder</label>
+                              <input type="text" placeholder="e.g. Enter name" className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.placeholder || ''} onChange={(e) => updateField(field.id, { placeholder: e.target.value })} />
+                            </div>
+                          </div>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={field.required} onChange={(e) => updateField(field.id, { required: e.target.checked })} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                            <span className="text-sm text-slate-700">Required field</span>
+                          </label>
+                          {field.type === 'select' && (
+                            <div className="space-y-3 p-4 bg-slate-50 rounded-xl">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Data Source</label>
+                                <select className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.dataSource || 'custom'} onChange={(e) => updateField(field.id, { dataSource: e.target.value as DataSource })}>
+                                  {Object.entries(dataSourceLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                                </select>
+                              </div>
+                              {field.dataSource === 'custom' && (
+                                <div className="space-y-2">
+                                  <label className="block text-xs font-semibold text-slate-500">Options</label>
+                                  {(field.options || []).map((opt, i) => (
+                                    <div key={i} className="flex items-center gap-2">
+                                      <input type="text" placeholder={`Option ${i + 1}`} className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={opt} onChange={(e) => updateOption(field.id, i, e.target.value)} />
+                                      <button onClick={() => removeOption(field.id, i)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                                    </div>
+                                  ))}
+                                  <button onClick={() => addOption(field.id)} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add Option</button>
+                                </div>
+                              )}
+                              {field.dataSource && field.dataSource !== 'custom' && (
+                                <p className="text-xs text-slate-500 italic">Options will be loaded dynamically from the {dataSourceLabels[field.dataSource]} table when the form is used.</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
             </div>
+
+            {/* Right: Add Field Panel */}
+            <div className="space-y-4">
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 sticky top-6">
+                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Add Field</h2>
+                <div className="space-y-2">
+                  {fieldTypeConfig.map((config) => {
+                    const Icon = config.icon;
+                    return (
+                      <button key={config.type} onClick={() => addField(config.type)} disabled={isReadOnly} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 hover:text-blue-700 text-slate-600 transition-all text-left group border border-transparent hover:border-blue-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-transparent">
+                        <div className="p-2 bg-slate-50 group-hover:bg-blue-100 rounded-lg transition-colors"><Icon className="w-4 h-4" /></div>
+                        <div>
+                          <span className="block text-sm font-medium">{config.label}</span>
+                          <span className="block text-xs text-slate-400 group-hover:text-blue-500">{config.description}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
 
       {/* ── Unsaved Changes Modal ─────────────────────────────────── */}
       {showLeaveModal && (
@@ -605,10 +631,49 @@ export default function EditTemplatePage() {
         </div>
       )}
 
-      {/* \u2500\u2500 Revision History Panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+      {/* ── Transfer Ownership Modal ──────────────────────────────── */}
+      {showTransferModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowTransferModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 border border-slate-100">
+            <h2 className="text-lg font-bold text-slate-800 mb-2">Transfer Ownership</h2>
+            <p className="text-slate-500 text-sm mb-6">Select a user to transfer the ownership of this template. You will lose edit access unless you are an Admin.</p>
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-slate-700 mb-1">New Owner</label>
+              <select
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none"
+                value={transferUserId}
+                onChange={(e) => setTransferUserId(e.target.value)}
+              >
+                <option value="">Select a user...</option>
+                {usersList.map((u) => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowTransferModal(false)}
+                className="flex-1 px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTransferOwnership}
+                disabled={!transferUserId}
+                className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm transition-all disabled:opacity-50"
+              >
+                Confirm Transfer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Revision History Panel ────────────────────────────────── */}
       {showHistory && (
         <RevisionHistoryPanel
-          templateId={templateId}
+          revisions={template?.revisionArchives || []}
           onClose={() => setShowHistory(false)}
         />
       )}
