@@ -138,6 +138,9 @@ model Template {
   revision         Int        @default(1)
   requiresApproval Boolean    @default(false)
   allowsFindings   Boolean    @default(true)
+  estimatedHours   Float?
+  isOneOff         Boolean    @default(false)
+  type             String?
   formSchema       Json       // JSON document for active/published field definitions
   draftSchema      Json?      // JSON document for unpublished draft changes
   

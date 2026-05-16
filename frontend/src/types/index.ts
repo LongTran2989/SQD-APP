@@ -16,36 +16,52 @@ export interface AuthResponse {
   user: User;
 }
 
-export type FieldType = 'text' | 'number' | 'select' | 'checkbox' | 'textarea';
-export type DataSource = 'custom' | 'departments' | 'divisions' | 'users' | 'aircrafts';
+export type FormFieldType = 
+  | 'text' 
+  | 'textarea' 
+  | 'number' 
+  | 'select' 
+  | 'radio' 
+  | 'checkbox_group' 
+  | 'checkbox_single' 
+  | 'date';
 
 export interface FormField {
-  id: string;
-  type: FieldType;
+  fieldId: string;
+  type: FormFieldType;
   label: string;
   required: boolean;
-  placeholder?: string;
-  dataSource?: DataSource;
+  helpText?: string;
   options?: string[];
+  dataSource?: string;
 }
 
 export interface Template {
   id: number;
+  templateId: string;
   title: string;
   description: string | null;
   status: 'Draft' | 'Published' | 'Archived';
-  templateId: string;
   revision: number;
-  revisedBy?: { name: string } | null;
+  revisedByUser?: { name: string } | null;
   revisedAt?: string | null;
+  
   requiresApproval: boolean;
   allowsFindings: boolean;
+  estimatedHours: number | null;
+  isOneOff: boolean;
+  type: string | null;
+  
+  divisionId: number;
+  division?: { id: number; name: string } | null;
+  ownerId: number;
+  owner?: { id: number; name: string } | null;
+  
   formSchema: FormField[];
   draftSchema?: any;
+  revisionArchives?: any[];
+  
   createdAt: string;
   updatedAt: string;
   publishedAt: string | null;
-  ownerId: number;
-  owner?: { id: number; name: string } | null;
-  revisionArchives?: any[];
 }

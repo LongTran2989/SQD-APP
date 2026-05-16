@@ -1,282 +1,71 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { apiClient } from '../../../../api/client';
-import { FormField, FieldType, DataSource, Template } from '../../../../types';
+import { Template } from '../../../../types';
 import { useAuthStore } from '../../../../store/authStore';
-import {
-  ArrowLeft,
-  Plus,
-  Trash2,
-  GripVertical,
-  Save,
-  Send,
-  Type,
-  Hash,
-  List,
-  CheckSquare,
-  AlignLeft,
-  ChevronDown,
-  ChevronUp,
-  Eye,
-  Pencil,
-  Settings2,
-  Clock,
-  CheckCircle2,
-  Archive,
-  History,
-  UserPlus
-} from 'lucide-react';
+import toast from 'react-hot-toast';
 import RevisionHistoryPanel from '../../../../components/templates/RevisionHistoryPanel';
+import TransferOwnershipModal from '../../../../components/templates/TransferOwnershipModal';
+import { 
+  ArrowLeft, Edit, Copy, CheckCircle2, Clock, Archive, 
+  Settings, User, ChevronRight, History, Trash2, Repeat
+} from 'lucide-react';
 
-const fieldTypeConfig: { type: FieldType; label: string; icon: any; description: string }[] = [
-  { type: 'text', label: 'Text Input', icon: Type, description: 'Short text answer' },
-  { type: 'textarea', label: 'Text Area', icon: AlignLeft, description: 'Long text answer' },
-  { type: 'number', label: 'Number', icon: Hash, description: 'Numeric value' },
-  { type: 'select', label: 'Dropdown', icon: List, description: 'Select from options' },
-  { type: 'checkbox', label: 'Checkbox', icon: CheckSquare, description: 'Yes/No toggle' },
-];
-
-const dataSourceLabels: Record<DataSource, string> = {
-  custom: 'Custom List',
-  departments: 'Departments (from DB)',
-  divisions: 'Divisions (from DB)',
-  users: 'Users (from DB)',
-  aircrafts: 'Aircraft Types (from DB)',
+const statusConfig = {
+  Draft: { color: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock, label: 'Draft' },
+  Published: { color: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle2, label: 'Published' },
+  Archived: { color: 'bg-slate-100 text-slate-500 border-slate-200', icon: Archive, label: 'Archived' },
 };
 
-const statusConfig: Record<string, { icon: any; color: string }> = {
-  Draft: { icon: Clock, color: 'text-amber-600 bg-amber-50' },
-  Published: { icon: CheckCircle2, color: 'text-green-600 bg-green-50' },
-  Archived: { icon: Archive, color: 'text-slate-500 bg-slate-100' },
+const fieldTypeLabels: Record<string, string> = {
+  text: 'Text Input',
+  textarea: 'Text Area',
+  number: 'Number',
+  date: 'Date',
+  select: 'Dropdown',
+  radio: 'Radio',
+  checkbox_group: 'Checkboxes',
+  checkbox_single: 'Toggle',
 };
 
-function generateId() {
-  return 'field_' + Math.random().toString(36).substring(2, 9);
-}
-
-export default function EditTemplatePage() {
+export default function TemplateDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
-  const params = useParams();
-  const templateId = params.id as string;
+  const resolvedParams = use(params);
+  const templateId = parseInt(resolvedParams.id, 10);
+  
+  const [template, setTemplate] = useState<Template | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const { user } = useAuthStore();
 
-  const [template, setTemplate] = useState<Template | null>(null);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [requiresApproval, setRequiresApproval] = useState(false);
-  const [allowsFindings, setAllowsFindings] = useState(true);
-  const [fields, setFields] = useState<FormField[]>([]);
-  const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [showPreview, setShowPreview] = useState(false);
-
-  // ── Unsaved changes tracking ──────────────────────────────────────
-  const [isDirty, setIsDirty] = useState(false);
-  const [showLeaveModal, setShowLeaveModal] = useState(false);
-  const [pendingNavUrl, setPendingNavUrl] = useState<string | null>(null);
-
-  // ── Revision history panel ──────────────────────────────────────
-  const [showHistory, setShowHistory] = useState(false);
-
-  // ── Transfer Ownership ──────────────────────────────────────────
-  const [showTransferModal, setShowTransferModal] = useState(false);
-  const [transferUserId, setTransferUserId] = useState('');
-  const [usersList, setUsersList] = useState<{ value: string; label: string }[]>([]);
-
   useEffect(() => {
-    const fetchTemplate = async () => {
-      try {
-        const response = await apiClient.get(`/templates/${templateId}`);
-        const data: Template = response.data;
-        setTemplate(data);
-        setTitle(data.title);
-        setDescription(data.description || '');
-        setRequiresApproval(data.requiresApproval);
-        setAllowsFindings(data.allowsFindings);
-        const schemaToLoad = data.draftSchema || data.formSchema;
-        setFields(Array.isArray(schemaToLoad) ? schemaToLoad : []);
-      } catch (err: any) {
-        setError(err.response?.data?.message || 'Failed to load template');
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchTemplate();
   }, [templateId]);
 
-  // Ownership derived state
-  const isOwner = user?.id === template?.ownerId;
-  const isAdminOrDirector = ['Admin', 'Director'].includes(user?.role || '');
-  const isReadOnly = template && !isOwner && !isAdminOrDirector;
-
-  useEffect(() => {
-    if (showTransferModal && usersList.length === 0) {
-      apiClient.get('/datasources/users').then(res => setUsersList(res.data)).catch(console.error);
-    }
-  }, [showTransferModal, usersList.length]);
-
-  // ── beforeunload guard (browser tab close / refresh) ─────────────
-  useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      if (isDirty) { e.preventDefault(); e.returnValue = ''; }
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [isDirty]);
-
-  // ── Intercept programmatic Next.js navigation ─────────────────────
-  const safeNavigate = (url: string) => {
-    if (isDirty) {
-      setPendingNavUrl(url);
-      setShowLeaveModal(true);
-    } else {
-      router.push(url);
-    }
-  };
-
-  const handleDiscardAndLeave = () => {
-    setIsDirty(false);
-    setShowLeaveModal(false);
-    if (pendingNavUrl) router.push(pendingNavUrl);
-  };
-
-  const addField = useCallback((type: FieldType) => {
-    const newField: FormField = {
-      id: generateId(),
-      type,
-      label: '',
-      required: false,
-      placeholder: '',
-      ...(type === 'select' ? { dataSource: 'custom' as DataSource, options: [''] } : {}),
-    };
-    setFields((prev) => [...prev, newField]);
-    setActiveFieldId(newField.id);
-    setIsDirty(true); // mark dirty
-  }, []);
-
-  const updateField = useCallback((id: string, updates: Partial<FormField>) => {
-    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
-    setIsDirty(true); // mark dirty
-  }, []);
-
-  const removeField = useCallback((id: string) => {
-    setFields((prev) => prev.filter((f) => f.id !== id));
-    if (activeFieldId === id) setActiveFieldId(null);
-    setIsDirty(true); // mark dirty
-  }, [activeFieldId]);
-
-  const moveField = useCallback((index: number, direction: 'up' | 'down') => {
-    setFields((prev) => {
-      const newFields = [...prev];
-      const targetIndex = direction === 'up' ? index - 1 : index + 1;
-      if (targetIndex < 0 || targetIndex >= newFields.length) return prev;
-      [newFields[index], newFields[targetIndex]] = [newFields[targetIndex], newFields[index]];
-      return newFields;
-    });
-    setIsDirty(true); // mark dirty
-  }, []);
-
-  const addOption = useCallback((fieldId: string) => {
-    setFields((prev) =>
-      prev.map((f) =>
-        f.id === fieldId ? { ...f, options: [...(f.options || []), ''] } : f
-      )
-    );
-  }, []);
-
-  const updateOption = useCallback((fieldId: string, optionIndex: number, value: string) => {
-    setFields((prev) =>
-      prev.map((f) =>
-        f.id === fieldId
-          ? { ...f, options: (f.options || []).map((o, i) => (i === optionIndex ? value : o)) }
-          : f
-      )
-    );
-  }, []);
-
-  const removeOption = useCallback((fieldId: string, optionIndex: number) => {
-    setFields((prev) =>
-      prev.map((f) =>
-        f.id === fieldId
-          ? { ...f, options: (f.options || []).filter((_, i) => i !== optionIndex) }
-          : f
-      )
-    );
-  }, []);
-
-  const handleSave = async (status: 'Draft' | 'Published') => {
-    setError('');
-    if (!title.trim()) {
-      setError('Template title is required.');
-      return;
-    }
-    if (fields.length === 0) {
-      setError('Add at least one field to the template.');
-      return;
-    }
-    const emptyLabel = fields.find((f) => !f.label.trim());
-    if (emptyLabel) {
-      setError(`A field is missing a label. Please fill in all field labels.`);
-      setActiveFieldId(emptyLabel.id);
-      return;
-    }
-
-    setSaving(true);
+  const fetchTemplate = async () => {
     try {
-      const payload = {
-        title: title.trim(),
-        description: description.trim() || null,
-        formSchema: fields,
-        requiresApproval,
-        allowsFindings,
-      };
-
-      if (status === 'Draft') {
-        const res = await apiClient.put(`/templates/${templateId}`, payload);
-        setTemplate(res.data);
-      } else {
-        // Publish: Save first, then publish
-        await apiClient.put(`/templates/${templateId}`, payload);
-        const res = await apiClient.post(`/templates/${templateId}/publish`);
-
-        // Publish returns the updated template in res.data, wait let's check backend
-        // publishTemplate returns the template, so we can update state
-        setTemplate(res.data);
-      }
-
-      setIsDirty(false); // clear dirty on successful save
-      setShowLeaveModal(false);
-      router.push('/dashboard/templates');
+      const response = await apiClient.get(`/templates/${templateId}`);
+      setTemplate(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to save template');
+      toast.error('Failed to load template');
+      router.push('/dashboard/templates');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  const handleTransferOwnership = async () => {
-    if (!transferUserId) return;
+  const handleArchive = async () => {
+    if (!window.confirm('This template will be archived and can no longer generate new Tasks. All existing Tasks are unaffected.')) return;
     try {
-      const res = await apiClient.post(`/templates/${templateId}/transfer`, { newOwnerId: transferUserId });
-      setTemplate(prev => prev ? { ...prev, ownerId: parseInt(transferUserId), owner: res.data.owner } : null);
-      setShowTransferModal(false);
+      await apiClient.patch(`/templates/${templateId}/archive`);
+      toast.success('Template archived successfully');
+      fetchTemplate();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to transfer ownership');
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!window.confirm('Are you sure you want to delete this template?')) return;
-    try {
-      await apiClient.delete(`/templates/${templateId}`);
-      router.push('/dashboard/templates');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to delete template');
+      toast.error(err.response?.data?.message || 'Failed to archive template');
     }
   };
 
@@ -288,395 +77,264 @@ export default function EditTemplatePage() {
     );
   }
 
-  if (!template && error) {
-    return (
-      <div className="max-w-2xl mx-auto mt-12 text-center">
-        <p className="text-red-600 mb-4">{error}</p>
-        <Link href="/dashboard/templates" className="text-blue-600 font-semibold hover:text-blue-700">
-          Back to Templates
-        </Link>
-      </div>
-    );
-  }
+  if (!template) return null;
 
-  const currentStatus = template?.status || 'Draft';
-  const StatusIcon = statusConfig[currentStatus]?.icon || Clock;
+  const config = statusConfig[template.status] || statusConfig.Draft;
+  const StatusIcon = config.icon;
+  const isOwnerOrPrivileged = user && (user.id === template.ownerId || user.role === 'Admin' || user.role === 'Director');
+  const hasDraftPending = template.status === 'Draft' && template.publishedAt;
+  const fields = template.formSchema as any[] || [];
 
   return (
-    <>
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* ── Read-Only Banner ────────────────────────────────── */}
-        {isReadOnly && (
-          <div className="flex items-start gap-3 px-5 py-4 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-700">
-            <span className="text-lg leading-none mt-0.5">🔒</span>
-            <p>
-              <span className="font-semibold">Read-only mode.</span>{' '}
-              This template is owned by{' '}
-              <span className="font-semibold">{template?.owner?.name || 'another user'}</span>.
-              {' '}Only the owner or an Admin can modify it. Please ask the owner to transfer ownership if you need to edit.
-            </p>
-          </div>
-        )}
-        {/* Top Bar */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => safeNavigate('/dashboard/templates')}
-              className="p-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-500"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
+    <div className="max-w-6xl mx-auto pb-12">
+      {/* Top Navigation */}
+      <Link 
+        href="/dashboard/templates" 
+        className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors mb-6"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Back to Templates
+      </Link>
+
+      {hasDraftPending && isOwnerOrPrivileged && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3 text-amber-800">
+            <Clock className="w-5 h-5 text-amber-500" />
             <div>
-              <div className="flex items-center flex-wrap gap-2">
-                <h1 className="text-2xl font-bold text-slate-800">Edit Template</h1>
-                <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full ${statusConfig[currentStatus]?.color}`}>
-                  <StatusIcon className="w-3 h-3" />
-                  {currentStatus}
-                </span>
-                {template?.templateId && (
-                  <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                    {template.templateId}
-                  </span>
-                )}
-                <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                  Rev. {template?.revision}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 mt-1">
-                <p className="text-sm text-slate-500">Modify your QA audit form</p>
-                {template?.revisedByUser && (
-                  <>
-                    <span className="text-slate-300">•</span>
-                    <p className="text-xs text-slate-400 italic">
-                      Last revised by <span className="font-medium text-slate-500">{template.revisedByUser.name}</span> on{' '}
-                      {template.revisedAt ? new Date(template.revisedAt).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'Unknown'}
-                    </p>
-                  </>
-                )}
-              </div>
+              <p className="font-semibold text-sm">You have unpublished draft changes</p>
+              <p className="text-xs mt-0.5 opacity-90">Resume editing to publish these changes or discard them.</p>
             </div>
           </div>
-          <div className="flex items-center flex-wrap gap-3">
-            {/* ── Unsaved Changes Badge ── */}
-            {isDirty && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300 animate-pulse">
-                ● Unsaved Changes
-              </span>
-            )}
-            {/* ── Ownership Button ── */}
-            {(isOwner || isAdminOrDirector) && (
-              <button
-                onClick={() => setShowTransferModal(true)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-              >
-                <UserPlus className="w-4 h-4" />
-                Transfer
-              </button>
-            )}
-            {/* ── History Button ── */}
-            <button
-              onClick={() => setShowHistory(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-            >
-              <History className="w-4 h-4" />
-              History
-            </button>
-            <button
-              onClick={() => setShowPreview(!showPreview)}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all border ${showPreview
-                  ? 'bg-blue-50 text-blue-700 border-blue-200'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                }`}
-            >
-              {showPreview ? <Pencil className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              {showPreview ? 'Editor' : 'Preview'}
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={isReadOnly}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-semibold rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Trash2 className="w-4 h-4" />
-              Delete
-            </button>
-            <button
-              onClick={() => handleSave('Draft')}
-              disabled={saving || isReadOnly}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Save className="w-4 h-4" />
-              Save Draft
-            </button>
-            <button
-              onClick={() => handleSave('Published')}
-              disabled={saving || isReadOnly}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Send className="w-4 h-4" />
-              Publish
-            </button>
-          </div>
+          <Link
+            href={`/dashboard/templates/${template.id}/edit`}
+            className="px-4 py-2 bg-amber-100 text-amber-800 hover:bg-amber-200 font-medium text-sm rounded-lg transition-colors"
+          >
+            Resume Draft
+          </Link>
         </div>
+      )}
 
-        {error && (
-          <div className="p-4 bg-red-50 border-l-4 border-red-500 rounded-r">
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-
-        {showPreview ? (
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-            <div className="max-w-2xl mx-auto space-y-6">
-              <div className="mb-8">
-                <h2 className="text-xl font-bold text-slate-800">{title || 'Untitled Template'}</h2>
-                {description && <p className="text-slate-500 mt-1">{description}</p>}
-              </div>
-              {fields.length === 0 ? (
-                <p className="text-slate-400 text-center py-8">No fields added yet.</p>
-              ) : (
-                fields.map((field) => (
-                  <div key={field.id} className="space-y-1.5">
-                    <label className="block text-sm font-semibold text-slate-700">
-                      {field.label || 'Unlabeled Field'}
-                      {field.required && <span className="text-red-500 ml-1">*</span>}
-                    </label>
-                    {field.type === 'text' && (
-                      <input type="text" disabled placeholder={field.placeholder || 'Enter text...'} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400" />
-                    )}
-                    {field.type === 'textarea' && (
-                      <textarea disabled placeholder={field.placeholder || 'Enter details...'} rows={3} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400 resize-none" />
-                    )}
-                    {field.type === 'number' && (
-                      <input type="number" disabled placeholder={field.placeholder || '0'} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400" />
-                    )}
-                    {field.type === 'select' && (
-                      <select disabled className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400 appearance-none">
-                        <option>Select an option...</option>
-                        {field.dataSource === 'custom' && field.options?.filter(Boolean).map((opt, i) => <option key={i}>{opt}</option>)}
-                        {field.dataSource && field.dataSource !== 'custom' && <option>— Loaded from {dataSourceLabels[field.dataSource]} —</option>}
-                      </select>
-                    )}
-                    {field.type === 'checkbox' && (
-                      <div className="flex items-center gap-2">
-                        <input type="checkbox" disabled className="w-4 h-4 rounded border-slate-300" />
-                        <span className="text-sm text-slate-400">{field.label || 'Check this option'}</span>
-                      </div>
-                    )}
-                  </div>
-                ))
+      {/* Header Card */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6">
+          <div className="flex-1">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded text-sm font-bold font-mono border border-slate-200 shadow-sm">
+                {template.templateId}
+              </span>
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-full border shadow-sm ${config.color}`}>
+                <StatusIcon className="w-4 h-4" />
+                {config.label}
+              </span>
+              {template.isOneOff && (
+                <span className="px-2 py-1 rounded text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200 shadow-sm">
+                  ONE-OFF
+                </span>
               )}
             </div>
+            
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 mb-2">
+              {template.title}
+            </h1>
+            
+            <p className="text-slate-500 text-base leading-relaxed max-w-3xl">
+              {template.description || <span className="italic text-slate-400">No description provided.</span>}
+            </p>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              {/* Template Metadata */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
-                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                  <Settings2 className="w-4 h-4" /> Template Details
-                </h2>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">Title</label>
-                  <input type="text" placeholder="e.g. B737 Line Maintenance Audit" disabled={isReadOnly} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" value={title} onChange={(e) => { setTitle(e.target.value); setIsDirty(true); }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">Description</label>
-                  <textarea placeholder="Describe the purpose of this template..." disabled={isReadOnly} rows={2} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" value={description} onChange={(e) => { setDescription(e.target.value); setIsDirty(true); }} />
-                </div>
-                <div className="flex gap-6">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" disabled={isReadOnly} checked={requiresApproval} onChange={(e) => { setRequiresApproval(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed" />
-                    <span className="text-sm text-slate-700">Requires Approval</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" disabled={isReadOnly} checked={allowsFindings} onChange={(e) => { setAllowsFindings(e.target.checked); setIsDirty(true); }} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed" />
-                    <span className="text-sm text-slate-700">Allow Findings</span>
-                  </label>
-                </div>
-              </div>
 
-              {/* Fields */}
-              <div className="space-y-3">
-                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Form Fields ({fields.length})</h2>
-                {fields.length === 0 && (
-                  <div className="bg-white p-8 rounded-2xl shadow-sm border border-dashed border-slate-300 text-center">
-                    <p className="text-slate-400">No fields yet. Use the panel on the right to add fields.</p>
-                  </div>
-                )}
-                {fields.map((field, index) => {
-                  const typeConfig = fieldTypeConfig.find((c) => c.type === field.type);
-                  const TypeIcon = typeConfig?.icon || Type;
-                  const isActive = activeFieldId === field.id;
-                  return (
-                    <div key={field.id} className={`bg-white rounded-2xl shadow-sm border transition-all ${isActive ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-100'}`}>
-                      <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setActiveFieldId(isActive ? null : field.id)}>
-                        <GripVertical className="w-4 h-4 text-slate-300 flex-shrink-0" />
-                        <div className="p-1.5 bg-slate-50 rounded-lg"><TypeIcon className="w-4 h-4 text-slate-500" /></div>
-                        <div className="flex-1 min-w-0"><span className="text-sm font-medium text-slate-700 truncate block">{field.label || `Untitled ${typeConfig?.label}`}</span></div>
-                        {field.required && <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium">Required</span>}
-                        <div className="flex items-center gap-1">
-                          <button onClick={(e) => { e.stopPropagation(); moveField(index, 'up'); }} disabled={index === 0 || isReadOnly} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 disabled:opacity-30 transition-colors"><ChevronUp className="w-4 h-4" /></button>
-                          <button onClick={(e) => { e.stopPropagation(); moveField(index, 'down'); }} disabled={index === fields.length - 1 || isReadOnly} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 disabled:opacity-30 transition-colors"><ChevronDown className="w-4 h-4" /></button>
-                          <button onClick={(e) => { e.stopPropagation(); removeField(field.id); }} disabled={isReadOnly} className="p-1 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"><Trash2 className="w-4 h-4" /></button>
-                        </div>
-                      </div>
-                      {isActive && !isReadOnly && (
-                        <div className="px-4 pb-4 pt-0 border-t border-slate-100 space-y-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1">Label</label>
-                              <input type="text" placeholder="e.g. Inspector Name" className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.label} onChange={(e) => updateField(field.id, { label: e.target.value })} autoFocus />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1">Placeholder</label>
-                              <input type="text" placeholder="e.g. Enter name" className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.placeholder || ''} onChange={(e) => updateField(field.id, { placeholder: e.target.value })} />
-                            </div>
-                          </div>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={field.required} onChange={(e) => updateField(field.id, { required: e.target.checked })} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                            <span className="text-sm text-slate-700">Required field</span>
-                          </label>
-                          {field.type === 'select' && (
-                            <div className="space-y-3 p-4 bg-slate-50 rounded-xl">
-                              <div>
-                                <label className="block text-xs font-semibold text-slate-500 mb-1">Data Source</label>
-                                <select className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" value={field.dataSource || 'custom'} onChange={(e) => updateField(field.id, { dataSource: e.target.value as DataSource })}>
-                                  {Object.entries(dataSourceLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                                </select>
-                              </div>
-                              {field.dataSource === 'custom' && (
-                                <div className="space-y-2">
-                                  <label className="block text-xs font-semibold text-slate-500">Options</label>
-                                  {(field.options || []).map((opt, i) => (
-                                    <div key={i} className="flex items-center gap-2">
-                                      <input type="text" placeholder={`Option ${i + 1}`} className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={opt} onChange={(e) => updateOption(field.id, i, e.target.value)} />
-                                      <button onClick={() => removeOption(field.id, i)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                                    </div>
-                                  ))}
-                                  <button onClick={() => addOption(field.id)} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add Option</button>
-                                </div>
-                              )}
-                              {field.dataSource && field.dataSource !== 'custom' && (
-                                <p className="text-xs text-slate-500 italic">Options will be loaded dynamically from the {dataSourceLabels[field.dataSource]} table when the form is used.</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setShowHistory(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold rounded-xl shadow-sm transition-all"
+            >
+              <History className="w-4 h-4 text-slate-400" />
+              History
+            </button>
+            {isOwnerOrPrivileged && template.status !== 'Archived' && (
+              <>
+                <button
+                  onClick={() => setShowTransfer(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-amber-600 hover:bg-amber-50 hover:border-amber-200 font-semibold rounded-xl shadow-sm transition-all"
+                  title="Transfer Ownership"
+                >
+                  <Repeat className="w-4 h-4" />
+                </button>
+                <Link
+                  href={`/dashboard/templates/${template.id}/edit`}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all"
+                >
+                  <Edit className="w-4 h-4" />
+                  Edit Template
+                </Link>
+                <button
+                  onClick={handleArchive}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-200 font-semibold rounded-xl shadow-sm transition-all"
+                  title="Archive"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
 
-            {/* Right: Add Field Panel */}
-            <div className="space-y-4">
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 sticky top-6">
-                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Add Field</h2>
-                <div className="space-y-2">
-                  {fieldTypeConfig.map((config) => {
-                    const Icon = config.icon;
-                    return (
-                      <button key={config.type} onClick={() => addField(config.type)} disabled={isReadOnly} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 hover:text-blue-700 text-slate-600 transition-all text-left group border border-transparent hover:border-blue-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-transparent">
-                        <div className="p-2 bg-slate-50 group-hover:bg-blue-100 rounded-lg transition-colors"><Icon className="w-4 h-4" /></div>
-                        <div>
-                          <span className="block text-sm font-medium">{config.label}</span>
-                          <span className="block text-xs text-slate-400 group-hover:text-blue-500">{config.description}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+        <hr className="my-6 border-slate-100" />
+
+        {/* Metadata Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Revision</p>
+            <p className="font-semibold text-slate-800">{template.revision}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Division</p>
+            <p className="font-medium text-slate-700">{template.division?.name || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Type</p>
+            <p className="font-medium text-slate-700">{template.type || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Est. Time</p>
+            <p className="font-medium text-slate-700">{template.estimatedHours ? `${template.estimatedHours}h` : '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Owner</p>
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                <User className="w-3 h-3 text-slate-400" />
               </div>
+              <p className="font-medium text-slate-700 truncate">{template.owner?.name || '—'}</p>
             </div>
           </div>
-        )}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Last Updated By</p>
+            <p className="font-medium text-slate-700 truncate">{template.revisedByUser?.name || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Last Updated</p>
+            <p className="font-medium text-slate-700">
+              {new Date(template.updatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Published</p>
+            <p className="font-medium text-slate-700">
+              {template.publishedAt ? new Date(template.publishedAt).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '—'}
+            </p>
+          </div>
+        </div>
+
+        {/* Configuration Pills */}
+        <div className="flex flex-wrap items-center gap-3 mt-6 pt-6 border-t border-slate-100">
+          <p className="text-sm font-semibold text-slate-500 mr-2">Configuration:</p>
+          {template.requiresApproval ? (
+            <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold border border-blue-100 shadow-sm flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Requires Approval
+            </span>
+          ) : (
+            <span className="px-3 py-1 bg-slate-50 text-slate-500 rounded-full text-xs font-bold border border-slate-200 shadow-sm flex items-center gap-1">
+              <Archive className="w-3.5 h-3.5" /> No Approval Required
+            </span>
+          )}
+
+          {template.allowsFindings ? (
+            <span className="px-3 py-1 bg-amber-50 text-amber-700 rounded-full text-xs font-bold border border-amber-100 shadow-sm flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Findings Enabled
+            </span>
+          ) : (
+            <span className="px-3 py-1 bg-slate-50 text-slate-500 rounded-full text-xs font-bold border border-slate-200 shadow-sm flex items-center gap-1">
+              <Archive className="w-3.5 h-3.5" /> Findings Disabled
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* ── Unsaved Changes Modal ─────────────────────────────────── */}
-      {showLeaveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLeaveModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 border border-slate-100">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-2xl">⚠️</span>
-              <h2 className="text-lg font-bold text-slate-800">Unsaved Changes</h2>
-            </div>
-            <p className="text-slate-500 text-sm mb-6">You have unsaved changes. What would you like to do?</p>
-            <div className="flex flex-col gap-3">
-              <button
-                onClick={() => handleSave('Draft')}
-                disabled={saving}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all"
-              >
-                <Save className="w-4 h-4" />
-                Save Draft
-              </button>
-              <button
-                onClick={() => handleSave('Published')}
-                disabled={saving}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm transition-all"
-              >
-                <Send className="w-4 h-4" />
-                Publish
-              </button>
-              <button
-                onClick={handleDiscardAndLeave}
-                className="w-full inline-flex items-center justify-center px-4 py-3 text-red-600 hover:bg-red-50 font-medium rounded-xl text-sm transition-all border border-transparent hover:border-red-100"
-              >
-                Discard &amp; Leave
-              </button>
-            </div>
+      {/* Field Viewer */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">Form Fields</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Read-only view of the template fields</p>
+          </div>
+          <div className="text-sm font-medium text-slate-500">
+            {fields.length} {fields.length === 1 ? 'field' : 'fields'} total
           </div>
         </div>
-      )}
 
-      {/* ── Transfer Ownership Modal ──────────────────────────────── */}
-      {showTransferModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowTransferModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 border border-slate-100">
-            <h2 className="text-lg font-bold text-slate-800 mb-2">Transfer Ownership</h2>
-            <p className="text-slate-500 text-sm mb-6">Select a user to transfer the ownership of this template. You will lose edit access unless you are an Admin.</p>
-            <div className="mb-6">
-              <label className="block text-sm font-semibold text-slate-700 mb-1">New Owner</label>
-              <select
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none"
-                value={transferUserId}
-                onChange={(e) => setTransferUserId(e.target.value)}
-              >
-                <option value="">Select a user...</option>
-                {usersList.map((u) => (
-                  <option key={u.value} value={u.value}>{u.label}</option>
-                ))}
-              </select>
+        <div className="p-6">
+          {fields.length === 0 ? (
+            <div className="text-center py-12">
+              <Settings className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+              <p className="text-slate-500 font-medium">No fields defined yet</p>
+              <p className="text-slate-400 text-sm mt-1">Edit the template to add form fields.</p>
             </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowTransferModal(false)}
-                className="flex-1 px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-sm transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleTransferOwnership}
-                disabled={!transferUserId}
-                className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm transition-all disabled:opacity-50"
-              >
-                Confirm Transfer
-              </button>
+          ) : (
+            <div className="space-y-6 max-w-3xl">
+              {fields.map((f: any, i: number) => (
+                <div key={f.fieldId || i} className="opacity-90 pointer-events-none p-4 rounded-xl border border-slate-100 bg-slate-50">
+                  <label className="block text-sm font-semibold text-slate-800">
+                    {f.label} {f.required && <span className="text-red-500">*</span>}
+                  </label>
+                  {f.helpText && <p className="text-xs text-slate-500 mb-1">{f.helpText}</p>}
+                  
+                  {f.type === 'text' && <input type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" placeholder="Text input" disabled />}
+                  {f.type === 'number' && <input type="number" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" placeholder="0" disabled />}
+                  {f.type === 'date' && <input type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" disabled />}
+                  {f.type === 'textarea' && <textarea className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" rows={3} placeholder="Text area" disabled />}
+                  {f.type === 'select' && (
+                    <select className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" disabled>
+                      <option>{f.dataSource === 'custom' ? (f.options?.[0] || 'Select...') : `Dynamic ${f.dataSource}`}</option>
+                    </select>
+                  )}
+                  {f.type === 'radio' && (
+                    <div className="space-y-2 mt-2">
+                      {(f.options || []).map((o: string, idx: number) => (
+                        <label key={idx} className="flex items-center gap-2 text-sm text-slate-700">
+                          <input type="radio" disabled className="w-4 h-4" /> {o}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {f.type === 'checkbox_group' && (
+                    <div className="space-y-2 mt-2">
+                      {(f.options || []).map((o: string, idx: number) => (
+                        <label key={idx} className="flex items-center gap-2 text-sm text-slate-700">
+                          <input type="checkbox" disabled className="w-4 h-4 rounded" /> {o}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {f.type === 'checkbox_single' && (
+                    <label className="flex items-center gap-2 text-sm text-slate-700 mt-2">
+                      <input type="checkbox" disabled className="w-4 h-4 rounded" /> Yes/No
+                    </label>
+                  )}
+                </div>
+              ))}
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* ── Revision History Panel ────────────────────────────────── */}
       {showHistory && (
         <RevisionHistoryPanel
-          revisions={template?.revisionArchives || []}
+          revisions={template.revisionArchives || []}
           onClose={() => setShowHistory(false)}
         />
       )}
-    </>
+
+      {showTransfer && (
+        <TransferOwnershipModal
+          templateId={template.id}
+          currentOwnerId={template.ownerId}
+          onClose={() => setShowTransfer(false)}
+          onTransfer={(newOwner) => {
+            setTemplate({ ...template, ownerId: newOwner.id, owner: newOwner });
+            setShowTransfer(false);
+          }}
+        />
+      )}
+    </div>
   );
 }

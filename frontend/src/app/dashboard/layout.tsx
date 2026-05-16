@@ -6,6 +6,8 @@ import { useAuthStore } from '../../store/authStore';
 import Sidebar from '../../components/layout/Sidebar';
 import Header from '../../components/layout/Header';
 
+import { Toaster } from 'react-hot-toast';
+
 export default function DashboardLayout({
   children,
 }: {
@@ -33,6 +35,7 @@ export default function DashboardLayout({
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900">
+      <Toaster position="top-right" />
       <Sidebar />
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <Header />

@@ -39,6 +39,9 @@ export const getTemplates = async (req: Request, res: Response): Promise<void> =
                 formSchema: (t.draftSchema as any).formSchema,
                 requiresApproval: (t.draftSchema as any).requiresApproval,
                 allowsFindings: (t.draftSchema as any).allowsFindings,
+                estimatedHours: (t.draftSchema as any).estimatedHours,
+                isOneOff: (t.draftSchema as any).isOneOff,
+                type: (t.draftSchema as any).type,
               })
         };
       }
@@ -91,6 +94,9 @@ export const getTemplateById = async (req: Request, res: Response): Promise<void
               formSchema: (template.draftSchema as any).formSchema,
               requiresApproval: (template.draftSchema as any).requiresApproval,
               allowsFindings: (template.draftSchema as any).allowsFindings,
+              estimatedHours: (template.draftSchema as any).estimatedHours,
+              isOneOff: (template.draftSchema as any).isOneOff,
+              type: (template.draftSchema as any).type,
             })
       };
     }
@@ -105,7 +111,7 @@ export const getTemplateById = async (req: Request, res: Response): Promise<void
 // ─── POST /api/templates ─────────────────────────────────────────────
 export const createTemplate = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { title, description, formSchema, status, requiresApproval, allowsFindings, divisionId } = req.body;
+    const { title, description, formSchema, status, requiresApproval, allowsFindings, divisionId, estimatedHours, isOneOff, type } = req.body;
     const userId = req.user!.userId;
 
     if (!title || !formSchema) {
@@ -147,6 +153,9 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
           status: status || 'Draft',
           requiresApproval: requiresApproval || false,
           allowsFindings: allowsFindings !== undefined ? allowsFindings : true,
+          estimatedHours: estimatedHours || null,
+          isOneOff: isOneOff || false,
+          type: type || null,
           revision: 1,
           divisionId: targetDivisionId,
           revisedByUserId: userId,
@@ -173,7 +182,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
     const userRole = req.user!.role;
-    const { title, description, formSchema, requiresApproval, allowsFindings } = req.body;
+    const { title, description, formSchema, requiresApproval, allowsFindings, estimatedHours, isOneOff, type } = req.body;
 
     const existingTemplate = await prisma.template.findUnique({ where: { id } });
 
@@ -200,6 +209,9 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
         formSchema,
         requiresApproval: requiresApproval !== undefined ? requiresApproval : existingTemplate.requiresApproval,
         allowsFindings: allowsFindings !== undefined ? allowsFindings : existingTemplate.allowsFindings,
+        estimatedHours: estimatedHours !== undefined ? estimatedHours : existingTemplate.estimatedHours,
+        isOneOff: isOneOff !== undefined ? isOneOff : existingTemplate.isOneOff,
+        type: type !== undefined ? type : existingTemplate.type,
       };
     } else {
       dataToUpdate.title = title;
@@ -207,6 +219,9 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
       dataToUpdate.formSchema = formSchema;
       dataToUpdate.requiresApproval = requiresApproval !== undefined ? requiresApproval : existingTemplate.requiresApproval;
       dataToUpdate.allowsFindings = allowsFindings !== undefined ? allowsFindings : existingTemplate.allowsFindings;
+      if (estimatedHours !== undefined) dataToUpdate.estimatedHours = estimatedHours;
+      if (isOneOff !== undefined) dataToUpdate.isOneOff = isOneOff;
+      if (type !== undefined) dataToUpdate.type = type;
     }
 
     const updatedTemplate = await prisma.template.update({
@@ -236,6 +251,9 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
               formSchema: (updatedTemplate.draftSchema as any).formSchema,
               requiresApproval: (updatedTemplate.draftSchema as any).requiresApproval,
               allowsFindings: (updatedTemplate.draftSchema as any).allowsFindings,
+              estimatedHours: (updatedTemplate.draftSchema as any).estimatedHours,
+              isOneOff: (updatedTemplate.draftSchema as any).isOneOff,
+              type: (updatedTemplate.draftSchema as any).type,
             })
       };
     }
@@ -299,6 +317,9 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
           dataToPublish.formSchema = draft.formSchema;
           dataToPublish.requiresApproval = draft.requiresApproval;
           dataToPublish.allowsFindings = draft.allowsFindings;
+          if (draft.estimatedHours !== undefined) dataToPublish.estimatedHours = draft.estimatedHours;
+          if (draft.isOneOff !== undefined) dataToPublish.isOneOff = draft.isOneOff;
+          if (draft.type !== undefined) dataToPublish.type = draft.type;
         }
       } else {
         dataToPublish.formSchema = template.formSchema;
@@ -420,6 +441,36 @@ export const deleteTemplate = async (req: Request, res: Response): Promise<void>
     res.json({ message: 'Template deleted successfully' });
   } catch (error) {
     console.error('Error deleting template:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PATCH /api/templates/:id/archive ────────────────────────────────
+export const archiveTemplate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const userId = req.user!.userId;
+    const userRole = req.user!.role;
+
+    const template = await prisma.template.findUnique({ where: { id } });
+    if (!template) {
+      res.status(404).json({ message: 'Template not found' });
+      return;
+    }
+
+    if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
+      res.status(403).json({ message: 'Only the template owner can archive this template.' });
+      return;
+    }
+
+    await prisma.template.update({
+      where: { id },
+      data: { status: 'Archived' }
+    });
+
+    res.json({ message: 'Template archived successfully' });
+  } catch (error) {
+    console.error('Error archiving template:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

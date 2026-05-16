@@ -6,7 +6,8 @@ import {
   updateTemplate,
   publishTemplate,
   transferOwnership,
-  deleteTemplate
+  deleteTemplate,
+  archiveTemplate
 } from '../controllers/template.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { authorizeRoles } from '../middleware/rbac.middleware';
@@ -24,6 +25,9 @@ router.delete('/:id', authenticateJWT, authorizeRoles('Admin', 'Director', 'Mana
 
 // Publish (archive + revision bump)
 router.post('/:id/publish', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), publishTemplate);
+
+// Archive
+router.patch('/:id/archive', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), archiveTemplate);
 
 // Ownership transfer
 router.post('/:id/transfer', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), transferOwnership);
