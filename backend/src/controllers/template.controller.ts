@@ -191,6 +191,11 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    if (existingTemplate.status === 'Archived') {
+      res.status(403).json({ message: 'Cannot edit an archived template.' });
+      return;
+    }
+
     // Check ownership
     if (existingTemplate.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
       res.status(403).json({ message: 'Only the template owner can modify this template.' });
@@ -276,6 +281,10 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
       const template = await tx.template.findUnique({ where: { id } });
       if (!template) throw new Error('Template not found');
 
+      if (template.status === 'Archived') {
+        throw new Error('Cannot publish an archived template.');
+      }
+
       // Check ownership
       if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
         throw new Error('Only the template owner can publish this template.');
@@ -357,6 +366,10 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
     }
     if (error.message === 'Cannot publish a template with an empty formSchema') {
       res.status(400).json({ message: error.message });
+      return;
+    }
+    if (error.message === 'Cannot publish an archived template.') {
+      res.status(403).json({ message: error.message });
       return;
     }
     console.error('Error publishing template:', error);
@@ -471,6 +484,41 @@ export const archiveTemplate = async (req: Request, res: Response): Promise<void
     res.json({ message: 'Template archived successfully' });
   } catch (error) {
     console.error('Error archiving template:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PATCH /api/templates/:id/unarchive ──────────────────────────────
+export const unarchiveTemplate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const userId = req.user!.userId;
+    const userRole = req.user!.role;
+
+    const template = await prisma.template.findUnique({ where: { id } });
+    if (!template) {
+      res.status(404).json({ message: 'Template not found' });
+      return;
+    }
+
+    if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
+      res.status(403).json({ message: 'Only the template owner can unarchive this template.' });
+      return;
+    }
+
+    if (template.status !== 'Archived') {
+      res.status(400).json({ message: 'Template is not archived.' });
+      return;
+    }
+
+    await prisma.template.update({
+      where: { id },
+      data: { status: 'Draft' }
+    });
+
+    res.json({ message: 'Template unarchived successfully and moved to Draft.' });
+  } catch (error) {
+    console.error('Error unarchiving template:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

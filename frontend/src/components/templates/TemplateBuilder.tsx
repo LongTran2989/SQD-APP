@@ -182,19 +182,23 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
               Discard Changes
             </button>
           )}
-          <button 
-            onClick={() => handleSave('Draft')}
-            className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors"
-          >
-            Save as Draft
-          </button>
-          <button 
-            onClick={() => handleSave('Published')}
-            disabled={fields.length === 0}
-            className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
-          >
-            Publish
-          </button>
+          {initialData?.status !== 'Archived' && (
+            <>
+              <button 
+                onClick={() => handleSave('Draft')}
+                className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors"
+              >
+                Save as Draft
+              </button>
+              <button 
+                onClick={() => handleSave('Published')}
+                disabled={fields.length === 0}
+                className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
+              >
+                Publish
+              </button>
+            </>
+          )}
         </div>
       </div>
 

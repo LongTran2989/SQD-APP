@@ -7,7 +7,8 @@ import {
   publishTemplate,
   transferOwnership,
   deleteTemplate,
-  archiveTemplate
+  archiveTemplate,
+  unarchiveTemplate
 } from '../controllers/template.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { authorizeRoles } from '../middleware/rbac.middleware';
@@ -28,6 +29,9 @@ router.post('/:id/publish', authenticateJWT, authorizeRoles('Admin', 'Director',
 
 // Archive
 router.patch('/:id/archive', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), archiveTemplate);
+
+// Unarchive
+router.patch('/:id/unarchive', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), unarchiveTemplate);
 
 // Ownership transfer
 router.post('/:id/transfer', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), transferOwnership);

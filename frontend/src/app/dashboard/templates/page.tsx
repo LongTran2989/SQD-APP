@@ -16,7 +16,8 @@ import {
   Filter,
   Eye,
   Edit,
-  Trash2
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 
 const statusConfig = {
@@ -55,6 +56,17 @@ export default function TemplateListPage() {
       fetchTemplates();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to archive template');
+    }
+  };
+
+  const handleUnarchive = async (id: number) => {
+    if (!window.confirm('Are you sure you want to unarchive this template? It will be restored as a Draft.')) return;
+    try {
+      await apiClient.patch(`/templates/${id}/unarchive`);
+      toast.success('Template unarchived successfully');
+      fetchTemplates();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to unarchive template');
     }
   };
 
@@ -204,13 +216,15 @@ export default function TemplateListPage() {
                           </Link>
                           {hasPrivilege && (
                             <>
-                              <Link
-                                href={`/dashboard/templates/${template.id}/edit`}
-                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
-                                title="Edit"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </Link>
+                              {template.status !== 'Archived' && (
+                                <Link
+                                  href={`/dashboard/templates/${template.id}/edit`}
+                                  className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                                  title="Edit"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Link>
+                              )}
                               {template.status !== 'Archived' && (
                                 <button
                                   onClick={() => handleArchive(template.id)}
@@ -218,6 +232,15 @@ export default function TemplateListPage() {
                                   title="Archive"
                                 >
                                   <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                              {template.status === 'Archived' && (
+                                <button
+                                  onClick={() => handleUnarchive(template.id)}
+                                  className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                                  title="Unarchive"
+                                >
+                                  <RotateCcw className="w-4 h-4" />
                                 </button>
                               )}
                             </>

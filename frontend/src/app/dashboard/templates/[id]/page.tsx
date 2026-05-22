@@ -11,7 +11,7 @@ import RevisionHistoryPanel from '../../../../components/templates/RevisionHisto
 import TransferOwnershipModal from '../../../../components/templates/TransferOwnershipModal';
 import { 
   ArrowLeft, Edit, Copy, CheckCircle2, Clock, Archive, 
-  Settings, User, ChevronRight, History, Trash2, Repeat
+  Settings, User, ChevronRight, History, Trash2, Repeat, RotateCcw
 } from 'lucide-react';
 
 const statusConfig = {
@@ -66,6 +66,17 @@ export default function TemplateDetailPage({ params }: { params: Promise<{ id: s
       fetchTemplate();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to archive template');
+    }
+  };
+
+  const handleUnarchive = async () => {
+    if (!window.confirm('Are you sure you want to unarchive this template? It will be restored as a Draft.')) return;
+    try {
+      await apiClient.patch(`/templates/${templateId}/unarchive`);
+      toast.success('Template unarchived successfully');
+      fetchTemplate();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to unarchive template');
     }
   };
 
@@ -150,7 +161,7 @@ export default function TemplateDetailPage({ params }: { params: Promise<{ id: s
               <History className="w-4 h-4 text-slate-400" />
               History
             </button>
-            {isOwnerOrPrivileged && template.status !== 'Archived' && (
+            {isOwnerOrPrivileged && (
               <>
                 <button
                   onClick={() => setShowTransfer(true)}
@@ -159,20 +170,34 @@ export default function TemplateDetailPage({ params }: { params: Promise<{ id: s
                 >
                   <Repeat className="w-4 h-4" />
                 </button>
-                <Link
-                  href={`/dashboard/templates/${template.id}/edit`}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all"
-                >
-                  <Edit className="w-4 h-4" />
-                  Edit Template
-                </Link>
-                <button
-                  onClick={handleArchive}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-200 font-semibold rounded-xl shadow-sm transition-all"
-                  title="Archive"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {template.status !== 'Archived' && (
+                  <>
+                    <Link
+                      href={`/dashboard/templates/${template.id}/edit`}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all"
+                    >
+                      <Edit className="w-4 h-4" />
+                      Edit Template
+                    </Link>
+                    <button
+                      onClick={handleArchive}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-200 font-semibold rounded-xl shadow-sm transition-all"
+                      title="Archive"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+                {template.status === 'Archived' && (
+                  <button
+                    onClick={handleUnarchive}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-green-600 hover:bg-green-50 hover:border-green-200 font-semibold rounded-xl shadow-sm transition-all"
+                    title="Unarchive"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Unarchive
+                  </button>
+                )}
               </>
             )}
           </div>
