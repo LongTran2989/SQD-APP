@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import crypto from 'crypto';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -35,11 +36,19 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const sessionId = crypto.randomUUID();
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: { activeSessionId: sessionId }
+    });
+
     const payload = {
       userId: user.id,
       role: user.role.name,
       divisionId: user.divisionId,
-      forcePasswordChange: user.forcePasswordChange
+      forcePasswordChange: user.forcePasswordChange,
+      sessionId
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', {
@@ -124,11 +133,14 @@ export const updatePassword = async (req: Request, res: Response): Promise<void>
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
+    const sessionId = crypto.randomUUID();
+
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: {
         passwordHash,
-        forcePasswordChange: false
+        forcePasswordChange: false,
+        activeSessionId: sessionId
       },
       include: { role: true }
     });
@@ -137,7 +149,8 @@ export const updatePassword = async (req: Request, res: Response): Promise<void>
       userId: updatedUser.id,
       role: updatedUser.role.name,
       divisionId: updatedUser.divisionId,
-      forcePasswordChange: updatedUser.forcePasswordChange
+      forcePasswordChange: updatedUser.forcePasswordChange,
+      sessionId
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', {

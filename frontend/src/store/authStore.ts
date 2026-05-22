@@ -20,7 +20,15 @@ export const useAuthStore = create<AuthState>()(
       logout: () => set({ user: null, token: null, isAuthenticated: false }),
     }),
     {
-      name: 'auth-storage', // key in localStorage
+      name: 'auth-storage', // key in sessionStorage
+      storage: {
+        getItem: (name) => {
+          const str = sessionStorage.getItem(name);
+          return str ? JSON.parse(str) : null;
+        },
+        setItem: (name, value) => sessionStorage.setItem(name, JSON.stringify(value)),
+        removeItem: (name) => sessionStorage.removeItem(name),
+      },
     }
   )
 );

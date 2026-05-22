@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -11,9 +12,9 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use(
   (config) => {
-    // In browser context, get token from localStorage
+    // In browser context, get token from sessionStorage
     if (typeof window !== 'undefined') {
-      const authStorage = localStorage.getItem('auth-storage');
+      const authStorage = sessionStorage.getItem('auth-storage');
       if (authStorage) {
         try {
           const { state } = JSON.parse(authStorage);
@@ -36,7 +37,10 @@ apiClient.interceptors.response.use(
     // Optionally handle 401s globally (e.g. redirect to login)
     if (error.response?.status === 401) {
       if (typeof window !== 'undefined') {
-        // use Zustand authStore.getState().logout() or similar if we strictly separate it
+        useAuthStore.getState().logout();
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
       }
     }
     return Promise.reject(error);

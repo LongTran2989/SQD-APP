@@ -51,6 +51,8 @@ model User {
   forcePasswordChange Boolean   @default(true)
   resetPasswordToken  String?
   resetPasswordExpires DateTime?
+  activeSessionId    String?    // UUID tracking the latest active login session
+  
   
   divisionId         Int
   division           Division   @relation(fields: [divisionId], references: [id])
@@ -259,3 +261,15 @@ model AuditLog {
   
   timestamp          DateTime   @default(now())
 }
+
+// -----------------------------------------------------------------------
+// System Configuration
+// -----------------------------------------------------------------------
+
+model SystemSetting {
+  key         String   @id // e.g. ENFORCE_SINGLE_SESSION
+  value       String   // e.g. "true", "false", JSON payload
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
