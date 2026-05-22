@@ -8,6 +8,11 @@ const prisma = new PrismaClient({ adapter });
 
 beforeAll(async () => {
   // Any global setup
+  await prisma.systemSetting.upsert({
+    where: { key: 'ENFORCE_SINGLE_SESSION' },
+    update: { value: 'false' },
+    create: { key: 'ENFORCE_SINGLE_SESSION', value: 'false' }
+  });
 });
 
 afterAll(async () => {

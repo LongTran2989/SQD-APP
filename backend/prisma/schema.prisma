@@ -29,6 +29,7 @@ model Division {
   templates      Template[] @relation("TemplateDivision")
   targetedTasks  Task[]     @relation("TaskTargetDivision")
   targetedFinds  Finding[]  @relation("FindingTargetDivision")
+  workPackages   WorkPackage[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 }
@@ -71,6 +72,12 @@ model User {
   aircraftAuths      UserAircraftAuthorization[]
   jobAuths           UserJobAuthorization[]
   
+  issuedTasks        Task[]     @relation("TaskIssuer")
+  closedFindings     Finding[]  @relation("FindingClosedBy")
+  workPackageAssignments WorkPackageAssignment[]
+  createdWorkPackages WorkPackage[] @relation("WorkPackageCreator")
+  
+  deletedAt          DateTime?
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
 }
@@ -183,13 +190,29 @@ model TemplateRevisionArchive {
 
 model Task {
   id                 Int        @id @default(autoincrement())
+  taskId             String     @unique // e.g. QA-000001
   templateId         Int
   template           Template   @relation(fields: [templateId], references: [id])
   
-  status             String     @default("Assigned") // Assigned, InProgress, Review, Approved, Rejected
+  status             String     @default("Unassigned") // Assigned, InProgress, Review, Approved, Rejected, etc.
+  
+  issuerId           Int
+  issuer             User       @relation("TaskIssuer", fields: [issuerId], references: [id])
   
   assignedToUserId   Int?
   assignedToUser     User?      @relation("TaskAssignedTo", fields: [assignedToUserId], references: [id])
+  
+  wpId               Int?
+  wp                 WorkPackage? @relation(fields: [wpId], references: [id])
+  
+  deadline           DateTime?
+  deadlineExtensions Json?
+  inactivationLog    Json?
+  rejectionReason    String?
+  rating             Int?
+  estimatedHours     Float?
+  assignmentType     String     @default("INDIVIDUAL")
+  schemaSnapshot     Json
   
   // The division being audited/surveilled
   targetDivisionId   Int?
@@ -201,7 +224,10 @@ model Task {
   
   taskData           TaskData?
   sourceFindings     Finding[]  @relation("FindingSourceTask")
+  activities         TaskActivity[]
+  timeBooking        TimeBooking?
   
+  deletedAt          DateTime?
   createdAt          DateTime   @default(now())
   completedAt        DateTime?
   updatedAt          DateTime   @updatedAt
@@ -223,10 +249,21 @@ model TaskData {
 
 model Finding {
   id                 Int        @id @default(autoincrement())
-  severity           String     // Low, Medium, High, Critical
+  severity           String?    // Observation, Level 1, Level 2
   category           String     // Safety, Documentation, Tools, etc.
   description        String
-  status             String     @default("Open") // Open, Closed
+  status             String     @default("Open") // Open, In Progress, Pending Verification, Closed
+  
+  fieldId            String?
+  dueDate            DateTime?
+  eventType          String
+  aircraftRegistration String?
+  regulatoryReference String?
+  errorCode          String?
+  rootCause          String?
+  correctiveAction   String?
+  recurrence         Boolean?
+  violatorIds        Json?
   
   sourceTaskId       Int?
   sourceTask         Task?      @relation("FindingSourceTask", fields: [sourceTaskId], references: [id])
@@ -234,11 +271,15 @@ model Finding {
   reportedByUserId   Int
   reportedByUser     User       @relation("FindingReportedBy", fields: [reportedByUserId], references: [id])
   
+  closedByUserId     Int?
+  closedByUser       User?      @relation("FindingClosedBy", fields: [closedByUserId], references: [id])
+  
   targetDivisionId   Int?
   targetDivision     Division?  @relation("FindingTargetDivision", fields: [targetDivisionId], references: [id])
   
   followUpTasks      Task[]     @relation("FindingFollowUpTask")
   
+  deletedAt          DateTime?
   createdAt          DateTime   @default(now())
   closedAt           DateTime?
   updatedAt          DateTime   @updatedAt
@@ -251,8 +292,8 @@ model Finding {
 model AuditLog {
   id                 Int        @id @default(autoincrement())
   actionType         String     // TASK_REASSIGNED, TASK_REJECTED, FINDING_RAISED, etc.
-  entityType         String     // Task, Finding
-  entityId           Int        
+  entityType         String     // Task, Finding, WorkPackage, etc.
+  entityId           String     
   
   performedByUserId  Int
   
@@ -271,5 +312,105 @@ model SystemSetting {
   value       String   // e.g. "true", "false", JSON payload
   description String?
   updatedAt   DateTime @updatedAt
+}
+
+// -----------------------------------------------------------------------
+// Work Packages
+// -----------------------------------------------------------------------
+
+model WorkPackage {
+  id               Int        @id @default(autoincrement())
+  wpId             String     @unique // e.g. QA-WP-000001
+  name             String
+  type             String     // CHECK, AUDIT, etc. Reference to WpType implicitly or by string
+  
+  divisionId       Int
+  division         Division   @relation(fields: [divisionId], references: [id])
+  
+  timeframeFrom    DateTime
+  timeframeTo      DateTime
+  
+  creatorId        Int
+  creator          User       @relation("WorkPackageCreator", fields: [creatorId], references: [id])
+  
+  checkTemplateId  Int?       // ID of Template to auto-generate daily CHECK tasks
+  
+  status           String     @default("Open") // Open, In Progress, Overdue, Closed, Inactive
+  inactivationLog  Json?
+  
+  assignments      WorkPackageAssignment[]
+  tasks            Task[]
+  
+  deletedAt        DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+}
+
+model WorkPackageAssignment {
+  id             Int          @id @default(autoincrement())
+  wpId           Int
+  wp             WorkPackage  @relation(fields: [wpId], references: [id], onDelete: Cascade)
+  userId         Int
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([wpId, userId])
+}
+
+model WpType {
+  id             Int        @id @default(autoincrement())
+  code           String     @unique
+  description    String?
+  createdAt      DateTime   @default(now())
+}
+
+// -----------------------------------------------------------------------
+// Task Additions (Activity & Time)
+// -----------------------------------------------------------------------
+
+model TaskActivity {
+  id          Int      @id @default(autoincrement())
+  taskId      Int
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId    Int?
+  type        String   // SYSTEM_EVENT or COMMENT
+  content     String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+}
+
+model TimeBooking {
+  id             Int      @id @default(autoincrement())
+  taskId         Int      @unique
+  task           Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  assigneeEntry  Json
+  collaborators  Json
+  totalHours     Float
+  estimatedHours Float?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// -----------------------------------------------------------------------
+// Privileges & Attachments
+// -----------------------------------------------------------------------
+
+model PrivilegeConfig {
+  id          Int      @id @default(autoincrement())
+  roleId      Int      @unique
+  permissions Json     // Granular permissions map
+  updatedAt   DateTime @updatedAt
+}
+
+model Attachment {
+  id          Int      @id @default(autoincrement())
+  fileName    String
+  fileType    String
+  fileSize    Int
+  storageKey  String   @unique
+  entityType  String
+  entityId    String
+  uploadedById Int
+  createdAt   DateTime @default(now())
 }
 
