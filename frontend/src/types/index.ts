@@ -16,6 +16,18 @@ export interface AuthResponse {
   user: User;
 }
 
+// ── Task status — exactly the 10 DB statuses (isOverdue is a separate boolean)
+export type TaskStatus =
+  | 'Unassigned'
+  | 'Assigned'
+  | 'In Progress'
+  | 'In Review'
+  | 'Follow-up Required'
+  | 'Closed'
+  | 'Rejected'
+  | 'Terminated'
+  | 'Inactive';
+
 export type FormFieldType = 
   | 'text' 
   | 'textarea' 
@@ -24,7 +36,8 @@ export type FormFieldType =
   | 'radio' 
   | 'checkbox_group' 
   | 'checkbox_single' 
-  | 'date';
+  | 'date'
+  | 'file_upload';
 
 export interface FormField {
   fieldId: string;
@@ -66,27 +79,48 @@ export interface Template {
   publishedAt: string | null;
 }
 
+export interface DeadlineExtension {
+  requestedBy: number;
+  reason: string;
+  requestedAt: string;
+  decision?: 'approved' | 'denied';
+  decidedAt?: string;
+  newDeadline?: string;
+}
+
 export interface Task {
   id: number;
   taskId: string;
   templateId: number;
-  status: 'Unassigned' | 'Assigned' | 'In Progress' | 'Overdue' | 'In Review' | 'Follow-up Required' | 'Closed' | 'Rejected' | 'Terminated' | 'Inactive';
+  status: TaskStatus;
   issuerId: number;
   assignedToUserId: number | null;
   wpId: number | null;
   deadline: string | null;
-  deadlineExtensions: any | null;
-  inactivationLog: any | null;
+  deadlineExtensions: DeadlineExtension[] | null;
+  inactivationLog: { reason: string; inactivatedBy: number; inactivatedAt: string } | null;
   rejectionReason: string | null;
   rating: number | null;
   estimatedHours: number | null;
   assignmentType: string;
-  schemaSnapshot: any;
+  schemaSnapshot: FormField[];
   targetDivisionId: number | null;
   parentFindingId: number | null;
   createdAt: string;
   completedAt: string | null;
   updatedAt: string;
+}
+
+// Enriched Task — returned by GET /api/tasks/:id and list endpoints
+// Includes nested joined objects from taskInclude() + computed isOverdue
+export interface TaskEnriched extends Task {
+  isOverdue: boolean;
+  template: { id: number; templateId: string; title: string } | null;
+  issuer: { id: number; name: string } | null;
+  assignedToUser: { id: number; name: string; role?: string } | null;
+  targetDivision: { id: number; name: string; code: string } | null;
+  wp: { id: number; wpId: string; name: string } | null;
+  taskData?: { data: Record<string, unknown> } | null;
 }
 
 export interface WorkPackage {
@@ -111,8 +145,13 @@ export interface TaskActivity {
   authorId: number | null;
   type: 'SYSTEM_EVENT' | 'COMMENT';
   content: string;
-  metadata: any | null;
+  metadata: Record<string, unknown> | null;
   createdAt: string;
+}
+
+// Enriched — server-side joined author name
+export interface TaskActivityEnriched extends TaskActivity {
+  author: { id: number; name: string | null } | null;
 }
 
 export interface TimeBooking {

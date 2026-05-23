@@ -345,7 +345,7 @@ These are two separate systems that serve different purposes. **Both** are writt
 | `deadlineExtensions` | Json? | **ADD** — array of `{ requestedBy, reason, requestedAt, decision, decidedAt }` |
 | `inactivationLog` | Json? | **ADD** — `{ reason, inactivatedBy, inactivatedAt }` |
 | `rejectionReason` | String? | **ADD** — formal field, not just AuditLog |
-| `rating` | Int? | **ADD** — 0–3; Director rates Manager tasks; Manager rates same-Division user tasks |
+| `rating` | Int? | **ADD** — 0–5; Director rates Manager tasks; Manager rates same-Division user tasks |
 | `estimatedHours` | Float? | **ADD** — inherited from Template at Task creation |
 | `assignmentType` | String | **ADD** — `INDIVIDUAL` default; `GROUP`/`SCHEDULE` future |
 | `schemaSnapshot` | Json | **ADD** — immutable copy of `formSchema` at the moment of Task creation. This is the form definition used to render the Task, independent of the source Template. Required to support One-off Templates and Template edits without breaking in-flight Tasks |
@@ -389,7 +389,7 @@ These are two separate systems that serve different purposes. **Both** are writt
 | Review / Approve / Reject / Follow-up | Issuer + Director + Managers of same Division |
 | Transfer issuer rights | Issuer only |
 | Inactivate Task | Issuer + Admin |
-| Rate Task (0–3) | **Director**: can rate Tasks where assignee is a Manager. **Manager**: can rate Tasks where assignee is a user in same Division. First-come-first-served if both act simultaneously. Rating is revisable but each revision is logged to `TaskActivity` |
+| Rate Task (0–5) | **Director**: can rate Tasks where assignee is a Manager. **Manager**: can rate Tasks where assignee is a user in same Division. First-come-first-served if both act simultaneously. Rating is revisable but each revision is logged to `TaskActivity` |
 | Post-rejection: Terminate or Reassign | Issuer + Director + Managers of same Division |
 
 > **CRITICAL — Reassignment rule:** A Task can be reassigned to a different user by the Issuer, Director, or Manager of same Division at any **non-final** stage. A reason is always required. All `TaskData` already entered by the previous assignee is fully preserved and visible to the new assignee. Reassignment is **blocked** on final states: `Closed`, `Terminated`, `Rejected`. For work that needs redoing after closure, the correct approach is to either create a new Task from the same Template, or raise a Finding on the closed Task which then generates a corrective follow-up Task.
@@ -634,7 +634,7 @@ All changes needed before Phase 5 development begins:
 | `Task` | ADD field | `deadlineExtensions Json?` |
 | `Task` | ADD field | `inactivationLog Json?` |
 | `Task` | ADD field | `rejectionReason String?` |
-| `Task` | ADD field | `rating Int?` — score 0–3; Director rates Manager tasks; Manager rates same-Division user tasks |
+| `Task` | ADD field | `rating Int?` — score 0–5; Director rates Manager tasks; Manager rates same-Division user tasks |
 | `Task` | ADD field | `estimatedHours Float?` |
 | `Task` | ADD field | `assignmentType String @default("INDIVIDUAL")` |
 | `Task` | EXPAND | `status` values to full 10-status set |
@@ -819,7 +819,7 @@ All changes needed before Phase 5 development begins:
 4. Write or update tests before or alongside new features — test DB only
 5. All status changes must auto-log a `SYSTEM_EVENT` to `TaskActivity` (once that model exists)
 6. RBAC: reviewer actions on Tasks = Issuer + Director + Managers of same Division (not Issuer alone)
-7. Rating: Director rates Manager assignees; Manager rates same-Division assignees. Score 0–3. Revisable with audit log entry.
+7. Rating: Director rates Manager assignees; Manager rates same-Division assignees. Score 0–5. Revisable with audit log entry.
 8. Reassignment: permitted at any non-final stage with mandatory reason. Blocked on `Closed`, `Terminated`, `Rejected`. All TaskData always preserved.
 9. Every significant event must be written to BOTH `AuditLog` (system-wide compliance) AND `TaskActivity` (per-Task feed) — see Section 3.5.
 10. Task always stores `schemaSnapshot` at creation time — never rely on Template's `formSchema` to render a Task form.
