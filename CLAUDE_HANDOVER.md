@@ -46,9 +46,14 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5.1 audit fixes** (found during review, resolved before 5.2):
     - `template.controller.ts` — `prisma.task.count()` was missing `deletedAt: null` filter (soft-deleted tasks would incorrectly block template deletion)
     - `user.controller.ts` — `updateUserRole` was missing a soft-delete guard; now returns 404 if user is soft-deleted before attempting the update
+- **Phase 5.2 & 5.3** — Task & Activity Feed Backend (COMPLETED 2026-05-23)
+  - `task.routes.ts` + `task.controller.ts` — full CRUD, assignment, submission, review, re-rating, and inactivation status machine
+  - Strict TypeScript null checks resolved (`Prisma.DbNull` applied to JSON columns)
+  - Activity feed (`GET /api/tasks/:id/activity`) and comments (`POST /api/tasks/:id/activity`) implemented
+  - Work Package RBAC exceptions implemented (Staff/Group Leader can create and assign tasks within their assigned WPs, scoped to their division)
 
 ### Test Suite
-- All **51 integration tests passing** as of 2026-05-23
+- All **129 integration tests passing** as of 2026-05-23
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
