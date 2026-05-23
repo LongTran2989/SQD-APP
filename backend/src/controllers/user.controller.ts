@@ -17,6 +17,15 @@ export const updateUserRole = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Guard: ensure the target user exists and is not soft-deleted
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId, deletedAt: null }
+    });
+    if (!targetUser) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
     const role = await prisma.role.findUnique({ where: { name: roleName } });
     if (!role) {
       res.status(400).json({ message: 'Invalid role provided' });

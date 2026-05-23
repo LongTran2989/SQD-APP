@@ -440,7 +440,7 @@ export const deleteTemplate = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const tasksCount = await prisma.task.count({ where: { templateId: id } });
+    const tasksCount = await prisma.task.count({ where: { templateId: id, deletedAt: null } });
     if (tasksCount > 0) {
       await prisma.template.update({
         where: { id },

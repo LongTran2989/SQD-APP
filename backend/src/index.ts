@@ -12,6 +12,7 @@ import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
 import templateRoutes from './routes/template.routes';
 import datasourceRoutes from './routes/datasource.routes';
+import wpRoutes from './routes/wp.routes';
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/datasources', datasourceRoutes);
+app.use('/api/work-packages', wpRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {

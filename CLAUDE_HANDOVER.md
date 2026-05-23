@@ -36,9 +36,19 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - Frontend `types/index.ts` updated with `Task`, `WorkPackage`, `TaskActivity`, `TimeBooking`, `Attachment`, `Finding` interfaces
   - Baseline migration SQL generated at `prisma/migrations/0_init/migration.sql`
   - All soft-delete filters applied across existing controllers and auth middleware
+- **Phase 5.1** — Work Package Backend (COMPLETED 2026-05-23)
+  - `wp.routes.ts` + `wp.controller.ts` — full CRUD for WorkPackage
+  - `WpType` management endpoints (Admin only)
+  - WP user assignment/removal endpoints (Manager / Director; cross-division enforced)
+  - WP status computed on-the-fly: `Open` / `In Progress` / `Overdue` / `Closed` / `Inactive`
+  - CHECK type on-demand Task auto-generation via `wpCheckService.ts` (reusable service, dedup guard)
+  - `wp.routes.ts` registered in `backend/src/index.ts`
+  - **Phase 5.1 audit fixes** (found during review, resolved before 5.2):
+    - `template.controller.ts` — `prisma.task.count()` was missing `deletedAt: null` filter (soft-deleted tasks would incorrectly block template deletion)
+    - `user.controller.ts` — `updateUserRole` was missing a soft-delete guard; now returns 404 if user is soft-deleted before attempting the update
 
 ### Test Suite
-- All **25 integration tests passing** as of 2026-05-23
+- All **51 integration tests passing** as of 2026-05-23
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -682,13 +692,15 @@ All changes needed before Phase 5 development begins:
 - [ ] Build reusable upload middleware: enforce MIME types, file size limits (configurable)
 - [ ] Build `GET /api/attachments/:id/url` — generate presigned download URL
 
-#### Phase 5.1 — Work Package Backend
-- [ ] `wp.routes.ts` + `wp.controller.ts`
-- [ ] CRUD for WorkPackage
-- [ ] `WpType` management endpoints (Admin only)
-- [ ] WP user assignment endpoints (Manager only)
-- [ ] WP status computed logic (Open / In Progress / Overdue / Closed / Inactive)
-- [ ] CHECK type daily Task auto-generation (cron job or scheduler)
+#### Phase 5.1 — Work Package Backend (COMPLETED 2026-05-23)
+- [x] `wp.routes.ts` + `wp.controller.ts`
+- [x] CRUD for WorkPackage
+- [x] `WpType` management endpoints (Admin only)
+- [x] WP user assignment endpoints (Manager / Director, cross-division rules enforced)
+- [x] WP status computed logic (Open / In Progress / Overdue / Closed / Inactive) — on-the-fly, no DB writes
+- [x] CHECK type on-demand Task auto-generation via `backend/src/services/wpCheckService.ts`
+- [x] Audit fix: `template.controller.ts` task.count missing `deletedAt: null`
+- [x] Audit fix: `user.controller.ts` updateUserRole missing soft-delete guard
 
 #### Phase 5.2 — Task Backend
 - [ ] `task.routes.ts` + `task.controller.ts`
@@ -770,7 +782,7 @@ All changes needed before Phase 5 development begins:
 2. **Hydration mismatch**: Minor React warning on `/login` from browser extensions. Non-critical.
 3. **No `/revisions` route**: `GET /api/templates/:id` returns nested `revisionArchives`. Do not create a separate `/revisions` endpoint — use nested data.
 4. **Checkbox icon bug**: In Template Builder preview, checkmark icon sometimes fails to render on toggle. Known visual glitch, not yet fixed.
-5. **`AuditLog.entityId` is `Int`**: Do not change this until soft deletes are implemented — changing it is a breaking migration. Plan to migrate to `String` in Phase 5.0.
+5. ~~**`AuditLog.entityId` is `Int`**~~ — **RESOLVED in Phase 5.0**: successfully migrated to `String` via `prisma db push`. No further action needed.
 6. **Prisma generation**: Always run `npx prisma generate` in `/backend` after schema changes.
 7. **Port conflict**: Backend must stay on `:5000`. Frontend on `:3000`.
 8. **CORS**: `app.use(cors())` allows all origins — local dev only. Restrict before any deployment.
