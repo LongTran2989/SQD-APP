@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-05-15 (rev 2). Supersedes all previous versions.*
+*Last updated: 2026-05-23 (rev 3). Supersedes all previous versions.*
 
 ---
 
@@ -26,11 +26,22 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - Draft Encapsulation implemented (`draftSchema`)
   - Ownership model implemented
   - Frontend visual Form Builder complete with revision history and archive actions
+- **Phase 5.0** — Database Schema Migration + Infrastructure (COMPLETED 2026-05-23)
+  - All schema additions from Section 6 applied via `prisma db push` (dev + test DBs)
+  - New models: `WorkPackage`, `WorkPackageAssignment`, `TaskActivity`, `TimeBooking`, `WpType`, `PrivilegeConfig`, `Attachment`
+  - `Task` model expanded with `taskId`, `issuerId`, `wpId`, `schemaSnapshot`, `rating`, `deadline`, and full 10-status set
+  - `AuditLog.entityId` migrated from `Int` → `String`
+  - Soft delete (`deletedAt`) added to `User`, `Task`, `Finding`, `WorkPackage`
+  - `Finding` expanded with Stage 2 analytical fields
+  - Frontend `types/index.ts` updated with `Task`, `WorkPackage`, `TaskActivity`, `TimeBooking`, `Attachment`, `Finding` interfaces
+  - Baseline migration SQL generated at `prisma/migrations/0_init/migration.sql`
+  - All soft-delete filters applied across existing controllers and auth middleware
 
 ### Test Suite
-- All **25 integration tests passing** as of 2026-05-13
+- All **25 integration tests passing** as of 2026-05-23
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
+- Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
 
 ---
 
@@ -77,6 +88,55 @@ A dedicated Admin-only panel under `/settings/privileges`. Allows granular, syst
 - Which roles can manage WpType values
 
 **Implementation note:** Build a `PrivilegeConfig` model in Phase 7. For Phases 5–6, hardcode the default rules in middleware but structure the code so the middleware reads from a config object — making it straightforward to wire up the DB-driven config in Phase 7 without rewriting business logic.
+
+### 3.4a PrivilegeConfig Model (Phase 7)
+
+The `PrivilegeConfig` model was added to the database schema in Phase 5.0 as a placeholder table. It will be populated and activated in Phase 7.
+
+**What it is:** A database table that stores a JSON permissions map for each Role. Rather than hardcoding rules like "only Managers can assign Tasks" directly in middleware logic, the `PrivilegeConfig` table will store these rules as configurable data.
+
+**How it works (Phase 7 target):**
+```
+PrivilegeConfig {
+  roleId: 3           // Manager role
+  permissions: {
+    "task.create": true,
+    "task.assign.sameDiv": true,
+    "task.assign.anyDiv": false,
+    "template.archive": true,
+    ...
+  }
+}
+```
+
+**Why it matters:** The Admin-only Privilege Management panel (`/settings/privileges`) reads from and writes to this table. When an Admin changes which roles can do what, the change is saved here. The backend middleware then reads this table on each privileged request instead of relying on hardcoded role names.
+
+**Current state (Phase 5):** Table exists in DB but is empty. All RBAC rules in Phases 5–6 are still hardcoded in middleware as config objects, making Phase 7 a wiring exercise — not a rewrite.
+
+### 3.7 Soft Delete Pattern
+
+The models `User`, `Task`, `Finding`, and `WorkPackage` now have a `deletedAt DateTime?` field.
+
+**Rules:**
+- A record is considered "deleted" when `deletedAt` is set to a timestamp.
+- It is **never physically removed** from the database.
+- **Every Prisma read query** on these models MUST include `where: { deletedAt: null }` in addition to any other filters. This is enforced across all controllers and the auth middleware.
+- Write operations (update, create) are not affected — only reads need the filter.
+- `WorkPackage` also uses soft delete for the same reasons.
+
+**Why not physical deletion?** Aviation compliance requires an immutable record of all entities, including those that were deactivated or removed. Soft deletes preserve the audit trail.
+
+**Current filter status (as of Phase 5.0):**
+
+| File | Query | Filter applied |
+|---|---|---|
+| `auth.controller.ts` | `user.findUnique` (login) | ✅ `deletedAt: null` |
+| `auth.controller.ts` | `user.findUnique` (register check) | ✅ `deletedAt: null` |
+| `auth.controller.ts` | `user.findUnique` (forgotPassword) | ✅ `deletedAt: null` |
+| `auth.controller.ts` | `user.findFirst` (resetPassword) | ✅ `deletedAt: null` |
+| `datasource.controller.ts` | `user.findMany` (dropdown) | ✅ `deletedAt: null` |
+| `template.controller.ts` | `user.findUnique` (transferOwnership) | ✅ `deletedAt: null` |
+| `auth.middleware.ts` | `user.findUnique` (session check) | ✅ `deletedAt: null` |
 
 ### 3.5 File Attachments & Storage (MinIO)
 

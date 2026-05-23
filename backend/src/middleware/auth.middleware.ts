@@ -60,7 +60,7 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
 
         if (isEnforced) {
           const user = await prisma.user.findUnique({
-            where: { id: authPayload.userId },
+            where: { id: authPayload.userId, deletedAt: null },
             select: { activeSessionId: true }
           });
 

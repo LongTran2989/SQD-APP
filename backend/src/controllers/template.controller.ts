@@ -403,7 +403,7 @@ export const transferOwnership = async (req: Request, res: Response): Promise<vo
     }
 
     // Check if new owner exists
-    const newOwner = await prisma.user.findUnique({ where: { id: parseInt(newOwnerId) } });
+    const newOwner = await prisma.user.findUnique({ where: { id: parseInt(newOwnerId), deletedAt: null } });
     if (!newOwner) {
       res.status(404).json({ message: 'New owner user not found' });
       return;

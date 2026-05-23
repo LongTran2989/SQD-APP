@@ -20,7 +20,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     }
 
     const user = await prisma.user.findUnique({
-      where: { email },
+      where: { email, deletedAt: null },
       include: { role: true }
     });
 
@@ -90,7 +90,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await prisma.user.findUnique({ where: { email, deletedAt: null } });
     if (existingUser) {
       res.status(400).json({ message: 'User already exists' });
       return;
@@ -182,7 +182,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email, deletedAt: null } });
     if (!user) {
       res.status(404).json({ message: 'No account found with this email. Please contact an Administrator.' });
       return;
@@ -227,7 +227,8 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
     const user = await prisma.user.findFirst({
       where: {
         resetPasswordToken: token,
-        resetPasswordExpires: { gt: new Date() } // Ensures token is not expired
+        resetPasswordExpires: { gt: new Date() }, // Ensures token is not expired
+        deletedAt: null
       }
     });
 
