@@ -35,35 +35,47 @@ describe('Seed Data Verification', () => {
     expect(codes).toContain('QA');
     expect(codes).toContain('QCH');
     expect(codes).toContain('QCS');
-    expect(codes).toContain('SQ');
+    expect(codes).toContain('KS');  // Previously 'SQ' — renamed in new seed
   });
 
-  it('should authenticate all seeded users and return correct roles', async () => {
+  it('should have all 15 departments seeded', async () => {
+    const departments = await prisma.department.findMany();
+    const names = departments.map(d => d.name);
+
+    expect(names).toContain('SQD');
+    expect(names).toContain('EGD');
+    expect(names).toContain('MCC');
+    expect(names).toContain('HAN BMC');
+    expect(names).toContain('EXTERNAL');
+    expect(departments.length).toBeGreaterThanOrEqual(15);
+  });
+
+  it('should authenticate seeded users by employeeId and return correct roles', async () => {
+    // Sample: one from each division, covering Director/Manager/Staff
     const seededUsers = [
-      { email: 'director@sqd.com', role: 'Director' },
-      { email: 'admin.qa@sqd.com', role: 'Admin' },
-      { email: 'manager.qch@sqd.com', role: 'Manager' },
-      { email: 'manager.qcs@sqd.com', role: 'Manager' },
-      { email: 'gl.qa@sqd.com', role: 'Group Leader' },
-      { email: 'nguyen.van.an@sqd.com', role: 'Staff' },
-      { email: 'tran.thi.bich@sqd.com', role: 'Staff' },
-      { email: 'le.quoc.hung@sqd.com', role: 'Staff' },
-      { email: 'pham.minh.duc@sqd.com', role: 'Staff' },
-      { email: 'hoang.thi.lan@sqd.com', role: 'Staff' },
-      { email: 'vo.thanh.liem@sqd.com', role: 'Staff' },
+      { employeeId: 'VAE00071', role: 'Director' },   // QCH Director
+      { employeeId: 'VAE00483', role: 'Manager'  },   // QCH Manager
+      { employeeId: 'VAE00057', role: 'Staff'    },   // QCH Staff
+      { employeeId: 'VAE00087', role: 'Manager'  },   // QCS Manager
+      { employeeId: 'VAE02576', role: 'Staff'    },   // QCS Staff
+      { employeeId: 'VAE00061', role: 'Manager'  },   // QA  Manager
+      { employeeId: 'VAE02566', role: 'Staff'    },   // QA  Staff
+      { employeeId: 'VAE00049', role: 'Manager'  },   // KS  Manager
+      { employeeId: 'VAE02279', role: 'Staff'    },   // KS  Staff
     ];
 
     for (const user of seededUsers) {
       const res = await request(app)
         .post('/api/auth/login')
         .send({
-          email: user.email,
-          password: 'password123'
+          employeeId: user.employeeId,
+          password: 'Abc@123'
         });
       
-      expect(res.status).toBe(200);
+      // All seeded users have forcePasswordChange: true → expect 202
+      expect(res.status).toBe(202);
       expect(res.body.token).toBeDefined();
-      expect(res.body.user.role).toBe(user.role);
+      expect(res.body.requirePasswordChange).toBe(true);
     }
   });
 });

@@ -1602,7 +1602,7 @@ describe('Task Backend (Phase 5.2)', () => {
       // Create a task where staff is assignee
       await prisma.task.create({
         data: {
-          taskId: `TSK-${String(Date.now()).slice(-6)}`,
+          taskId: `TSK-${String(Date.now()).slice(-5)}${Math.floor(Math.random()*10)}`,
           templateId: publishedTemplateId,
           issuerId: managerId,
           assignedToUserId: staffId,
@@ -1616,7 +1616,7 @@ describe('Task Backend (Phase 5.2)', () => {
       // Create a task where staff is NOT involved
       await prisma.task.create({
         data: {
-          taskId: `TSK-${String(Date.now()).slice(-6)}`,
+          taskId: `TSK-${String(Date.now()).slice(-5)}${Math.floor(Math.random()*10)}`,
           templateId: publishedTemplateId,
           issuerId: managerId,
           assignedToUserId: managerId,
@@ -1643,7 +1643,7 @@ describe('Task Backend (Phase 5.2)', () => {
     it('T73: GET /unassigned returns only Unassigned tasks', async () => {
       await prisma.task.create({
         data: {
-          taskId: `TSK-${String(Date.now()).slice(-6)}`,
+          taskId: `TSK-${String(Date.now()).slice(-5)}${Math.floor(Math.random()*10)}`,
           templateId: publishedTemplateId,
           issuerId: managerId,
           targetDivisionId: divisionId,
@@ -1655,7 +1655,7 @@ describe('Task Backend (Phase 5.2)', () => {
 
       await prisma.task.create({
         data: {
-          taskId: `TSK-${String(Date.now()).slice(-6)}`,
+          taskId: `TSK-${String(Date.now()).slice(-5)}${Math.floor(Math.random()*10)}`,
           templateId: publishedTemplateId,
           issuerId: managerId,
           assignedToUserId: staffId,

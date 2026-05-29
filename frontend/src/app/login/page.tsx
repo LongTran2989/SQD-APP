@@ -8,7 +8,7 @@ import { useAuthStore } from '../../store/authStore';
 import { PlaneTakeoff, ShieldAlert } from 'lucide-react';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,7 +21,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await apiClient.post('/auth/login', { email, password });
+      const response = await apiClient.post('/auth/login', { employeeId, password });
       
       // If backend returns 202, it means forcePasswordChange is true
       if (response.status === 202 && response.data.requirePasswordChange) {
@@ -37,7 +37,7 @@ export default function LoginPage() {
       router.push('/dashboard');
     } catch (err: any) {
       if (err.response?.status === 401) {
-        setError('Invalid email or password.');
+        setError('Invalid Staff ID or password.');
       } else {
         setError('An error occurred connecting to the server.');
       }
@@ -71,14 +71,14 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1">Email Address</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Staff ID</label>
             <input
-              type="email"
+              type="text"
               required
               className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white/50"
-              placeholder="director@sqd.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              placeholder="e.g. VAE00071"
+              value={employeeId}
+              onChange={(e) => setEmployeeId(e.target.value)}
             />
           </div>
 

@@ -38,7 +38,7 @@ export const updateUserRole = async (req: Request, res: Response): Promise<void>
       select: {
         id: true,
         name: true,
-        email: true,
+        employeeId: true,
         role: true,
         divisionId: true
       }

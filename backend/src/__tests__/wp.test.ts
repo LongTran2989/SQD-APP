@@ -737,6 +737,9 @@ describe('Work Package Backend', () => {
 
   describe('WpType CRUD (Admin only)', () => {
     it('should allow Admin to create a new WP type', async () => {
+      // Pre-delete in case the seed already populated this code
+      await prisma.wpType.deleteMany({ where: { code: 'INVESTIGATION' } });
+
       const res = await request(app)
         .post('/api/work-packages/types')
         .set('Authorization', `Bearer ${adminToken}`)

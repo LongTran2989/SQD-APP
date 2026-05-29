@@ -37,8 +37,8 @@ describe('Authentication & Session Management Endpoints', () => {
     it('should successfully login an existing user', async () => {
       await prisma.user.create({
         data: {
+          employeeId: 'TST-HAPPY',
           name: 'Happy User',
-          email: 'happy@sqd.com',
           passwordHash: await bcrypt.hash('password123', 10),
           forcePasswordChange: false,
           divisionId,
@@ -46,15 +46,17 @@ describe('Authentication & Session Management Endpoints', () => {
         }
       });
 
-      const res = await request(app).post('/api/auth/login').send({ email: 'happy@sqd.com', password: 'password123' });
+      const res = await request(app).post('/api/auth/login').send({ employeeId: 'TST-HAPPY', password: 'password123' });
       expect(res.status).toBe(200);
       expect(res.body.token).toBeDefined();
-      expect(res.body.user.email).toBe('happy@sqd.com');
+      expect(res.body.user.employeeId).toBe('TST-HAPPY');
     });
 
     it('should generate a reset password token via forgot password', async () => {
+      // This test keeps email because it exercises the email-based forgot-password flow
       await prisma.user.create({
         data: {
+          employeeId: 'TST-FORGOT',
           name: 'Forgot User',
           email: 'forgot@sqd.com',
           passwordHash: 'hash',
@@ -83,10 +85,10 @@ describe('Authentication & Session Management Endpoints', () => {
 
     // Protects against: Users bypassing the forced password change policy
     it('should block access to standard routes if forcePasswordChange is true', async () => {
-      const user = await prisma.user.create({
+      await prisma.user.create({
         data: {
+          employeeId: 'TST-FORCE1',
           name: 'Force Change User',
-          email: 'force@sqd.com',
           passwordHash: await bcrypt.hash('password123', 10),
           forcePasswordChange: true, // Must change!
           divisionId,
@@ -94,7 +96,7 @@ describe('Authentication & Session Management Endpoints', () => {
         }
       });
 
-      const loginRes = await request(app).post('/api/auth/login').send({ email: 'force@sqd.com', password: 'password123' });
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-FORCE1', password: 'password123' });
       const token = loginRes.body.token;
 
       // Try hitting templates list
@@ -108,10 +110,10 @@ describe('Authentication & Session Management Endpoints', () => {
 
     // Protects against: Users unable to change password because of the above lock
     it('should allow access to /update-password even if forcePasswordChange is true', async () => {
-      const user = await prisma.user.create({
+      await prisma.user.create({
         data: {
-          name: 'Force Change User',
-          email: 'force2@sqd.com',
+          employeeId: 'TST-FORCE2',
+          name: 'Force Change User 2',
           passwordHash: await bcrypt.hash('password123', 10),
           forcePasswordChange: true,
           divisionId,
@@ -119,7 +121,7 @@ describe('Authentication & Session Management Endpoints', () => {
         }
       });
 
-      const loginRes = await request(app).post('/api/auth/login').send({ email: 'force2@sqd.com', password: 'password123' });
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-FORCE2', password: 'password123' });
       const token = loginRes.body.token;
 
       const res = await request(app)
@@ -130,7 +132,7 @@ describe('Authentication & Session Management Endpoints', () => {
       expect(res.status).toBe(200);
 
       // Verify flag is cleared
-      const updatedUser = await prisma.user.findUnique({ where: { email: 'force2@sqd.com' } });
+      const updatedUser = await prisma.user.findUnique({ where: { employeeId: 'TST-FORCE2' } });
       expect(updatedUser?.forcePasswordChange).toBe(false);
     });
 
@@ -140,8 +142,8 @@ describe('Authentication & Session Management Endpoints', () => {
       const pastDate = new Date(Date.now() - 3600000);
       await prisma.user.create({
         data: {
+          employeeId: 'TST-EXPIRED',
           name: 'Expired Token User',
-          email: 'expired@sqd.com',
           passwordHash: 'hash',
           resetPasswordToken: 'expired-token-123',
           resetPasswordExpires: pastDate,
@@ -163,8 +165,8 @@ describe('Authentication & Session Management Endpoints', () => {
       const futureDate = new Date(Date.now() + 3600000);
       await prisma.user.create({
         data: {
+          employeeId: 'TST-REUSE',
           name: 'Reuse Token User',
-          email: 'reuse@sqd.com',
           passwordHash: 'hash',
           resetPasswordToken: 'valid-token-123',
           resetPasswordExpires: futureDate,

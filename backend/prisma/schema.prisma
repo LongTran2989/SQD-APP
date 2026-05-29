@@ -45,41 +45,42 @@ model Role {
 }
 
 model User {
-  id                 Int        @id @default(autoincrement())
-  name               String
-  email              String     @unique
-  passwordHash       String
-  forcePasswordChange Boolean   @default(true)
+  id                  Int        @id @default(autoincrement())
+  employeeId          String?    @unique  // Staff ID — primary login identifier (e.g. VAE00071)
+  name                String
+  email               String?    @unique  // Optional — for notifications / password reset only
+  phone               String?            // Optional contact number
+  passwordHash        String
+  forcePasswordChange Boolean    @default(true)
   resetPasswordToken  String?
   resetPasswordExpires DateTime?
-  activeSessionId    String?    // UUID tracking the latest active login session
-  
-  
-  divisionId         Int
-  division           Division   @relation(fields: [divisionId], references: [id])
-  
-  roleId             Int
-  role               Role       @relation(fields: [roleId], references: [id])
-  
-  assignedTasks      Task[]     @relation("TaskAssignedTo")
-  reportedFindings   Finding[]  @relation("FindingReportedBy")
-  
+  activeSessionId     String?    // UUID tracking the latest active login session
+
+  divisionId          Int
+  division            Division   @relation(fields: [divisionId], references: [id])
+
+  roleId              Int
+  role                Role       @relation(fields: [roleId], references: [id])
+
+  assignedTasks       Task[]     @relation("TaskAssignedTo")
+  reportedFindings    Finding[]  @relation("FindingReportedBy")
+
   // Templates this user revised or owns
   revisedTemplates       Template[]               @relation("TemplateRevisedBy")
   ownedTemplates         Template[]               @relation("TemplateOwnedBy")
   revisionArchives       TemplateRevisionArchive[] @relation("ArchiveRevisedBy")
-  
-  aircraftAuths      UserAircraftAuthorization[]
-  jobAuths           UserJobAuthorization[]
-  
-  issuedTasks        Task[]     @relation("TaskIssuer")
-  closedFindings     Finding[]  @relation("FindingClosedBy")
+
+  aircraftAuths       UserAircraftAuthorization[]
+  jobAuths            UserJobAuthorization[]
+
+  issuedTasks         Task[]     @relation("TaskIssuer")
+  closedFindings      Finding[]  @relation("FindingClosedBy")
   workPackageAssignments WorkPackageAssignment[]
   createdWorkPackages WorkPackage[] @relation("WorkPackageCreator")
-  
-  deletedAt          DateTime?
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+
+  deletedAt           DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 }
 
 // -----------------------------------------------------------------------

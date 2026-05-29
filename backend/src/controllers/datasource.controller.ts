@@ -26,6 +26,7 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
       }
       case 'divisions': {
         const divisions = await prisma.division.findMany({
+          where: { department: { name: 'SQD' } },
           select: { id: true, name: true, department: { select: { name: true } } },
           orderBy: { name: 'asc' }
         });
@@ -37,11 +38,11 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
       }
       case 'users': {
         const users = await prisma.user.findMany({
-          select: { id: true, name: true, email: true },
+          select: { id: true, name: true, employeeId: true },
           where: { deletedAt: null },
           orderBy: { name: 'asc' }
         });
-        res.json(users.map(u => ({ value: String(u.id), label: `${u.name} (${u.email})` })));
+        res.json(users.map(u => ({ value: String(u.id), label: `${u.name} (${u.employeeId ?? ''})` })));
         return;
       }
       case 'aircrafts': {

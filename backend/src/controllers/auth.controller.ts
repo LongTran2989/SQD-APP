@@ -12,15 +12,15 @@ const prisma = new PrismaClient({ adapter });
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password } = req.body;
+    const { employeeId, password } = req.body;
 
-    if (!email || !password) {
-      res.status(400).json({ message: 'Email and password are required' });
+    if (!employeeId || !password) {
+      res.status(400).json({ message: 'Staff ID and password are required' });
       return;
     }
 
     const user = await prisma.user.findUnique({
-      where: { email, deletedAt: null },
+      where: { employeeId, deletedAt: null },
       include: { role: true }
     });
 
@@ -69,8 +69,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       token,
       user: {
         id: user.id,
+        employeeId: user.employeeId,
         name: user.name,
-        email: user.email,
         role: user.role.name,
         divisionId: user.divisionId
       }
@@ -162,8 +162,8 @@ export const updatePassword = async (req: Request, res: Response): Promise<void>
       token,
       user: {
         id: updatedUser.id,
+        employeeId: updatedUser.employeeId,
         name: updatedUser.name,
-        email: updatedUser.email,
         role: updatedUser.role.name,
         divisionId: updatedUser.divisionId
       }
@@ -188,7 +188,15 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Generate random token (simulated here with crypto.randomBytes in reality, but using simple string for now)
+    // Guard: account exists but has no email address configured
+    if (!user.email) {
+      res.status(400).json({
+        message: 'Password reset is not available for this account. Please contact your administrator.'
+      });
+      return;
+    }
+
+    // Generate random token
     const crypto = require('crypto');
     const resetToken = crypto.randomBytes(32).toString('hex');
     const resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
