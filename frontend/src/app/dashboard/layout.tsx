@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
 import Sidebar from '../../components/layout/Sidebar';
 import Header from '../../components/layout/Header';
@@ -14,6 +14,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const [mounted, setMounted] = useState(false);
 
@@ -21,8 +22,17 @@ export default function DashboardLayout({
     setMounted(true);
     if (!isAuthenticated) {
       router.push('/login');
+    } else {
+      const user = useAuthStore.getState().user;
+      if (user?.employeeId) {
+        // Delay setting the title to ensure it overrides Next.js static metadata upon hydration/navigation
+        const timeout = setTimeout(() => {
+          document.title = `${user.employeeId} - SQD APP`;
+        }, 50);
+        return () => clearTimeout(timeout);
+      }
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, pathname]);
 
   // Prevent hydration mismatch and hide content until auth check completes
   if (!mounted || !isAuthenticated) {

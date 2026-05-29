@@ -13,6 +13,7 @@ import {
   decideDeadlineExtension,
   reassignTask,
   selfAssignTask,
+  assignTask,
 } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import {
@@ -167,6 +168,9 @@ export default function TaskActionBar({
   const [reassignUserId, setReassignUserId] = useState('');
   const [reassignReason, setReassignReason] = useState('');
 
+  const [showAssignInput, setShowAssignInput] = useState(false);
+  const [assignUserId, setAssignUserId] = useState('');
+
   const [showExtensionInput, setShowExtensionInput] = useState(false);
   const [extensionReason, setExtensionReason] = useState('');
 
@@ -197,6 +201,10 @@ export default function TaskActionBar({
       currentUser.role === 'Admin' ||
       currentUser.divisionId === task.targetDivisionId);
 
+  const canAssign =
+    isUnassigned &&
+    ['Director', 'Admin', 'Manager'].includes(currentUser.role);
+
   // Self-approve guard: same person can't be issuer+assignee AND reviewer
   const selfApproveBlocked =
     task.issuerId === currentUser.id && task.assignedToUserId === currentUser.id;
@@ -221,6 +229,20 @@ export default function TaskActionBar({
       toast.success('Task claimed — you are now the assignee');
       return r;
     });
+
+  const handleAssign = () => {
+    if (!assignUserId) {
+      toast.error('Please enter a user ID to assign');
+      return;
+    }
+    handle('assign', async () => {
+      const r = await assignTask(task.id, Number(assignUserId));
+      toast.success('Task assigned successfully');
+      setShowAssignInput(false);
+      setAssignUserId('');
+      return r;
+    });
+  };
 
   const handleApprove = () =>
     handle('approve', async () => {
@@ -293,7 +315,7 @@ export default function TaskActionBar({
     if (ratingValue === null) return;
     handle('rate', async () => {
       const r = await rateTask(task.id, ratingValue);
-      toast.success(`Task rated ${ratingValue}/3`);
+      toast.success(`Task rated ${ratingValue}/5`);
       return r;
     });
   };
@@ -328,6 +350,7 @@ export default function TaskActionBar({
   // If no buttons will render, return null
   const noActions =
     !hasSelfAssignRight &&
+    !canAssign &&
     !isEditable &&
     task.status !== 'In Review' &&
     task.status !== 'Rejected' &&
@@ -361,6 +384,58 @@ export default function TaskActionBar({
             >
               {loading === 'self-assign' ? 'Claiming...' : 'PERFORM THIS TASK'}
             </ActionButton>
+          </div>
+        )}
+
+        {/* ── ASSIGN TASK — Director / Admin / Manager on Unassigned ── */}
+        {canAssign && (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+            <p className="text-sm text-slate-700 font-medium flex items-center gap-1.5">
+              <UserCheck className="w-4 h-4" />
+              Assign this task to a staff member
+            </p>
+            <button
+              id="btn-toggle-assign"
+              onClick={() => setShowAssignInput(!showAssignInput)}
+              className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1 font-semibold transition-colors"
+            >
+              {showAssignInput ? 'Cancel' : 'Assign Task...'}
+              {showAssignInput ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {showAssignInput && (
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-500">Assignee User ID *</label>
+                  <input
+                    type="number"
+                    id="assign-user-id"
+                    value={assignUserId}
+                    onChange={(e) => setAssignUserId(e.target.value)}
+                    placeholder="Enter user ID"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-[10px] text-slate-400">Phase 5.5: will replace with user picker</p>
+                </div>
+                <div className="flex gap-2">
+                  <ActionButton
+                    id="btn-confirm-assign"
+                    onClick={handleAssign}
+                    disabled={loading === 'assign'}
+                    variant="primary"
+                    icon={UserCheck}
+                  >
+                    {loading === 'assign' ? 'Assigning...' : 'Confirm Assign'}
+                  </ActionButton>
+                  <ActionButton
+                    id="btn-cancel-assign"
+                    onClick={() => { setShowAssignInput(false); setAssignUserId(''); }}
+                    variant="ghost"
+                  >
+                    Cancel
+                  </ActionButton>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -609,7 +684,7 @@ export default function TaskActionBar({
           <div className="border-t border-slate-100 pt-3 space-y-2">
             <p className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
               <Star className="w-3.5 h-3.5" />
-              Rate this task (0–3)
+              Rate this task (1–5)
             </p>
             <div className="flex items-center gap-3">
               <StarRating

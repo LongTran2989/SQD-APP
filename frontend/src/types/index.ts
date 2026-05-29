@@ -5,6 +5,7 @@ export interface Role {
 
 export interface User {
   id: number;
+  employeeId: string;
   name: string;
   email: string;
   role: string; // The backend returns the role name as a string

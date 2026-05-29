@@ -164,12 +164,14 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
         ]
       };
     } else {
-      // Staff / Group Leader: only tasks they are assignee or issuer of
+      // Staff / Group Leader: tasks they are assignee or issuer of,
+      // plus all Unassigned tasks targeted at their division (so they can see & claim them)
       where = {
         deletedAt: null,
         OR: [
           { assignedToUserId: userId },
-          { issuerId: userId }
+          { issuerId: userId },
+          { status: 'Unassigned', targetDivisionId: divisionId }
         ]
       };
     }
@@ -281,7 +283,9 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
       role === 'Admin' ||
       task.issuerId === userId ||
       task.assignedToUserId === userId ||
-      (role === 'Manager' && task.targetDivisionId === divisionId);
+      (role === 'Manager' && task.targetDivisionId === divisionId) ||
+      // Staff/Group Leader can view any Unassigned task in their division (to claim it)
+      (task.status === 'Unassigned' && task.targetDivisionId === divisionId);
 
     if (!canView) {
       res.status(403).json({ message: 'You do not have permission to view this task' });

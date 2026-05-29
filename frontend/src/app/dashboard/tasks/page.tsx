@@ -42,7 +42,7 @@ export default function TaskListPage() {
   const { user } = useAuthStore();
 
   // ── Tab & filter state (persists within session via component state) ──
-  const [activeTab, setActiveTab] = useState<ActiveTab>('unassigned');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('all');
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
