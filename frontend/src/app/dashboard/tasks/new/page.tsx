@@ -106,6 +106,13 @@ export default function NewTaskPage() {
       toast.error('Please select a target division');
       return;
     }
+    if (deadline) {
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(deadline) || isNaN(Date.parse(deadline))) {
+        toast.error('Invalid deadline date format. Please use a valid date.');
+        return;
+      }
+    }
 
     setSubmitting(true);
     try {

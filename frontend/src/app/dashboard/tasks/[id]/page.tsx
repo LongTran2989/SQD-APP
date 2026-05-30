@@ -98,18 +98,58 @@ export default function TaskDetailPage() {
     }
   };
 
+  // ── Submit task ──
+  const handleSubmitTask = async () => {
+    if (!task) return;
+    if (!validateRequiredFields()) return;
+    setSavingProgress(true);
+    try {
+      // 1. Save form data
+      await saveTaskData(task.id, formData);
+      setHasUnsavedChanges(false);
+      
+      // 2. Submit task
+      const { submitTask } = await import('../../../../api/taskApi');
+      const updated = await submitTask(task.id);
+      toast.success('Task submitted for review');
+      
+      // 3. Update task state
+      setTask(updated);
+      
+      // 4. Refresh activity feed
+      getTaskActivity(task.id).then(setActivities).catch(() => {});
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to submit task');
+    } finally {
+      setSavingProgress(false);
+    }
+  };
+
   // ── Required field validation before submit ──
   const validateRequiredFields = (): boolean => {
     if (!task) return false;
     const schema: FormField[] = task.schemaSnapshot;
     const missing: string[] = [];
+    
     for (const field of schema) {
-      if (!field.required) continue;
       const val = formData[field.fieldId];
+      
+      // Date format validation
+      if (field.type === 'date' && val) {
+        const dateStr = String(val);
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(dateStr) || isNaN(Date.parse(dateStr))) {
+          toast.error(`Invalid date format for ${field.label}. Please use a valid date.`);
+          return false;
+        }
+      }
+
+      if (!field.required) continue;
       if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) {
         missing.push(field.label);
       }
     }
+    
     if (missing.length > 0) {
       toast.error(`Please fill in required fields: ${missing.join(', ')}`);
       return false;
@@ -207,6 +247,7 @@ export default function TaskDetailPage() {
             onTaskUpdated={handleTaskUpdated}
             onSaveProgress={handleSaveProgress}
             savingProgress={savingProgress}
+            onSubmitTask={handleSubmitTask}
           />
 
           {/* Dynamic form */}
