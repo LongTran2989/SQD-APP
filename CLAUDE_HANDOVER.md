@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-05-23 (rev 3). Supersedes all previous versions.*
+*Last updated: 2026-05-30 (rev 4). Supersedes all previous versions.*
 
 ---
 
@@ -53,6 +53,15 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - Work Package RBAC exceptions implemented (Staff/Group Leader can create and assign tasks within their assigned WPs, scoped to their division)
 - **Phase 5.4** — Task Frontend (COMPLETED)
   - Task dashboard list views and execution routing implemented.
+- **Phase 5.5 Prerequisite Audit Fixes** (COMPLETED 2026-05-30)
+  - Resolved 8 high-priority (🔴) findings from the external codebase audit:
+    - Added `deletedAt: null` to `task.findFirst` in `wpCheckService.ts` and `generateTaskId` in `task.controller.ts` (soft-delete ID sequence fixes).
+    - Fixed user enumeration vulnerability in `forgotPassword` (`auth.controller.ts`) by always returning a generic 200 OK status.
+    - Restricted template creation in `template.controller.ts` to enforce that Managers can only create templates for their own division.
+    - Enforced mandatory non-empty reason validation in `reassignTask` (`task.controller.ts`).
+    - Fixed TypeScript implicit `any` parameter types on Prisma transaction client (`task.controller.ts`) and `computeWpStatus` input arguments (`wp.controller.ts`).
+    - Removed hardcoded 'SQD' division filter in `datasource.controller.ts` (now returns all divisions per Option A).
+    - Updated rating validation, error messages, and activity logging to use the **1–5** star rating scale.
 
 ### Test Suite
 - All **130 integration tests passing** as of 2026-05-30
@@ -347,7 +356,7 @@ These are two separate systems that serve different purposes. **Both** are writt
 | `deadlineExtensions` | Json? | **ADD** — array of `{ requestedBy, reason, requestedAt, decision, decidedAt }` |
 | `inactivationLog` | Json? | **ADD** — `{ reason, inactivatedBy, inactivatedAt }` |
 | `rejectionReason` | String? | **ADD** — formal field, not just AuditLog |
-| `rating` | Int? | **ADD** — 0–5; Director rates Manager tasks; Manager rates same-Division user tasks |
+| `rating` | Int? | **ADD** — 1–5; Director rates Manager tasks; Manager rates same-Division user tasks |
 | `estimatedHours` | Float? | **ADD** — inherited from Template at Task creation |
 | `assignmentType` | String | **ADD** — `INDIVIDUAL` default; `GROUP`/`SCHEDULE` future |
 | `schemaSnapshot` | Json | **ADD** — immutable copy of `formSchema` at the moment of Task creation. This is the form definition used to render the Task, independent of the source Template. Required to support One-off Templates and Template edits without breaking in-flight Tasks |
@@ -391,7 +400,7 @@ These are two separate systems that serve different purposes. **Both** are writt
 | Review / Approve / Reject / Follow-up | Issuer + Director + Managers of same Division |
 | Transfer issuer rights | Issuer only |
 | Inactivate Task | Issuer + Admin |
-| Rate Task (0–5) | **Director**: can rate Tasks where assignee is a Manager. **Manager**: can rate Tasks where assignee is a user in same Division. First-come-first-served if both act simultaneously. Rating is revisable but each revision is logged to `TaskActivity` |
+| Rate Task (1–5) | **Director**: can rate Tasks where assignee is a Manager. **Manager**: can rate Tasks where assignee is a user in same Division. First-come-first-served if both act simultaneously. Rating is revisable but each revision is logged to `TaskActivity` |
 | Post-rejection: Terminate or Reassign | Issuer + Director + Managers of same Division |
 
 > **CRITICAL — Reassignment rule:** A Task can be reassigned to a different user by the Issuer, Director, or Manager of same Division at any **non-final** stage. A reason is always required. All `TaskData` already entered by the previous assignee is fully preserved and visible to the new assignee. Reassignment is **blocked** on final states: `Closed`, `Terminated`, `Rejected`. For work that needs redoing after closure, the correct approach is to either create a new Task from the same Template, or raise a Finding on the closed Task which then generates a corrective follow-up Task.
@@ -421,7 +430,7 @@ These are two separate systems that serve different purposes. **Both** are writt
 - This is separate from Task reassignment (assigning a new performer ≠ transferring issuer rights)
 
 **Rating:**
-- Score 0–3
+- Score 1–5
 - **Director** can rate Tasks where the assignee is a Manager
 - **Manager** can rate Tasks where the assignee is a user in the same Division
 - Only available once Task is in a final state: `Closed`, `Rejected`, or `Terminated`
@@ -636,7 +645,7 @@ All changes needed before Phase 5 development begins:
 | `Task` | ADD field | `deadlineExtensions Json?` |
 | `Task` | ADD field | `inactivationLog Json?` |
 | `Task` | ADD field | `rejectionReason String?` |
-| `Task` | ADD field | `rating Int?` — score 0–5; Director rates Manager tasks; Manager rates same-Division user tasks |
+| `Task` | ADD field | `rating Int?` — score 1–5; Director rates Manager tasks; Manager rates same-Division user tasks |
 | `Task` | ADD field | `estimatedHours Float?` |
 | `Task` | ADD field | `assignmentType String @default("INDIVIDUAL")` |
 | `Task` | EXPAND | `status` values to full 10-status set |
@@ -723,7 +732,7 @@ All changes needed before Phase 5 development begins:
 - [x] `PUT /api/tasks/:id/reactivate`
 - [x] `PUT /api/tasks/:id/deadline` — set or extend deadline
 - [x] `PUT /api/tasks/:id/transfer-issuer` — transfer issuer rights
-- [x] `PUT /api/tasks/:id/rate` — rate Task (0–3); enforce Director→Manager and Manager→same-Division rules; log revisions to TaskActivity
+- [x] `PUT /api/tasks/:id/rate` — rate Task (1–5); enforce Director→Manager and Manager→same-Division rules; log revisions to TaskActivity
 - [x] Auto-log SYSTEM_EVENT to `TaskActivity` on every state change
 - [x] RBAC enforcement: review rights = Issuer + Director + Managers of same Division
 
@@ -821,7 +830,7 @@ All changes needed before Phase 5 development begins:
 4. Write or update tests before or alongside new features — test DB only
 5. All status changes must auto-log a `SYSTEM_EVENT` to `TaskActivity` (once that model exists)
 6. RBAC: reviewer actions on Tasks = Issuer + Director + Managers of same Division (not Issuer alone)
-7. Rating: Director rates Manager assignees; Manager rates same-Division assignees. Score 0–5. Revisable with audit log entry.
+7. Rating: Director rates Manager assignees; Manager rates same-Division assignees. Score 1–5. Revisable with audit log entry.
 8. Reassignment: permitted at any non-final stage with mandatory reason. Blocked on `Closed`, `Terminated`, `Rejected`. All TaskData always preserved.
 9. Every significant event must be written to BOTH `AuditLog` (system-wide compliance) AND `TaskActivity` (per-Task feed) — see Section 3.5.
 10. Task always stores `schemaSnapshot` at creation time — never rely on Template's `formSchema` to render a Task form.
@@ -841,10 +850,11 @@ Audited on **2026-05-29**. These are known vulnerabilities to be fixed before an
 **Problem:** `PUT /api/auth/update-password` does NOT verify the user's current password before setting a new one. Any valid session token can silently change the password.
 **Fix:** Require `oldPassword` in request body. Call `bcrypt.compare(oldPassword, user.passwordHash)` — reject with `403` if it fails.
 
-### Fix 2 — User enumeration via `forgotPassword` (MODERATE)
+### Fix 2 — User enumeration via `forgotPassword` (RESOLVED 2026-05-30)
 **File:** `backend/src/controllers/auth.controller.ts`
 **Problem:** `/forgot-password` returns `404` when the email is not found, allowing an attacker to enumerate valid user emails.
 **Fix:** Always return `200 OK` with a generic message (`"If an account exists, a reset link has been generated."`) regardless of whether the email exists.
+**Status:** Completed during Phase 5.5 prerequisite audit fixes.
 
 ### Fix 3 — No rate limiting on `/login` and `/forgot-password` (MODERATE)
 **File:** Add `backend/src/middleware/rateLimit.middleware.ts` + update `backend/src/routes/auth.routes.ts`

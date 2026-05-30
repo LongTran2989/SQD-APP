@@ -12,11 +12,18 @@ const prisma = new PrismaClient({ adapter });
 
 const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
 
+interface ComputeWpStatusInput {
+  id: number;
+  status: string;
+  timeframeFrom: Date;
+  timeframeTo: Date;
+}
+
 /**
  * Computes the effective WP status on-the-fly.
  * Only 'Closed' and 'Inactive' are stored in DB; the rest are derived.
  */
-async function computeWpStatus(wp: any): Promise<string> {
+async function computeWpStatus(wp: ComputeWpStatusInput): Promise<string> {
   // Manual states are authoritative
   if (wp.status === 'Closed' || wp.status === 'Inactive') {
     return wp.status;

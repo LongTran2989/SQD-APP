@@ -26,7 +26,6 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
       }
       case 'divisions': {
         const divisions = await prisma.division.findMany({
-          where: { department: { name: 'SQD' } },
           select: { id: true, name: true, department: { select: { name: true } } },
           orderBy: { name: 'asc' }
         });

@@ -113,6 +113,7 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
   try {
     const { title, description, formSchema, status, requiresApproval, allowsFindings, divisionId, estimatedHours, isOneOff, type } = req.body;
     const userId = req.user!.userId;
+    const userRole = req.user!.role;
 
     if (!title || !formSchema) {
       res.status(400).json({ message: 'Title and form schema are required' });
@@ -121,6 +122,12 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
 
     // Use the creator's divisionId if none specified
     const targetDivisionId = divisionId || req.user!.divisionId;
+
+    // Managers are scoped to their own division
+    if (userRole === 'Manager' && targetDivisionId !== req.user!.divisionId) {
+      res.status(403).json({ message: 'Managers can only create templates for their own division' });
+      return;
+    }
 
     // Auto-generate templateId atomically
     const template = await prisma.$transaction(async (tx) => {

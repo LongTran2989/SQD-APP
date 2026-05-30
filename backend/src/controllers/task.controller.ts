@@ -21,9 +21,9 @@ const TASK_CREATOR_ROLES = ['Manager', 'Director', 'Admin'];
  * Format: [DivisionCode]-[000001]
  * Must be called inside a $transaction to avoid race conditions.
  */
-async function generateTaskId(divisionCode: string, tx: any): Promise<string> {
+async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
   const lastTask = await tx.task.findFirst({
-    where: { taskId: { startsWith: `${divisionCode}-` } },
+    where: { taskId: { startsWith: `${divisionCode}-` }, deletedAt: null },
     orderBy: { id: 'desc' },
     select: { taskId: true }
   });
@@ -957,7 +957,7 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    if (!reason) {
+    if (!reason?.trim()) {
       res.status(400).json({ message: 'A reason is required when reassigning a task' });
       return;
     }
@@ -1468,8 +1468,8 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
     const { userId, role, divisionId } = req.user!;
     const { rating } = req.body;
 
-    if (rating === undefined || rating === null || !Number.isInteger(rating) || rating < 0 || rating > 3) {
-      res.status(400).json({ message: 'rating must be an integer between 0 and 3' });
+    if (rating === undefined || rating === null || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+      res.status(400).json({ message: 'rating must be an integer between 1 and 5' });
       return;
     }
 
@@ -1538,8 +1538,8 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
     });
 
     const content = isRevision
-      ? `Task re-rated from ${previousRating}/3 to ${rating}/3`
-      : `Task rated ${rating}/3`;
+      ? `Task re-rated from ${previousRating}/5 to ${rating}/5`
+      : `Task rated ${rating}/5`;
 
     await logAuditAndActivity(
       task.id,

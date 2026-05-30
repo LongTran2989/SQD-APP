@@ -124,7 +124,7 @@ export async function generateDailyCheckTasks(
 
   // Find highest sequence for this division's tasks
   const lastTask = await db.task.findFirst({
-    where: { taskId: { startsWith: `${divCode}-` } },
+    where: { taskId: { startsWith: `${divCode}-` }, deletedAt: null },
     orderBy: { id: 'desc' },
     select: { taskId: true }
   });
