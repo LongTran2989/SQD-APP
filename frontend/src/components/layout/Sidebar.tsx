@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
-import { 
-  LayoutDashboard, 
-  ClipboardList, 
-  FileCheck2, 
-  Users, 
+import {
+  LayoutDashboard,
+  ClipboardList,
+  FileCheck2,
+  FolderOpen,
+  Users,
   Settings,
   PlaneTakeoff
 } from 'lucide-react';
@@ -20,6 +21,7 @@ export default function Sidebar() {
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
     { name: 'Tasks', href: '/dashboard/tasks', icon: ClipboardList, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
+    { name: 'Work Packages', href: '/dashboard/work-packages', icon: FolderOpen, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
     { name: 'Template Builder', href: '/dashboard/templates', icon: FileCheck2, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'User Management', href: '/dashboard/users', icon: Users, roles: ['Admin', 'Director'] },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },

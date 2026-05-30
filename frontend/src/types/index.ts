@@ -124,6 +124,8 @@ export interface TaskEnriched extends Task {
   taskData?: { data: Record<string, unknown> } | null;
 }
 
+export type WpStatus = 'Open' | 'In Progress' | 'Overdue' | 'Closed' | 'Inactive';
+
 export interface WorkPackage {
   id: number;
   wpId: string;
@@ -134,10 +136,46 @@ export interface WorkPackage {
   timeframeTo: string;
   creatorId: number;
   checkTemplateId: number | null;
-  status: 'Open' | 'In Progress' | 'Overdue' | 'Closed' | 'Inactive';
-  inactivationLog: any | null;
+  status: WpStatus;
+  inactivationLog: { reason: string; inactivatedBy: number; inactivatedAt: string } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface WpType {
+  id: number;
+  code: string;
+  description: string | null;
+}
+
+// Enriched WP returned by GET /api/work-packages (list)
+export interface WorkPackageEnriched extends WorkPackage {
+  computedStatus: WpStatus;
+  division: { id: number; name: string; code: string } | null;
+  creator: { id: number; name: string } | null;
+  assignments: { id: number; wpId: number; userId: number; user: { id: number; name: string } }[];
+  _count: { tasks: number };
+}
+
+// WP task row returned by GET /api/work-packages/:id
+export interface WpTaskRow {
+  id: number;
+  taskId: string;
+  status: TaskStatus;
+  assignedToUser: { id: number; name: string } | null;
+  template: { title: string; templateId: string } | null;
+  createdAt: string;
+  completedAt: string | null;
+  deadline: string | null;
+}
+
+// Enriched WP returned by GET /api/work-packages/:id (detail)
+export interface WorkPackageDetail extends WorkPackage {
+  computedStatus: WpStatus;
+  division: { id: number; name: string; code: string } | null;
+  creator: { id: number; name: string } | null;
+  assignments: { id: number; wpId: number; userId: number; user: { id: number; name: string; email: string } }[];
+  tasks: WpTaskRow[];
 }
 
 export interface TaskActivity {

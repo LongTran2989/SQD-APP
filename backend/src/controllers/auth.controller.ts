@@ -183,39 +183,30 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
     }
 
     const user = await prisma.user.findUnique({ where: { email, deletedAt: null } });
-    if (!user) {
-      res.status(404).json({ message: 'No account found with this email. Please contact an Administrator.' });
-      return;
-    }
 
-    // Guard: account exists but has no email address configured
-    if (!user.email) {
-      res.status(400).json({
-        message: 'Password reset is not available for this account. Please contact your administrator.'
+    // Only act if the account exists and has an email address configured.
+    // Intentionally no early return on missing user — prevents email enumeration.
+    if (user && user.email) {
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          resetPasswordToken: resetToken,
+          resetPasswordExpires
+        }
       });
-      return;
+
+      // Simulated email sending by printing to console
+      console.log(`\n========================================`);
+      console.log(`[EMAIL MOCK] Password Reset Requested`);
+      console.log(`To: ${email}`);
+      console.log(`Link: http://localhost:3000/reset-password?token=${resetToken}`);
+      console.log(`========================================\n`);
     }
 
-    // Generate random token
-    const crypto = require('crypto');
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        resetPasswordToken: resetToken,
-        resetPasswordExpires
-      }
-    });
-
-    // Simulated email sending by printing to console
-    console.log(`\n========================================`);
-    console.log(`[EMAIL MOCK] Password Reset Requested`);
-    console.log(`To: ${email}`);
-    console.log(`Link: http://localhost:3000/reset-password?token=${resetToken}`);
-    console.log(`========================================\n`);
-
+    // Always return the same generic response regardless of whether the user exists
     res.status(200).json({ message: 'If an account exists, a reset link has been generated.' });
   } catch (error) {
     console.error('Forgot password error:', error);

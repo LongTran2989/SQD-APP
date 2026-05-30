@@ -12,11 +12,18 @@ const prisma = new PrismaClient({ adapter });
 
 const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
 
+interface ComputeWpStatusInput {
+  id: number;
+  status: string;
+  timeframeFrom: Date;
+  timeframeTo: Date;
+}
+
 /**
  * Computes the effective WP status on-the-fly.
  * Only 'Closed' and 'Inactive' are stored in DB; the rest are derived.
  */
-async function computeWpStatus(wp: any): Promise<string> {
+async function computeWpStatus(wp: ComputeWpStatusInput): Promise<string> {
   // Manual states are authoritative
   if (wp.status === 'Closed' || wp.status === 'Inactive') {
     return wp.status;
@@ -54,8 +61,26 @@ async function computeWpStatus(wp: any): Promise<string> {
 // ─── GET /api/work-packages ──────────────────────────────────────────
 export const getWorkPackages = async (req: Request, res: Response): Promise<void> => {
   try {
+    const { userId, role, divisionId } = req.user!;
+
+    let where: any = { deletedAt: null };
+
+    if (role === 'Director' || role === 'Admin') {
+      // system-wide visibility — no further filter
+    } else if (role === 'Manager') {
+      where.divisionId = divisionId;
+    } else {
+      // Staff / Group Leader: only WPs they are explicitly assigned to
+      const assignments = await prisma.workPackageAssignment.findMany({
+        where: { userId },
+        select: { wpId: true }
+      });
+      const assignedWpIds = assignments.map((a) => a.wpId);
+      where.id = { in: assignedWpIds };
+    }
+
     const wps = await prisma.workPackage.findMany({
-      where: { deletedAt: null },
+      where,
       orderBy: { updatedAt: 'desc' },
       include: {
         division: { select: { id: true, name: true, code: true } },
@@ -110,6 +135,24 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
 
     if (!wp) {
       res.status(404).json({ message: 'Work Package not found' });
+      return;
+    }
+
+    // Access control: Director/Admin see any WP; Manager sees own-division WPs;
+    // Staff/Group Leader can only access WPs they are assigned to.
+    const { userId, role, divisionId } = req.user!;
+    let canAccess = role === 'Director' || role === 'Admin';
+    if (!canAccess && role === 'Manager') {
+      canAccess = wp.divisionId === divisionId;
+    }
+    if (!canAccess) {
+      const assignment = await prisma.workPackageAssignment.findUnique({
+        where: { wpId_userId: { wpId: wp.id, userId } }
+      });
+      canAccess = assignment !== null;
+    }
+    if (!canAccess) {
+      res.status(403).json({ message: 'You do not have permission to view this work package' });
       return;
     }
 

@@ -21,9 +21,9 @@ const TASK_CREATOR_ROLES = ['Manager', 'Director', 'Admin'];
  * Format: [DivisionCode]-[000001]
  * Must be called inside a $transaction to avoid race conditions.
  */
-async function generateTaskId(divisionCode: string, tx: any): Promise<string> {
+async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
   const lastTask = await tx.task.findFirst({
-    where: { taskId: { startsWith: `${divisionCode}-` } },
+    where: { taskId: { startsWith: `${divisionCode}-` }, deletedAt: null },
     orderBy: { id: 'desc' },
     select: { taskId: true }
   });
@@ -165,13 +165,21 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
       };
     } else {
       // Staff / Group Leader: tasks they are assignee or issuer of,
-      // plus all Unassigned tasks targeted at their division (so they can see & claim them)
+      // plus all Unassigned tasks targeted at their division (so they can see & claim them),
+      // plus all tasks belonging to WPs they are assigned to
+      const wpAssignments = await prisma.workPackageAssignment.findMany({
+        where: { userId },
+        select: { wpId: true }
+      });
+      const memberWpIds = wpAssignments.map((a) => a.wpId);
+
       where = {
         deletedAt: null,
         OR: [
           { assignedToUserId: userId },
           { issuerId: userId },
-          { status: 'Unassigned', targetDivisionId: divisionId }
+          { status: 'Unassigned', targetDivisionId: divisionId },
+          ...(memberWpIds.length > 0 ? [{ wpId: { in: memberWpIds } }] : [])
         ]
       };
     }
@@ -278,6 +286,12 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
     }
 
     // Role-based visibility check
+    const isWpMember = task.wpId
+      ? (await prisma.workPackageAssignment.findUnique({
+          where: { wpId_userId: { wpId: task.wpId, userId } }
+        })) !== null
+      : false;
+
     const canView =
       role === 'Director' ||
       role === 'Admin' ||
@@ -285,7 +299,9 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
       task.assignedToUserId === userId ||
       (role === 'Manager' && task.targetDivisionId === divisionId) ||
       // Staff/Group Leader can view any Unassigned task in their division (to claim it)
-      (task.status === 'Unassigned' && task.targetDivisionId === divisionId);
+      (task.status === 'Unassigned' && task.targetDivisionId === divisionId) ||
+      // Any user assigned to the parent WP can view all tasks within it
+      isWpMember;
 
     if (!canView) {
       res.status(403).json({ message: 'You do not have permission to view this task' });
@@ -957,7 +973,7 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    if (!reason) {
+    if (!reason?.trim()) {
       res.status(400).json({ message: 'A reason is required when reassigning a task' });
       return;
     }
@@ -1468,8 +1484,8 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
     const { userId, role, divisionId } = req.user!;
     const { rating } = req.body;
 
-    if (rating === undefined || rating === null || !Number.isInteger(rating) || rating < 0 || rating > 3) {
-      res.status(400).json({ message: 'rating must be an integer between 0 and 3' });
+    if (rating === undefined || rating === null || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+      res.status(400).json({ message: 'rating must be an integer between 1 and 5' });
       return;
     }
 
@@ -1538,8 +1554,8 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
     });
 
     const content = isRevision
-      ? `Task re-rated from ${previousRating}/3 to ${rating}/3`
-      : `Task rated ${rating}/3`;
+      ? `Task re-rated from ${previousRating}/5 to ${rating}/5`
+      : `Task rated ${rating}/5`;
 
     await logAuditAndActivity(
       task.id,
@@ -1566,7 +1582,7 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
 
     const task = await prisma.task.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, issuerId: true, assignedToUserId: true, targetDivisionId: true }
+      select: { id: true, issuerId: true, assignedToUserId: true, targetDivisionId: true, wpId: true }
     });
 
     if (!task) {
@@ -1574,13 +1590,20 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    // Must have view access to the task
+    const isWpMember = task.wpId
+      ? (await prisma.workPackageAssignment.findUnique({
+          where: { wpId_userId: { wpId: task.wpId, userId } }
+        })) !== null
+      : false;
+
+    // Must have view access to the task (mirrors getTaskById canView logic)
     const canView =
       role === 'Director' ||
       role === 'Admin' ||
       task.issuerId === userId ||
       task.assignedToUserId === userId ||
-      (role === 'Manager' && task.targetDivisionId === divisionId);
+      (role === 'Manager' && task.targetDivisionId === divisionId) ||
+      isWpMember;
 
     if (!canView) {
       res.status(403).json({ message: 'You do not have permission to view this task activity' });
@@ -1635,7 +1658,7 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
 
     const task = await prisma.task.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, issuerId: true, assignedToUserId: true, targetDivisionId: true, status: true }
+      select: { id: true, issuerId: true, assignedToUserId: true, targetDivisionId: true, status: true, wpId: true }
     });
 
     if (!task) {
@@ -1643,11 +1666,18 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    // RBAC: Assignee + Issuer + Director + Managers of same Division
+    const isWpMember = task.wpId
+      ? (await prisma.workPackageAssignment.findUnique({
+          where: { wpId_userId: { wpId: task.wpId, userId } }
+        })) !== null
+      : false;
+
+    // RBAC: Assignee + Issuer + Director + Managers of same Division + WP members
     // Admin excluded from comment posting (system/user management role only)
     const canComment =
       task.assignedToUserId === userId ||
-      isReviewer(userId, role, divisionId, task);
+      isReviewer(userId, role, divisionId, task) ||
+      isWpMember;
 
     if (!canComment) {
       res.status(403).json({ message: 'You do not have permission to post comments on this task' });

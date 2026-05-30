@@ -733,6 +733,185 @@ describe('Work Package Backend', () => {
     });
   });
 
+  // ─── WP VISIBILITY (RBAC) ────────────────────────────────────────────
+
+  describe('WP Visibility (RBAC)', () => {
+    it('WV1: Staff sees only WPs they are assigned to in the list', async () => {
+      const assignedWp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS001',
+          name: 'Assigned WP',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+      const unassignedWp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS002',
+          name: 'Unassigned WP',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+      await prisma.workPackageAssignment.create({ data: { wpId: assignedWp.id, userId: staffUserId } });
+
+      const res = await request(app)
+        .get('/api/work-packages')
+        .set('Authorization', `Bearer ${staffToken}`);
+
+      expect(res.status).toBe(200);
+      const ids = res.body.map((w: any) => w.id);
+      expect(ids).toContain(assignedWp.id);
+      expect(ids).not.toContain(unassignedWp.id);
+    });
+
+    it('WV2: Staff with no WP assignments sees empty list', async () => {
+      await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS003',
+          name: 'Some WP',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+
+      const res = await request(app)
+        .get('/api/work-packages')
+        .set('Authorization', `Bearer ${staffToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(0);
+    });
+
+    it('WV3: Staff NOT assigned to WP gets 403 on GET /work-packages/:id', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS004',
+          name: 'Hidden WP',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+
+      const res = await request(app)
+        .get(`/api/work-packages/${wp.id}`)
+        .set('Authorization', `Bearer ${staffToken}`);
+
+      expect(res.status).toBe(403);
+    });
+
+    it('WV4: Staff assigned to WP can access its detail → 200', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS005',
+          name: 'Accessible WP',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+      await prisma.workPackageAssignment.create({ data: { wpId: wp.id, userId: staffUserId } });
+
+      const res = await request(app)
+        .get(`/api/work-packages/${wp.id}`)
+        .set('Authorization', `Bearer ${staffToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(wp.id);
+    });
+
+    it('WV5: Manager sees all WPs in their division only', async () => {
+      const ownDivWp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS006',
+          name: 'Own Div WP',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+      const otherDivWp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS007',
+          name: 'Other Div WP',
+          type: 'AUDIT',
+          divisionId: otherDivisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+
+      const res = await request(app)
+        .get('/api/work-packages')
+        .set('Authorization', `Bearer ${managerToken}`);
+
+      expect(res.status).toBe(200);
+      const ids = res.body.map((w: any) => w.id);
+      expect(ids).toContain(ownDivWp.id);
+      expect(ids).not.toContain(otherDivWp.id);
+    });
+
+    it('WV6: Director sees all WPs across divisions', async () => {
+      const wp1 = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS008',
+          name: 'Div 1 WP',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+      const wp2 = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-VIS009',
+          name: 'Div 2 WP',
+          type: 'AUDIT',
+          divisionId: otherDivisionId,
+          timeframeFrom: new Date('2026-06-01'),
+          timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId,
+          status: 'Open'
+        }
+      });
+
+      const res = await request(app)
+        .get('/api/work-packages')
+        .set('Authorization', `Bearer ${directorToken}`);
+
+      expect(res.status).toBe(200);
+      const ids = res.body.map((w: any) => w.id);
+      expect(ids).toContain(wp1.id);
+      expect(ids).toContain(wp2.id);
+    });
+  });
+
   // ─── WP TYPE CRUD ────────────────────────────────────────────────────
 
   describe('WpType CRUD (Admin only)', () => {
