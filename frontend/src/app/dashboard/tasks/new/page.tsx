@@ -40,15 +40,15 @@ export default function NewTaskPage() {
   const searchParams = useSearchParams();
   const { user } = useAuthStore();
 
+  // ── Prefill from query params ──
+  const prefilledWpId = searchParams.get('wpId') ? Number(searchParams.get('wpId')) : null;
+
   // Role gate on mount — redirect staff who arrive without a WP context
   useEffect(() => {
     if (user && !canAccessNewTaskPage(user.role, prefilledWpId)) {
       router.replace('/dashboard/tasks');
     }
   }, [user, router, prefilledWpId]);
-
-  // ── Prefill from query params ──
-  const prefilledWpId = searchParams.get('wpId') ? Number(searchParams.get('wpId')) : null;
 
   // ── Form state ──
   const [templateId, setTemplateId] = useState<number | ''>('');

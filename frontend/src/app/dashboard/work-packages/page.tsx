@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
 import { WorkPackageEnriched, WpStatus } from '../../../types';
@@ -37,6 +37,17 @@ export default function WorkPackageListPage() {
   const [statusFilter, setStatusFilter] = useState<WpStatus | 'all'>('all');
   const [viewFilter, setViewFilter] = useState<'my' | 'division' | 'all'>('my');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const defaultSetRef = useRef(false);
+
+  useEffect(() => {
+    if (user && !defaultSetRef.current) {
+      if (user.role === 'Director' || user.role === 'Admin') {
+        setViewFilter('all');
+      }
+      defaultSetRef.current = true;
+    }
+  }, [user]);
 
   const fetchWps = useCallback(async () => {
     setLoading(true);
