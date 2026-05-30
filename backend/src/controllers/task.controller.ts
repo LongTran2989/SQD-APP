@@ -138,7 +138,8 @@ function taskInclude() {
     issuer: { select: { id: true, name: true } },
     assignedToUser: { select: { id: true, name: true, role: { select: { name: true } } } },
     targetDivision: { select: { id: true, name: true, code: true } },
-    wp: { select: { id: true, wpId: true, name: true } }
+    wp: { select: { id: true, wpId: true, name: true } },
+    timeBooking: true
   };
 }
 

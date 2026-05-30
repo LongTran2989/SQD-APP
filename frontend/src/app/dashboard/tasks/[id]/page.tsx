@@ -11,6 +11,7 @@ import TaskActionBar from '../../../../components/tasks/TaskActionBar';
 import TaskFormPanel from '../../../../components/tasks/TaskFormPanel';
 import TaskActivityFeed from '../../../../components/tasks/TaskActivityFeed';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
+import TimeBookingPanel from '../../../../components/tasks/TimeBookingPanel';
 import toast from 'react-hot-toast';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
 
@@ -257,6 +258,15 @@ export default function TaskDetailPage() {
               taskStatus={task.status}
               formData={formData}
               onDataChange={handleDataChange}
+            />
+          )}
+
+          {/* Time Booking — available only once task reaches a final state */}
+          {['Closed', 'Rejected', 'Terminated'].includes(task.status) && (
+            <TimeBookingPanel
+              task={task}
+              currentUser={user}
+              onBookingChange={loadTask}
             />
           )}
         </div>

@@ -1840,4 +1840,217 @@ describe('Task Backend (Phase 5.2)', () => {
       });
     });
   });
+
+  // ─── Time Booking (Phase 5.6) ──────────────────────────────────────────────
+
+  describe('Time Booking', () => {
+    // Helper: create a fresh task per-test (beforeEach wipes all tasks)
+    async function makeTask(
+      status: string,
+      opts: { assigneeId?: number; estimatedHours?: number } = {}
+    ): Promise<{ id: number; taskId: string }> {
+      const t = await prisma.task.create({
+        data: {
+          taskId: `TSK-TB-${Date.now()}-${Math.floor(Math.random() * 9999)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          assignedToUserId: opts.assigneeId ?? staffId,
+          targetDivisionId: divisionId,
+          status,
+          schemaSnapshot: [],
+          assignmentType: 'INDIVIDUAL',
+          estimatedHours: opts.estimatedHours ?? null
+        }
+      });
+      return { id: t.id, taskId: t.taskId };
+    }
+
+    it('T74: Assignee POSTs booking on Closed task → 201 with correct structure', async () => {
+      const { id } = await makeTask('Closed', { estimatedHours: 4.0 });
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 3.0, notes: 'Main work' },
+        collaborators: []
+      };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(201);
+      expect(res.body.taskId).toBe(id);
+      expect(res.body.totalHours).toBe(3.0);
+      expect(res.body.estimatedHours).toBe(4.0);
+      expect(res.body.collaborators).toEqual([]);
+    });
+
+    it('T75: Non-assignee (Manager) attempts POST → 403', async () => {
+      const { id } = await makeTask('Closed');
+
+      const payload = { assigneeEntry: { userId: managerId, hoursLogged: 1.0, notes: '' }, collaborators: [] };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(403);
+    });
+
+    it('T76: POST on non-final state task → 400', async () => {
+      const { id } = await makeTask('In Progress');
+
+      const payload = { assigneeEntry: { userId: staffId, hoursLogged: 2.0, notes: '' }, collaborators: [] };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/Closed.*Rejected.*Terminated/i);
+    });
+
+    it('T77: Duplicate POST (booking already exists) → 409', async () => {
+      const { id } = await makeTask('Closed');
+
+      const payload = { assigneeEntry: { userId: staffId, hoursLogged: 1.0, notes: '' }, collaborators: [] };
+      // First POST — should succeed
+      await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      // Second POST — should be duplicate
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(409);
+    });
+
+    it('T78: PUT by assignee — update hours → 200, totalHours recalculated', async () => {
+      const { id } = await makeTask('Closed');
+
+      // Create booking first
+      await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ assigneeEntry: { userId: staffId, hoursLogged: 1.0, notes: '' }, collaborators: [] });
+
+      // Update with collaborator
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 5.0, notes: 'Revised' },
+        collaborators: [{ userId: managerId, hoursLogged: 1.5, notes: 'Assisted' }]
+      };
+      const res = await request(app)
+        .put(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(200);
+      expect(res.body.totalHours).toBe(6.5);
+      expect(res.body.collaborators).toHaveLength(1);
+    });
+
+    it('T79: PUT by Director (override) → 200', async () => {
+      const { id } = await makeTask('Closed');
+
+      // Create booking as assignee first
+      await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ assigneeEntry: { userId: staffId, hoursLogged: 2.0, notes: '' }, collaborators: [] });
+
+      // Director override
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 4.0, notes: 'Director corrected' },
+        collaborators: []
+      };
+      const res = await request(app)
+        .put(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(200);
+      expect(res.body.totalHours).toBe(4.0);
+    });
+
+    it('T80: PUT by non-assignee Manager → 403', async () => {
+      const { id } = await makeTask('Closed');
+
+      // Create booking as assignee first
+      await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ assigneeEntry: { userId: staffId, hoursLogged: 2.0, notes: '' }, collaborators: [] });
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 3.0, notes: '' },
+        collaborators: []
+      };
+      const res = await request(app)
+        .put(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(403);
+    });
+
+    it('T81: POST with collaborator userId == assignee userId → 400', async () => {
+      const { id } = await makeTask('Closed');
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 2.0, notes: '' },
+        collaborators: [{ userId: staffId, hoursLogged: 1.0, notes: 'Self as collaborator' }]
+      };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/assignee cannot also appear as a collaborator/i);
+    });
+
+    it('T82: POST with negative hoursLogged → 400', async () => {
+      const { id } = await makeTask('Closed');
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: -1.0, notes: '' },
+        collaborators: []
+      };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(400);
+    });
+
+    it('T83: AuditLog + TaskActivity SYSTEM_EVENT written on POST', async () => {
+      const { id, taskId } = await makeTask('Terminated');
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 2.5, notes: 'Final hours' },
+        collaborators: []
+      };
+      const postRes = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+      expect(postRes.status).toBe(201);
+
+      // AuditLog record
+      const auditEntry = await prisma.auditLog.findFirst({
+        where: { entityType: 'TimeBooking', entityId: taskId, actionType: 'TIME_BOOKING_CREATE' }
+      });
+      expect(auditEntry).not.toBeNull();
+
+      // TaskActivity SYSTEM_EVENT
+      const activityEntry = await prisma.taskActivity.findFirst({
+        where: { taskId: id, type: 'SYSTEM_EVENT', content: { contains: 'Time logged' } }
+      });
+      expect(activityEntry).not.toBeNull();
+    });
+  });
 });

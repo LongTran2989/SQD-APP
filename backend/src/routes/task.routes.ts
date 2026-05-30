@@ -23,6 +23,7 @@ import {
   getTaskActivity,
   postTaskComment
 } from '../controllers/task.controller';
+import { createTimeBooking, updateTimeBooking } from '../controllers/timebooking.controller';
 
 const router = Router();
 
@@ -67,5 +68,9 @@ router.put('/:id/rate', rateTask);
 // ─── Activity feed (Phase 5.3 endpoints included here per plan) ──────
 router.get('/:id/activity', getTaskActivity);
 router.post('/:id/activity', postTaskComment);
+
+// ─── Time Booking (Phase 5.6) ─────────────────────────────────────────
+router.post('/:id/time-booking', createTimeBooking);
+router.put('/:id/time-booking', updateTimeBooking);
 
 export default router;

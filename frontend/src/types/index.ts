@@ -122,6 +122,7 @@ export interface TaskEnriched extends Task {
   targetDivision: { id: number; name: string; code: string } | null;
   wp: { id: number; wpId: string; name: string } | null;
   taskData?: { data: Record<string, unknown> } | null;
+  timeBooking?: TimeBooking | null;
 }
 
 export type WpStatus = 'Open' | 'In Progress' | 'Overdue' | 'Closed' | 'Inactive';
@@ -193,11 +194,17 @@ export interface TaskActivityEnriched extends TaskActivity {
   author: { id: number; name: string | null } | null;
 }
 
+export interface TimeBookingEntry {
+  userId: number;
+  hoursLogged: number;
+  notes: string;
+}
+
 export interface TimeBooking {
   id: number;
   taskId: number;
-  assigneeEntry: any;
-  collaborators: any;
+  assigneeEntry: TimeBookingEntry;
+  collaborators: TimeBookingEntry[];
   totalHours: number;
   estimatedHours: number | null;
   createdAt: string;
