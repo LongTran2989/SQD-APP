@@ -62,9 +62,20 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
     - Fixed TypeScript implicit `any` parameter types on Prisma transaction client (`task.controller.ts`) and `computeWpStatus` input arguments (`wp.controller.ts`).
     - Removed hardcoded 'SQD' division filter in `datasource.controller.ts` (now returns all divisions per Option A).
     - Updated rating validation, error messages, and activity logging to use the **1–5** star rating scale.
+- **Phase 5.5 — Work Package Frontend & Transparency** (COMPLETED 2026-05-30)
+  > [!WARNING]
+  > **Note:** This phase was partially revised outside of Claude Code during execution. The actual code files are the source of truth — not the original Phase 5.5 plan.
+  - **Backend Permissions Relaxed (Transparency):** `wp.controller.ts` and `task.controller.ts` modified to allow all system users to view Work Packages and Tasks system-wide (removed `isWpMember` viewing restrictions). Anyone can comment on tasks. `wp.test.ts` and `task.test.ts` updated to match.
+  - **Frontend List Filters (`work-packages/page.tsx`):** Implemented frontend View Filters: "My WP" (default for Staff/Manager), "Division WP", and "All WP" (default for Admin/Director).
+  - **Frontend Detail View (`work-packages/[id]/page.tsx`):** Hidden action buttons (Edit, Close, Assign Users) for non-actionable viewers, cleanly separating viewing from acting. Staff assigned to a WP can still create tasks within it.
+  - **CHECK WP Deadline (`wpCheckService.ts`):** Adjusted the daily auto-generated task to set its deadline to the very end of the current day (`23:59:59.999`) so it properly displays as "today" and becomes overdue exactly at midnight.
+  - **Bugs Fixed:**
+    - *Crash on Create Task:* Fixed `ReferenceError: Cannot access 'prefilledWpId' before initialization` in `tasks/new/page.tsx` by hoisting the URL parameter parsing above the `useEffect` hook.
+    - *Date Input Validation:* Fixed an issue where date pickers allowed 5-digit years (e.g., `20023`) by globally adding `max="9999-12-31"` to all `type="date"` inputs (`TaskFormPanel.tsx`, `WorkPackageForm.tsx`, `TaskActionBar.tsx`, `TemplateBuilder.tsx`, `[id]/page.tsx`).
+    - *Test DB cleanup:* Created `backend/clean.ts` to cleanly drop data without foreign key violations during CI runs.
 
 ### Test Suite
-- All **130 integration tests passing** as of 2026-05-30
+- All **140 integration tests passing** as of 2026-05-30
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -752,14 +763,6 @@ All changes needed before Phase 5 development begins:
   - Inactivate / Reactivate controls
   - Rating UI (final state only; visible to Director for Manager assignees, Manager for same-Division assignees)
 
-#### Phase 5.5 — Work Package Frontend
-- [ ] `/dashboard/workpackages` — list view with filters
-- [ ] `/dashboard/workpackages/[id]` — WP detail view
-  - Linked Tasks list with statuses
-  - Create Task from inside WP (auto-linked)
-  - Assign users to WP (Manager only)
-  - Timeframe adjustment
-  - Inactivate / Reactivate
 
 #### Phase 5.6 — Time Booking
 - [ ] `TimeBooking` backend endpoints

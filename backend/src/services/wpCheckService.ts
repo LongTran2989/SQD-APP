@@ -151,6 +151,7 @@ export async function generateDailyCheckTasks(
       estimatedHours: template.estimatedHours,
       targetDivisionId: wp.divisionId,
       assignmentType: 'INDIVIDUAL',
+      deadline: new Date(endOfDay.getTime() - 1),
     }
   });
 
