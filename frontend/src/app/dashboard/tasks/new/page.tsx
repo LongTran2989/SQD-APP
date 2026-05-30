@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '../../../../store/authStore';
-import { Template } from '../../../../types';
+import { Template, WorkPackageEnriched } from '../../../../types';
 import { createTask, getDivisions, getUsers } from '../../../../api/taskApi';
+import { getWorkPackages } from '../../../../api/wpApi';
 import { apiClient } from '../../../../api/client';
 import toast from 'react-hot-toast';
 import {
@@ -12,6 +13,7 @@ import {
   FileCheck2,
   Clock,
   Info,
+  FolderOpen,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -30,6 +32,7 @@ interface SelectOption {
 
 export default function NewTaskPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuthStore();
 
   // Role gate on mount
@@ -39,17 +42,22 @@ export default function NewTaskPage() {
     }
   }, [user, router]);
 
+  // ── Prefill from query params ──
+  const prefilledWpId = searchParams.get('wpId') ? Number(searchParams.get('wpId')) : null;
+
   // ── Form state ──
   const [templateId, setTemplateId] = useState<number | ''>('');
   const [targetDivisionId, setTargetDivisionId] = useState<number | ''>(user?.divisionId ?? '');
   const [assignedToUserId, setAssignedToUserId] = useState<number | ''>('');
   const [deadline, setDeadline] = useState('');
+  const [wpId, setWpId] = useState<number | ''>(prefilledWpId ?? '');
   const [submitting, setSubmitting] = useState(false);
 
   // ── Data ──
   const [templates, setTemplates] = useState<Template[]>([]);
   const [divisions, setDivisions] = useState<SelectOption[]>([]);
   const [users, setUsers] = useState<SelectOption[]>([]);
+  const [workPackages, setWorkPackages] = useState<WorkPackageEnriched[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   // Selected template details for preview
@@ -58,10 +66,11 @@ export default function NewTaskPage() {
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const [tplRes, divRes, usersRes] = await Promise.all([
+        const [tplRes, divRes, usersRes, wpsRes] = await Promise.all([
           apiClient.get('/templates'),
           getDivisions(),
           getUsers(),
+          getWorkPackages(),
         ]);
 
         // Only Published templates
@@ -77,6 +86,8 @@ export default function NewTaskPage() {
         setTemplates(published);
         setDivisions(divRes);
         setUsers(usersRes);
+        // Only active (non-Closed, non-Inactive) WPs
+        setWorkPackages(wpsRes.filter((w) => w.computedStatus !== 'Closed' && w.computedStatus !== 'Inactive'));
       } catch {
         toast.error('Failed to load form data');
       } finally {
@@ -114,6 +125,7 @@ export default function NewTaskPage() {
         targetDivisionId: Number(targetDivisionId),
         assignedToUserId: assignedToUserId ? Number(assignedToUserId) : undefined,
         deadline: deadline || undefined,
+        wpId: wpId ? Number(wpId) : undefined,
       });
       toast.success(`Task ${task.taskId} created`);
       router.push(`/dashboard/tasks/${task.id}`);
@@ -262,14 +274,33 @@ export default function NewTaskPage() {
               />
             </div>
 
-            {/* Work Package — Phase 5.5 */}
+            {/* Work Package */}
             <div>
-              <label className="block text-sm font-semibold text-slate-400 mb-1.5">
-                Work Package <span className="font-normal">(coming in Phase 5.5)</span>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-select">
+                <span className="flex items-center gap-1.5">
+                  <FolderOpen className="w-4 h-4 text-slate-400" />
+                  Work Package <span className="font-normal text-slate-400">(optional)</span>
+                </span>
               </label>
-              <div className="w-full px-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-sm text-slate-400 cursor-not-allowed">
-                Work Package linking will be available in Phase 5.5
-              </div>
+              <select
+                id="wp-select"
+                value={wpId}
+                onChange={(e) => setWpId(e.target.value ? Number(e.target.value) : '')}
+                disabled={!!prefilledWpId}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm disabled:bg-slate-50 disabled:text-slate-500"
+              >
+                <option value="">No work package</option>
+                {workPackages.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.wpId} — {w.name}
+                  </option>
+                ))}
+              </select>
+              {prefilledWpId && (
+                <p className="mt-1.5 text-xs text-blue-600 flex items-center gap-1">
+                  <Info className="w-3.5 h-3.5" /> Work package pre-selected from the work package page.
+                </p>
+              )}
             </div>
           </div>
 

@@ -165,13 +165,21 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
       };
     } else {
       // Staff / Group Leader: tasks they are assignee or issuer of,
-      // plus all Unassigned tasks targeted at their division (so they can see & claim them)
+      // plus all Unassigned tasks targeted at their division (so they can see & claim them),
+      // plus all tasks belonging to WPs they are assigned to
+      const wpAssignments = await prisma.workPackageAssignment.findMany({
+        where: { userId },
+        select: { wpId: true }
+      });
+      const memberWpIds = wpAssignments.map((a) => a.wpId);
+
       where = {
         deletedAt: null,
         OR: [
           { assignedToUserId: userId },
           { issuerId: userId },
-          { status: 'Unassigned', targetDivisionId: divisionId }
+          { status: 'Unassigned', targetDivisionId: divisionId },
+          ...(memberWpIds.length > 0 ? [{ wpId: { in: memberWpIds } }] : [])
         ]
       };
     }
@@ -278,6 +286,12 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
     }
 
     // Role-based visibility check
+    const isWpMember = task.wpId
+      ? (await prisma.workPackageAssignment.findUnique({
+          where: { wpId_userId: { wpId: task.wpId, userId } }
+        })) !== null
+      : false;
+
     const canView =
       role === 'Director' ||
       role === 'Admin' ||
@@ -285,7 +299,9 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
       task.assignedToUserId === userId ||
       (role === 'Manager' && task.targetDivisionId === divisionId) ||
       // Staff/Group Leader can view any Unassigned task in their division (to claim it)
-      (task.status === 'Unassigned' && task.targetDivisionId === divisionId);
+      (task.status === 'Unassigned' && task.targetDivisionId === divisionId) ||
+      // Any user assigned to the parent WP can view all tasks within it
+      isWpMember;
 
     if (!canView) {
       res.status(403).json({ message: 'You do not have permission to view this task' });

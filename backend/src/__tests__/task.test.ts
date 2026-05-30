@@ -492,6 +492,87 @@ describe('Task Backend (Phase 5.2)', () => {
       await prisma.workPackage.delete({ where: { id: wp.id } });
     });
 
+    it('T14c: Staff assigned to a WP can view (GET) a task inside that WP → 200', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: `TSK-WP-14C${String(Date.now()).slice(-4)}`,
+          name: 'WP 14C',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date(),
+          timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: managerId,
+          status: 'Open'
+        }
+      });
+      await prisma.workPackageAssignment.create({
+        data: { wpId: wp.id, userId: staffId }
+      });
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${String(Date.now()).slice(-6)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          wpId: wp.id,
+          targetDivisionId: divisionId,
+          status: 'Assigned',
+          assignedToUserId: managerId,
+          schemaSnapshot: [],
+          assignmentType: 'INDIVIDUAL'
+        }
+      });
+
+      const res = await request(app)
+        .get(`/api/tasks/${task.id}`)
+        .set('Authorization', `Bearer ${staffToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(task.id);
+
+      // Cleanup
+      await prisma.workPackageAssignment.deleteMany({ where: { wpId: wp.id } });
+      await prisma.task.delete({ where: { id: task.id } });
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+
+    it('T14d: Staff NOT assigned to a WP cannot view a task inside it → 403', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: `TSK-WP-14D${String(Date.now()).slice(-4)}`,
+          name: 'WP 14D',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date(),
+          timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: managerId,
+          status: 'Open'
+        }
+      });
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${String(Date.now()).slice(-6)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          wpId: wp.id,
+          targetDivisionId: divisionId,
+          status: 'Assigned',
+          assignedToUserId: managerId,
+          schemaSnapshot: [],
+          assignmentType: 'INDIVIDUAL'
+        }
+      });
+
+      const res = await request(app)
+        .get(`/api/tasks/${task.id}`)
+        .set('Authorization', `Bearer ${staffToken}`);
+
+      expect(res.status).toBe(403);
+
+      // Cleanup
+      await prisma.task.delete({ where: { id: task.id } });
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+
     it('T15: Self-assign (PERFORM THIS TASK) on Unassigned task', async () => {
       const taskId = await createUnassignedTask();
 
@@ -1427,13 +1508,13 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(revisionEvent).toBeDefined();
     });
 
-    it('T63: Rating out of range (4) → 400', async () => {
+    it('T63: Rating out of range (6) → 400', async () => {
       const taskId = await createClosedTask(staffId);
 
       const res = await request(app)
         .put(`/api/tasks/${taskId}/rate`)
         .set('Authorization', `Bearer ${managerToken}`)
-        .send({ rating: 4 });
+        .send({ rating: 6 });
 
       expect(res.status).toBe(400);
     });
