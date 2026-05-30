@@ -202,6 +202,7 @@ export default function WorkPackageForm({
               value={timeframeFrom}
               onChange={(e) => setTimeframeFrom(e.target.value)}
               required
+              max="9999-12-31"
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
             />
           </div>
@@ -214,6 +215,7 @@ export default function WorkPackageForm({
               type="date"
               value={timeframeTo}
               min={timeframeFrom || undefined}
+              max="9999-12-31"
               onChange={(e) => setTimeframeTo(e.target.value)}
               required
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"

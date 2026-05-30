@@ -590,6 +590,7 @@ export default function TaskActionBar({
                     value={extensionNewDeadline}
                     onChange={(e) => setExtensionNewDeadline(e.target.value)}
                     min={new Date().toISOString().split('T')[0]}
+                    max="9999-12-31"
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

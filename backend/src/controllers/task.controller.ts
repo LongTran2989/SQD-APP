@@ -285,28 +285,9 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Role-based visibility check
-    const isWpMember = task.wpId
-      ? (await prisma.workPackageAssignment.findUnique({
-          where: { wpId_userId: { wpId: task.wpId, userId } }
-        })) !== null
-      : false;
-
-    const canView =
-      role === 'Director' ||
-      role === 'Admin' ||
-      task.issuerId === userId ||
-      task.assignedToUserId === userId ||
-      (role === 'Manager' && task.targetDivisionId === divisionId) ||
-      // Staff/Group Leader can view any Unassigned task in their division (to claim it)
-      (task.status === 'Unassigned' && task.targetDivisionId === divisionId) ||
-      // Any user assigned to the parent WP can view all tasks within it
-      isWpMember;
-
-    if (!canView) {
-      res.status(403).json({ message: 'You do not have permission to view this task' });
-      return;
-    }
+    // Access control: Transparent viewing model
+    // All authenticated users can view the task details.
+    // Action endpoints (PUT/POST) remain strictly controlled.
 
     res.json({ ...task, isOverdue: computeIsOverdue(task) });
   } catch (error) {
@@ -1590,25 +1571,8 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const isWpMember = task.wpId
-      ? (await prisma.workPackageAssignment.findUnique({
-          where: { wpId_userId: { wpId: task.wpId, userId } }
-        })) !== null
-      : false;
-
-    // Must have view access to the task (mirrors getTaskById canView logic)
-    const canView =
-      role === 'Director' ||
-      role === 'Admin' ||
-      task.issuerId === userId ||
-      task.assignedToUserId === userId ||
-      (role === 'Manager' && task.targetDivisionId === divisionId) ||
-      isWpMember;
-
-    if (!canView) {
-      res.status(403).json({ message: 'You do not have permission to view this task activity' });
-      return;
-    }
+    // Access control: Transparent viewing model
+    // All authenticated users can view the task activity feed.
 
     const activities = await prisma.taskActivity.findMany({
       where: { taskId: id },
@@ -1666,23 +1630,7 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const isWpMember = task.wpId
-      ? (await prisma.workPackageAssignment.findUnique({
-          where: { wpId_userId: { wpId: task.wpId, userId } }
-        })) !== null
-      : false;
-
-    // RBAC: Assignee + Issuer + Director + Managers of same Division + WP members
-    // Admin excluded from comment posting (system/user management role only)
-    const canComment =
-      task.assignedToUserId === userId ||
-      isReviewer(userId, role, divisionId, task) ||
-      isWpMember;
-
-    if (!canComment) {
-      res.status(403).json({ message: 'You do not have permission to post comments on this task' });
-      return;
-    }
+    // Access control: Anyone can comment on tasks (Transparent commenting model)
 
     const activity = await prisma.taskActivity.create({
       data: {

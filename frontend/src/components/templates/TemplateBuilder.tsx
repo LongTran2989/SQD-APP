@@ -447,7 +447,7 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                       
                       {f.type === 'text' && <input type="text" className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" placeholder="Text input" disabled />}
                       {f.type === 'number' && <input type="number" className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" placeholder="0" disabled />}
-                      {f.type === 'date' && <input type="date" className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" disabled />}
+                      {f.type === 'date' && <input type="date" className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" max="9999-12-31" disabled />}
                       {f.type === 'textarea' && <textarea className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" rows={3} placeholder="Text area" disabled />}
                       {f.type === 'select' && (
                         <select className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" disabled>

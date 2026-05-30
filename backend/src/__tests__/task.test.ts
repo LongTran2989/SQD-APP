@@ -131,9 +131,11 @@ describe('Task Backend (Phase 5.2)', () => {
   });
 
   afterAll(async () => {
+    await prisma.workPackageAssignment.deleteMany({});
     await prisma.taskActivity.deleteMany({});
     await prisma.taskData.deleteMany({});
     await prisma.task.deleteMany({});
+    await prisma.workPackage.deleteMany({});
     await prisma.auditLog.deleteMany({});
     // Delete ALL templates that were created by test users (includes dynamically created ones in Submission group)
     // Must happen before user deletion to avoid FK constraint violation on Template.ownerId
@@ -615,7 +617,7 @@ describe('Task Backend (Phase 5.2)', () => {
       await prisma.workPackage.delete({ where: { id: wp.id } });
     });
 
-    it('T14d: Staff NOT assigned to a WP cannot view a task inside it → 403', async () => {
+    it('T14d: Staff NOT assigned to a WP can view a task inside it (Transparent Model) → 200', async () => {
       const wp = await prisma.workPackage.create({
         data: {
           wpId: `TSK-WP-14D${String(Date.now()).slice(-4)}`,
@@ -646,7 +648,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .get(`/api/tasks/${task.id}`)
         .set('Authorization', `Bearer ${staffToken}`);
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
 
       // Cleanup
       await prisma.task.delete({ where: { id: task.id } });
@@ -1680,16 +1682,16 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.status).toBe(201);
     });
 
-    it('T68: User without task access cannot post comment → 403', async () => {
+    it('T68: User without task access can post comment (Transparent Model) → 201', async () => {
       const { taskId } = await createTaskWithActivity();
 
       // manager2 is in a different division and is not issuer/assignee
       const res = await request(app)
         .post(`/api/tasks/${taskId}/activity`)
         .set('Authorization', `Bearer ${manager2Token}`)
-        .send({ content: 'Unauthorized comment' });
+        .send({ content: 'Transparent comment' });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(201);
     });
 
     it('T69: No PATCH or DELETE endpoint exists for activity entries → 404', async () => {

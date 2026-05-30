@@ -137,6 +137,7 @@ function FieldRenderer({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           required={field.required}
+          max="9999-12-31"
           className={baseInputClass}
         />
       );
