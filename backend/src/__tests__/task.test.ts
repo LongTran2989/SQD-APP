@@ -535,6 +535,86 @@ describe('Task Backend (Phase 5.2)', () => {
       await prisma.workPackage.delete({ where: { id: wp.id } });
     });
 
+    it('T14c_act: Staff WP member can view activity feed of a task inside their WP → 200', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: `TSK-WP-C_ACT${String(Date.now()).slice(-4)}`,
+          name: 'WP C_ACT',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date(),
+          timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: managerId,
+          status: 'Open'
+        }
+      });
+      await prisma.workPackageAssignment.create({ data: { wpId: wp.id, userId: staffId } });
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${String(Date.now()).slice(-6)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          wpId: wp.id,
+          targetDivisionId: divisionId,
+          status: 'Assigned',
+          assignedToUserId: managerId,
+          schemaSnapshot: [],
+          assignmentType: 'INDIVIDUAL'
+        }
+      });
+
+      const res = await request(app)
+        .get(`/api/tasks/${task.id}/activity`)
+        .set('Authorization', `Bearer ${staffToken}`);
+
+      expect(res.status).toBe(200);
+
+      await prisma.workPackageAssignment.deleteMany({ where: { wpId: wp.id } });
+      await prisma.task.delete({ where: { id: task.id } });
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+
+    it('T14c_com: Staff WP member can post a comment on a task inside their WP → 201', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: `TSK-WP-C_COM${String(Date.now()).slice(-4)}`,
+          name: 'WP C_COM',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date(),
+          timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: managerId,
+          status: 'Open'
+        }
+      });
+      await prisma.workPackageAssignment.create({ data: { wpId: wp.id, userId: staffId } });
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${String(Date.now()).slice(-6)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          wpId: wp.id,
+          targetDivisionId: divisionId,
+          status: 'Assigned',
+          assignedToUserId: managerId,
+          schemaSnapshot: [],
+          assignmentType: 'INDIVIDUAL'
+        }
+      });
+
+      const res = await request(app)
+        .post(`/api/tasks/${task.id}/activity`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ content: 'WP member comment' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.content).toBe('WP member comment');
+
+      await prisma.workPackageAssignment.deleteMany({ where: { wpId: wp.id } });
+      await prisma.task.delete({ where: { id: task.id } });
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+
     it('T14d: Staff NOT assigned to a WP cannot view a task inside it → 403', async () => {
       const wp = await prisma.workPackage.create({
         data: {
