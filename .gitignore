@@ -124,3 +124,6 @@ dist
 # IDEs
 .idea/
 .vscode/
+
+# Archive
+docs/archive/

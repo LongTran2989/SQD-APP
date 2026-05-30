@@ -51,9 +51,11 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - Strict TypeScript null checks resolved (`Prisma.DbNull` applied to JSON columns)
   - Activity feed (`GET /api/tasks/:id/activity`) and comments (`POST /api/tasks/:id/activity`) implemented
   - Work Package RBAC exceptions implemented (Staff/Group Leader can create and assign tasks within their assigned WPs, scoped to their division)
+- **Phase 5.4** — Task Frontend (COMPLETED)
+  - Task dashboard list views and execution routing implemented.
 
 ### Test Suite
-- All **129 integration tests passing** as of 2026-05-23
+- All **130 integration tests passing** as of 2026-05-30
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -708,31 +710,31 @@ All changes needed before Phase 5 development begins:
 - [x] Audit fix: `user.controller.ts` updateUserRole missing soft-delete guard
 
 #### Phase 5.2 — Task Backend
-- [ ] `task.routes.ts` + `task.controller.ts`
-- [ ] Full CRUD for Task
-- [ ] `GET /api/tasks/my-tasks` — tasks where user is assignee or issuer
-- [ ] `GET /api/tasks/unassigned` — open pool for "PERFORM THIS TASK"
-- [ ] `PUT /api/tasks/:id/assign` — assign to user (with self-serve support)
-- [ ] `PUT /api/tasks/:id/data` — save TaskData progress
-- [ ] `PUT /api/tasks/:id/submit` — assignee submits
-- [ ] `PUT /api/tasks/:id/review` — reviewer action (Approve / Reject / Follow-up)
-- [ ] `PUT /api/tasks/:id/post-rejection` — Terminate or Reassign
-- [ ] `PUT /api/tasks/:id/inactive` — inactivate with reason
-- [ ] `PUT /api/tasks/:id/reactivate`
-- [ ] `PUT /api/tasks/:id/deadline` — set or extend deadline
-- [ ] `PUT /api/tasks/:id/transfer-issuer` — transfer issuer rights
-- [ ] `PUT /api/tasks/:id/rate` — rate Task (0–3); enforce Director→Manager and Manager→same-Division rules; log revisions to TaskActivity
-- [ ] Auto-log SYSTEM_EVENT to `TaskActivity` on every state change
-- [ ] RBAC enforcement: review rights = Issuer + Director + Managers of same Division
+- [x] `task.routes.ts` + `task.controller.ts`
+- [x] Full CRUD for Task
+- [x] `GET /api/tasks/my-tasks` — tasks where user is assignee or issuer
+- [x] `GET /api/tasks/unassigned` — open pool for "PERFORM THIS TASK"
+- [x] `PUT /api/tasks/:id/assign` — assign to user (with self-serve support)
+- [x] `PUT /api/tasks/:id/data` — save TaskData progress
+- [x] `PUT /api/tasks/:id/submit` — assignee submits
+- [x] `PUT /api/tasks/:id/review` — reviewer action (Approve / Reject / Follow-up)
+- [x] `PUT /api/tasks/:id/post-rejection` — Terminate or Reassign
+- [x] `PUT /api/tasks/:id/inactive` — inactivate with reason
+- [x] `PUT /api/tasks/:id/reactivate`
+- [x] `PUT /api/tasks/:id/deadline` — set or extend deadline
+- [x] `PUT /api/tasks/:id/transfer-issuer` — transfer issuer rights
+- [x] `PUT /api/tasks/:id/rate` — rate Task (0–3); enforce Director→Manager and Manager→same-Division rules; log revisions to TaskActivity
+- [x] Auto-log SYSTEM_EVENT to `TaskActivity` on every state change
+- [x] RBAC enforcement: review rights = Issuer + Director + Managers of same Division
 
 #### Phase 5.3 — TaskActivity Backend
-- [ ] `GET /api/tasks/:id/activity` — full chronological feed
-- [ ] `POST /api/tasks/:id/activity` — post a COMMENT
+- [x] `GET /api/tasks/:id/activity` — full chronological feed
+- [x] `POST /api/tasks/:id/activity` — post a COMMENT
 
 #### Phase 5.4 — Task Frontend
-- [ ] `/dashboard/tasks` — list view, tabs: Unassigned | Assigned | In Progress | In Review | Closed | All
-- [ ] Status filter pills (all 10 statuses)
-- [ ] `/dashboard/tasks/[id]` — Task execution view
+- [x] `/dashboard/tasks` — list view, tabs: Unassigned | Assigned | In Progress | In Review | Closed | All
+- [x] Status filter pills (all 10 statuses)
+- [x] `/dashboard/tasks/[id]` — Task execution view
   - Dynamic form rendering from `formSchema`
   - TaskActivity feed panel (right side or bottom)
   - Action buttons contextual to current status and user role
