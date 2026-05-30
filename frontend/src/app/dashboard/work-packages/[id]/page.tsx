@@ -174,8 +174,10 @@ export default function WorkPackageDetailPage() {
   }
 
   const isCreator = user.id === wp.creatorId;
+  const isWpMember = wp.assignments.some((a) => a.userId === user.id);
   const canChangeStatus = isCreator || STATUS_CHANGE_ROLES.includes(user.role);
   const canEdit = EDIT_ROLES.includes(user.role) && wp.computedStatus !== 'Closed';
+  const canCreateTask = (EDIT_ROLES.includes(user.role) || isWpMember) && wp.computedStatus !== 'Closed';
 
   const showInactivate = canChangeStatus && wp.computedStatus !== 'Inactive' && wp.computedStatus !== 'Closed';
   const showReactivate = canChangeStatus && wp.computedStatus === 'Inactive';
@@ -310,7 +312,7 @@ export default function WorkPackageDetailPage() {
                   {wp.tasks.length}
                 </span>
               </h3>
-              {EDIT_ROLES.includes(user.role) && wp.computedStatus !== 'Closed' && (
+              {canCreateTask && (
                 <Link
                   href={`/dashboard/tasks/new?wpId=${wp.id}`}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-lg transition-colors"
@@ -325,7 +327,7 @@ export default function WorkPackageDetailPage() {
               <div className="p-10 text-center">
                 <FolderOpen className="w-10 h-10 text-slate-300 mx-auto mb-3" />
                 <p className="text-slate-500 text-sm">No tasks yet.</p>
-                {EDIT_ROLES.includes(user.role) && wp.computedStatus !== 'Closed' && (
+                {canCreateTask && (
                   <Link
                     href={`/dashboard/tasks/new?wpId=${wp.id}`}
                     className="mt-3 inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline font-medium"

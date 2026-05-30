@@ -19,7 +19,12 @@ import Link from 'next/link';
 
 // ─── Role gate ────────────────────────────────────────────────────────────────
 
-const ALLOWED_ROLES = ['Manager', 'Director', 'Admin'];
+const ELEVATED_ROLES = ['Manager', 'Director', 'Admin'];
+// Staff/Group Leader may reach this page ONLY when arriving from a WP (wpId pre-filled).
+// Backend still enforces WP membership — the frontend just removes the hard redirect.
+function canAccessNewTaskPage(role: string, prefilledWpId: number | null): boolean {
+  return ELEVATED_ROLES.includes(role) || prefilledWpId !== null;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,12 +40,12 @@ export default function NewTaskPage() {
   const searchParams = useSearchParams();
   const { user } = useAuthStore();
 
-  // Role gate on mount
+  // Role gate on mount — redirect staff who arrive without a WP context
   useEffect(() => {
-    if (user && !ALLOWED_ROLES.includes(user.role)) {
+    if (user && !canAccessNewTaskPage(user.role, prefilledWpId)) {
       router.replace('/dashboard/tasks');
     }
-  }, [user, router]);
+  }, [user, router, prefilledWpId]);
 
   // ── Prefill from query params ──
   const prefilledWpId = searchParams.get('wpId') ? Number(searchParams.get('wpId')) : null;
@@ -135,7 +140,7 @@ export default function NewTaskPage() {
     }
   };
 
-  if (!user || !ALLOWED_ROLES.includes(user.role)) return null;
+  if (!user || !canAccessNewTaskPage(user.role, prefilledWpId)) return null;
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -228,7 +233,8 @@ export default function NewTaskPage() {
                 value={targetDivisionId}
                 onChange={(e) => setTargetDivisionId(e.target.value ? Number(e.target.value) : '')}
                 required
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                disabled={!ELEVATED_ROLES.includes(user?.role ?? '')}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm disabled:bg-slate-50 disabled:text-slate-500"
               >
                 <option value="">Select division...</option>
                 {divisions.map((d) => (
