@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
-import { PlaneTakeoff, ShieldAlert } from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
 
 export default function LoginPage() {
   const [employeeId, setEmployeeId] = useState('');
@@ -55,8 +55,8 @@ export default function LoginPage() {
 
       <div className="w-full max-w-md p-8 bg-white/80 backdrop-blur-xl rounded-2xl shadow-xl z-10 border border-slate-100">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg mb-4">
-            <PlaneTakeoff className="text-white w-8 h-8" />
+          <div className="w-20 h-20 flex items-center justify-center mb-4">
+            <img src="/logo.png" alt="SQD Logo" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-3xl font-bold text-slate-800 tracking-tight">SQD-APP</h1>
           <p className="text-slate-500 font-medium">Aviation QA System</p>

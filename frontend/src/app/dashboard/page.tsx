@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuthStore } from '../../store/authStore';
-import { PlaneTakeoff, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
 
 export default function DashboardHome() {
   const user = useAuthStore((state) => state.user);
@@ -13,8 +13,8 @@ export default function DashboardHome() {
           <h1 className="text-2xl font-bold text-slate-800 mb-2">Welcome back, {user?.name}!</h1>
           <p className="text-slate-500">Here's what is happening in your maintenance division today.</p>
         </div>
-        <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center border border-blue-100">
-          <PlaneTakeoff className="text-blue-600 w-8 h-8" />
+        <div className="w-16 h-16 flex items-center justify-center">
+          <img src="/logo.png" alt="SQD Logo" className="w-14 h-14 object-contain" />
         </div>
       </div>
 

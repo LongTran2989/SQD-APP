@@ -9,8 +9,7 @@ import {
   FileCheck2,
   FolderOpen,
   Users,
-  Settings,
-  PlaneTakeoff
+  Settings
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -34,8 +33,8 @@ export default function Sidebar() {
   return (
     <div className="w-64 bg-white border-r border-slate-200 h-full flex flex-col shadow-sm">
       <div className="p-6 flex items-center space-x-3 border-b border-slate-100">
-        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-          <PlaneTakeoff className="text-white w-5 h-5" />
+        <div className="w-8 h-8 flex items-center justify-center">
+          <img src="/logo.png" alt="SQD Logo" className="w-full h-full object-contain" />
         </div>
         <span className="text-xl font-bold text-slate-800 tracking-tight">SQD-APP</span>
       </div>
