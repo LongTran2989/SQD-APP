@@ -13,8 +13,9 @@ const prisma = new PrismaClient({ adapter });
 describe('Seed Data Verification', () => {
   beforeAll(() => {
     // Run the seed script against the test database
-    // We use ts-node.cmd explicitly to avoid Windows npx execution policy issues
-    const tsNodePath = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'ts-node.cmd');
+    // Use the platform-appropriate ts-node binary: ts-node.cmd on Windows, ts-node elsewhere.
+    const tsNodeBin = process.platform === 'win32' ? 'ts-node.cmd' : 'ts-node';
+    const tsNodePath = path.join(__dirname, '..', '..', 'node_modules', '.bin', tsNodeBin);
     const seedScript = path.join(__dirname, '..', '..', 'prisma', 'seed.ts');
     
     console.log('Running seed script for tests...');

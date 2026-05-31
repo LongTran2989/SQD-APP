@@ -15,6 +15,7 @@ model Department {
   id             Int        @id @default(autoincrement())
   name           String     @unique
   divisions      Division[]
+  findings       Finding[]  @relation("FindingDepartment")
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 }
@@ -251,7 +252,7 @@ model TaskData {
 model Finding {
   id                 Int        @id @default(autoincrement())
   severity           String?    // Observation, Level 1, Level 2
-  category           String     // Safety, Documentation, Tools, etc.
+  category           String?    // Legacy classification (Safety, Documentation, Tools, etc.) — optional; eventType is the primary classifier
   description        String
   status             String     @default("Open") // Open, In Progress, Pending Verification, Closed
   
@@ -277,7 +278,10 @@ model Finding {
   
   targetDivisionId   Int?
   targetDivision     Division?  @relation("FindingTargetDivision", fields: [targetDivisionId], references: [id])
-  
+
+  departmentId       Int        // Department where the finding occurred — required at raise time
+  department         Department @relation("FindingDepartment", fields: [departmentId], references: [id])
+
   followUpTasks      Task[]     @relation("FindingFollowUpTask")
   
   deletedAt          DateTime?
