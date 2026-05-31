@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A full-stack aviation maintenance Quality Assurance (QA) and Quality Control (QC) web application for managing dynamic audit templates, task assignment, inspections, findings, and work packages.
 
-**Status:** Phase 5 (Task Management & Work Packages) — ACTIVE DEVELOPMENT
+**Status:** Phase 6 (Findings System) — ACTIVE DEVELOPMENT (Phase 5 fully complete)
 
 ---
 
@@ -112,7 +112,7 @@ npm run test
 npm run test -- auth.test.ts
 ```
 
-Always targets `sqd_qa_test_db` (Rule 8). Database wiped in `beforeEach`. All 130+ tests must pass before and after every change.
+Always targets `sqd_qa_test_db` (Rule 8). Database wiped in `beforeEach`. All 150 tests must pass before and after every change.
 
 ---
 
@@ -163,5 +163,5 @@ Audited 2026-05-29. See `CLAUDE_HANDOVER.md` Section 11 for detailed fixes:
 1. Re-read **NON-NEGOTIABLE RULES** above.
 2. Read `CLAUDE_HANDOVER.md` Sections 1, 2, 3, 6, and 10.
 3. Plan every file change, get approval before touching code (Rule 1).
-4. Run `cd backend && npm run test` — confirm 130+ pass as baseline.
+4. Run `cd backend && npm run test` — confirm 150 pass as baseline.
 5. After user confirms completion, update `CLAUDE_HANDOVER.md` (Rule 12).

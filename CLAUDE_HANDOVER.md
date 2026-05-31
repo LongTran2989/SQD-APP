@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-05-30 (rev 4). Supersedes all previous versions.*
+*Last updated: 2026-05-31 (rev 5). Supersedes all previous versions.*
 
 ---
 
@@ -73,9 +73,14 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
     - *Crash on Create Task:* Fixed `ReferenceError: Cannot access 'prefilledWpId' before initialization` in `tasks/new/page.tsx` by hoisting the URL parameter parsing above the `useEffect` hook.
     - *Date Input Validation:* Fixed an issue where date pickers allowed 5-digit years (e.g., `20023`) by globally adding `max="9999-12-31"` to all `type="date"` inputs (`TaskFormPanel.tsx`, `WorkPackageForm.tsx`, `TaskActionBar.tsx`, `TemplateBuilder.tsx`, `[id]/page.tsx`).
     - *Test DB cleanup:* Created `backend/clean.ts` to cleanly drop data without foreign key violations during CI runs.
+- **Phase 5.6 — Time Booking** (COMPLETED 2026-05-31)
+  - **Backend (`timebooking.controller.ts`):** `createTimeBooking` (POST) and `updateTimeBooking` (PUT) with full validation, RBAC (assignee creates; assignee + Admin + Director can update), dual audit write (AuditLog `TIME_BOOKING_CREATE`/`TIME_BOOKING_UPDATE` + TaskActivity `SYSTEM_EVENT`), soft-delete guard on task lookup, one-booking-per-task uniqueness enforcement, assignee-cannot-be-collaborator guard, `estimatedHours` snapshot on creation.
+  - **Routes:** `POST /api/tasks/:id/time-booking` and `PUT /api/tasks/:id/time-booking` registered in `task.routes.ts`.
+  - **Frontend (`TimeBookingPanel.tsx`):** Full form (hours + notes + collaborator management), read-only summary view with budget-vs-actual comparison badge, edit mode for existing bookings, live total preview during form entry.
+  - **Integration:** `TimeBookingPanel` imported and rendered in `tasks/[id]/page.tsx` (final-state tasks only).
 
 ### Test Suite
-- All **140 integration tests passing** as of 2026-05-30
+- All **150 integration tests passing** as of 2026-05-31
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -510,7 +515,7 @@ These are two separate systems that serve different purposes. **Both** are writt
 
 **Purpose:** Log actual hours spent on a Task after it reaches a final state.
 
-**New model — not yet in schema. Phase 5 or Phase 6.**
+**Model implemented in Phase 5.0 schema migration. Backend + frontend completed in Phase 5.6.**
 
 **Available only when Task status is:** `Closed`, `Rejected`, or `Terminated`
 
@@ -764,10 +769,10 @@ All changes needed before Phase 5 development begins:
   - Rating UI (final state only; visible to Director for Manager assignees, Manager for same-Division assignees)
 
 
-#### Phase 5.6 — Time Booking
-- [ ] `TimeBooking` backend endpoints
-- [ ] Time Booking UI on Task detail page (available at final state only)
-- [ ] Collaborator addition (assignee only)
+#### Phase 5.6 — Time Booking (COMPLETED 2026-05-31)
+- [x] `TimeBooking` backend endpoints (`POST` + `PUT /api/tasks/:id/time-booking`)
+- [x] Time Booking UI on Task detail page (available at final state only)
+- [x] Collaborator addition (assignee only); budget-vs-actual comparison display
 
 ### Phase 6 — Findings System
 - [ ] `finding.routes.ts` + `finding.controller.ts`
