@@ -92,6 +92,7 @@ export interface DeadlineExtension {
 export interface Task {
   id: number;
   taskId: string;
+  title: string | null;
   templateId: number;
   status: TaskStatus;
   issuerId: number;
@@ -223,22 +224,26 @@ export interface Attachment {
   createdAt: string;
 }
 
+export type FindingSeverity = 'Observation' | 'Level 1' | 'Level 2';
+export type FindingStatus = 'Open' | 'In Progress' | 'Pending Verification' | 'Closed';
+
 export interface Finding {
   id: number;
-  severity: 'Observation' | 'Level 1' | 'Level 2' | null;
-  category: string;
+  severity: FindingSeverity | null;
+  category: string | null;
   description: string;
-  status: 'Open' | 'In Progress' | 'Pending Verification' | 'Closed';
+  status: FindingStatus;
   fieldId: string | null;
   dueDate: string | null;
   eventType: string;
+  departmentId: number;
   aircraftRegistration: string | null;
   regulatoryReference: string | null;
   errorCode: string | null;
   rootCause: string | null;
   correctiveAction: string | null;
   recurrence: boolean | null;
-  violatorIds: any | null;
+  violatorIds: unknown | null;
   sourceTaskId: number | null;
   reportedByUserId: number;
   closedByUserId: number | null;
@@ -246,4 +251,54 @@ export interface Finding {
   createdAt: string;
   closedAt: string | null;
   updatedAt: string;
+}
+
+// Shared nested shapes returned by the findings API
+export interface FindingSourceTask {
+  id: number;
+  taskId: string;
+  title: string | null;
+  status: TaskStatus;
+}
+
+export interface FindingFollowUpTask {
+  id: number;
+  taskId: string;
+  title: string | null;
+  status: TaskStatus;
+  assignedToUserId: number | null;
+  assignedToUser: { id: number; name: string } | null;
+}
+
+export interface FindingUserRef {
+  id: number;
+  name: string;
+  role?: { name: string } | null;
+}
+
+// GET /api/findings — one row
+export interface FindingListItem extends Finding {
+  dueDateBreached: boolean;
+  sourceTask: FindingSourceTask | null;
+  reportedByUser: { id: number; name: string } | null;
+  targetDivision: { id: number; name: string; code: string } | null;
+  department: { id: number; name: string } | null;
+}
+
+export interface FindingsListResponse {
+  findings: FindingListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+// GET /api/findings/:id — full detail
+export interface FindingDetail extends Finding {
+  dueDateBreached: boolean;
+  sourceTask: FindingSourceTask | null;
+  followUpTasks: FindingFollowUpTask[];
+  reportedByUser: FindingUserRef | null;
+  closedByUser: FindingUserRef | null;
+  targetDivision: { id: number; name: string; code: string } | null;
+  department: { id: number; name: string } | null;
 }
