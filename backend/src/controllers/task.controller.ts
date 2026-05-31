@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { checkAndTriggerPendingVerification } from '../services/findingService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -742,6 +743,11 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       { fromStatus: task.status, toStatus: newStatus }
     );
 
+    // Finding Pending-Verification hook: auto-close may finalise a follow-up task.
+    if (newStatus === 'Closed') {
+      await checkAndTriggerPendingVerification(task.id, userId);
+    }
+
     res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
   } catch (error) {
     console.error('Error submitting task:', error);
@@ -839,6 +845,11 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
       comment
     );
 
+    // Finding Pending-Verification hook: approve/reject can finalise a follow-up task.
+    if (FINAL_TASK_STATUSES.includes(newStatus)) {
+      await checkAndTriggerPendingVerification(task.id, userId);
+    }
+
     res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
   } catch (error) {
     console.error('Error reviewing task:', error);
@@ -934,6 +945,11 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       { fromStatus: 'Rejected', toStatus: updateData.status, reason },
       reason
     );
+
+    // Finding Pending-Verification hook: termination finalises a follow-up task.
+    if (FINAL_TASK_STATUSES.includes(updateData.status)) {
+      await checkAndTriggerPendingVerification(task.id, userId);
+    }
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
   } catch (error) {

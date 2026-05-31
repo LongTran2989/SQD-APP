@@ -193,9 +193,10 @@ model TemplateRevisionArchive {
 model Task {
   id                 Int        @id @default(autoincrement())
   taskId             String     @unique // e.g. QA-000001
+  title              String?    // Optional override label; falls back to template.title when null (used by follow-up tasks)
   templateId         Int
   template           Template   @relation(fields: [templateId], references: [id])
-  
+
   status             String     @default("Unassigned") // Assigned, InProgress, Review, Approved, Rejected, etc.
   
   issuerId           Int
