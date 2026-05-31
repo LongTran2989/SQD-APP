@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { TaskEnriched, TaskActivityEnriched } from '../types';
+import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry } from '../types';
 
 // ─── List endpoints ────────────────────────────────────────────────────────────
 
@@ -119,6 +119,25 @@ export const postTaskComment = (
   content: string
 ): Promise<TaskActivityEnriched> =>
   apiClient.post(`/tasks/${id}/activity`, { content }).then((r) => r.data);
+
+// ─── Time Booking (Phase 5.6) ─────────────────────────────────────────────────
+
+export interface TimeBookingPayload {
+  assigneeEntry: TimeBookingEntry;
+  collaborators: TimeBookingEntry[];
+}
+
+export const createTimeBooking = (
+  id: number,
+  payload: TimeBookingPayload
+): Promise<TimeBooking> =>
+  apiClient.post(`/tasks/${id}/time-booking`, payload).then((r) => r.data);
+
+export const updateTimeBooking = (
+  id: number,
+  payload: TimeBookingPayload
+): Promise<TimeBooking> =>
+  apiClient.put(`/tasks/${id}/time-booking`, payload).then((r) => r.data);
 
 // ─── Datasources (used in create form) ────────────────────────────────────────
 
