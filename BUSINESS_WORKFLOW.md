@@ -19,6 +19,7 @@ This document outlines the high-level business logic and application workflow fo
 - **Task Data Immutable Snapshot:** When a Task is created, it captures a snapshot of the Template schema. If the Template is deleted or changed, the Task remains completely unaffected.
 - **Review Loop:** Completed tasks go to `In Review`. A reviewer (Issuer, Manager, or Director) can Approve (closing it), Reject, or send it back for Follow-up. 
 - **Activity Feed:** Every task maintains a chronological, immutable feed (`TaskActivity`) of system events (status changes, deadlines) and human comments.
+- **Time Booking:** Once a Task reaches a final state (`Closed`, `Rejected`, or `Terminated`), the assignee can log actual hours worked, including collaborators. A budget-vs-actual comparison is shown when the source Template had an `estimatedHours` value. The booking is revisable by the assignee, Admin, or Director. Each create/update is written to both the `AuditLog` and the Task's `TaskActivity` feed.
 
 ## 4. Findings & Corrective Action Loop
 - **Raising Findings:** Staff can raise multiple findings from a single Task. A finding requires key information (e.g., Event Type, Aircraft Registration, Dept).
@@ -31,7 +32,9 @@ This document outlines the high-level business logic and application workflow fo
 - **Rule:** Every critical state change MUST be recorded in the `AuditLog` table. This is separate from the `TaskActivity` feed (which is operational communication). The `AuditLog` is an immutable, system-wide compliance record.
 
 ## 6. Data Visibility Rules (RBAC)
-- **Staff:** Can view Tasks and Findings where they are the assignee or issuer.
-- **Group Leaders / Managers:** Have visibility over records scoped to their specific Division. Managers can assign tasks and WPs across their entire division.
-- **Directors:** Have global read access across all departments and divisions. They can assign tasks to anyone system-wide and act as reviewers globally.
-- **Global Privilege Config:** Granular privilege toggles are configured by Admins to modify standard roles.
+- **All users (system-wide transparency):** All authenticated users can view all Work Packages and Tasks across the system, regardless of division or assignment. This supports operational transparency in an aviation maintenance environment where awareness of ongoing work matters for safety.
+- **Action rights remain role-scoped:** Viewing is open; acting is restricted. Only the Issuer, Director, and Managers of the same Division can review/approve/reject/reassign Tasks. Only Managers/Directors can assign users to WPs or close them.
+- **Staff:** Can self-assign `Unassigned` tasks. Can create Tasks within WPs they are assigned to, and assign those Tasks to any user in the same Division.
+- **Group Leaders / Managers:** Have action rights scoped to their Division. Managers can assign tasks and WPs across their entire division.
+- **Directors:** Have global action rights across all departments and divisions. They can assign tasks to anyone system-wide and act as reviewers globally.
+- **Global Privilege Config:** Granular privilege toggles are configured by Admins to modify standard roles (Phase 7).
