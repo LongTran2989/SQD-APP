@@ -117,7 +117,7 @@ export interface Task {
 // Includes nested joined objects from taskInclude() + computed isOverdue
 export interface TaskEnriched extends Task {
   isOverdue: boolean;
-  template: { id: number; templateId: string; title: string } | null;
+  template: { id: number; templateId: string; title: string; allowsFindings?: boolean } | null;
   issuer: { id: number; name: string } | null;
   assignedToUser: { id: number; name: string; role?: string } | null;
   targetDivision: { id: number; name: string; code: string } | null;

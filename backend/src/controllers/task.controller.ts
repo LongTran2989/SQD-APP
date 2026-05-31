@@ -135,7 +135,7 @@ function computeIsOverdue(task: { deadline: Date | null; status: string }): bool
  */
 function taskInclude() {
   return {
-    template: { select: { id: true, templateId: true, title: true } },
+    template: { select: { id: true, templateId: true, title: true, allowsFindings: true } },
     issuer: { select: { id: true, name: true } },
     assignedToUser: { select: { id: true, name: true, role: { select: { name: true } } } },
     targetDivision: { select: { id: true, name: true, code: true } },
