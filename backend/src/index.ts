@@ -57,6 +57,20 @@ app.get('/api/health', async (req: Request, res: Response) => {
   }
 });
 
+// Global error handler — catches any error passed to next(err) or thrown in an
+// async Express 5 route that wasn't caught by the route's own try/catch.
+app.use((err: Error, req: Request, res: Response, _next: express.NextFunction) => {
+  console.error('[Global error handler]', err);
+  if (!res.headersSent) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Prevent unhandled promise rejections from crashing the process.
+process.on('unhandledRejection', (reason) => {
+  console.error('[Unhandled rejection]', reason);
+});
+
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
