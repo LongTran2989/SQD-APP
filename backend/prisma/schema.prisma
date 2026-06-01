@@ -30,6 +30,7 @@ model Division {
   templates      Template[] @relation("TemplateDivision")
   targetedTasks  Task[]     @relation("TaskTargetDivision")
   targetedFinds  Finding[]  @relation("FindingTargetDivision")
+  actionFinds    Finding[]  @relation("FindingActionDivision")
   workPackages   WorkPackage[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
@@ -279,6 +280,9 @@ model Finding {
   
   targetDivisionId   Int?
   targetDivision     Division?  @relation("FindingTargetDivision", fields: [targetDivisionId], references: [id])
+
+  actionDivisionId   Int?       // Division responsible for actioning/correcting this finding (may differ from targetDivisionId)
+  actionDivision     Division?  @relation("FindingActionDivision", fields: [actionDivisionId], references: [id])
 
   departmentId       Int        // Department where the finding occurred — required at raise time
   department         Department @relation("FindingDepartment", fields: [departmentId], references: [id])

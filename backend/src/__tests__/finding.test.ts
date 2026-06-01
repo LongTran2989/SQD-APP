@@ -268,6 +268,20 @@ describe('Findings Backend (Phase 6)', () => {
       const res = await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Catastrophic' });
       expect(res.status).toBe(400);
     });
+
+    it('F24: Manager from another division cannot review a finding not assigned to them → 403', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${manager2Token}`).send({ severity: 'Level 1' });
+      expect(res.status).toBe(403);
+    });
+
+    it('F25: Manager from another division can review after actionDivisionId is set to their division', async () => {
+      // Director first sets actionDivisionId to division2
+      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${directorToken}`).send({ severity: 'Level 1', actionDivisionId: division2Id });
+      // manager2 (division2) can now review
+      const res = await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${manager2Token}`).send({ severity: 'Level 2' });
+      expect(res.status).toBe(200);
+      expect(res.body.severity).toBe('Level 2');
+    });
   });
 
   // ────────────────────────────────────────────────────────────────────────
@@ -340,6 +354,17 @@ describe('Findings Backend (Phase 6)', () => {
     it('F43: Staff cannot generate follow-up tasks → 403', async () => {
       const res = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${staffToken}`).send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'X' }] });
       expect(res.status).toBe(403);
+    });
+
+    it('F47: Manager from another division cannot generate follow-up tasks unless actionDivisionId matches', async () => {
+      // manager2 blocked before actionDivisionId is set
+      const blocked = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${manager2Token}`).send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'X' }] });
+      expect(blocked.status).toBe(403);
+      // Director assigns actionDivisionId to division2
+      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${directorToken}`).send({ severity: 'Level 1', actionDivisionId: division2Id });
+      // Now manager2 can generate follow-up tasks
+      const allowed = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${manager2Token}`).send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'Cross-div CAR' }] });
+      expect(allowed.status).toBe(201);
     });
 
     it('F44: non-Published template → 400 and creates no tasks', async () => {
@@ -461,6 +486,20 @@ describe('Findings Backend (Phase 6)', () => {
       await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${staffToken}`);
       expect(res.status).toBe(403);
+    });
+
+    it('F64: Manager from another division cannot close unless actionDivisionId matches', async () => {
+      const findingId = await makePendingVerification();
+      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
+      // manager2 (division2) blocked — finding belongs to divisionId, not division2Id
+      const blocked = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${manager2Token}`);
+      expect(blocked.status).toBe(403);
+      // Director assigns actionDivisionId to division2
+      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${directorToken}`).send({ severity: 'Level 1', actionDivisionId: division2Id });
+      // Now manager2 can close
+      const allowed = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${manager2Token}`);
+      expect(allowed.status).toBe(200);
+      expect(allowed.body.status).toBe('Closed');
     });
 
     it('F63: Manager closes after Stage 2 → status Closed, closedBy set', async () => {

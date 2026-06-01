@@ -57,7 +57,7 @@ async function generateWpId(divisionCode: string, tx: Prisma.TransactionClient):
 function buildFindingScope(user: { userId: number; role: string; divisionId: number }): Prisma.FindingWhereInput {
   const { userId, role, divisionId } = user;
   if (role === 'Director' || role === 'Admin') return {};
-  if (role === 'Manager') return { targetDivisionId: divisionId };
+  if (role === 'Manager') return { OR: [{ targetDivisionId: divisionId }, { actionDivisionId: divisionId }] };
   // Staff / Group Leader: own findings or findings whose follow-up Task they are assigned.
   return {
     OR: [
@@ -70,11 +70,11 @@ function buildFindingScope(user: { userId: number; role: string; divisionId: num
 /** JS-side equivalent of buildFindingScope, for a single already-loaded Finding. */
 function canViewFinding(
   user: { userId: number; role: string; divisionId: number },
-  finding: { targetDivisionId: number | null; reportedByUserId: number; followUpTasks?: { assignedToUserId: number | null }[] }
+  finding: { targetDivisionId: number | null; actionDivisionId: number | null; reportedByUserId: number; followUpTasks?: { assignedToUserId: number | null }[] }
 ): boolean {
   const { userId, role, divisionId } = user;
   if (role === 'Director' || role === 'Admin') return true;
-  if (role === 'Manager') return finding.targetDivisionId === divisionId;
+  if (role === 'Manager') return finding.targetDivisionId === divisionId || finding.actionDivisionId === divisionId;
   if (finding.reportedByUserId === userId) return true;
   return finding.followUpTasks?.some((t) => t.assignedToUserId === userId) ?? false;
 }
@@ -117,7 +117,7 @@ async function ensureDueDateBreachLogged(
 }
 
 async function getUserName(userId: number): Promise<string> {
-  const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const u = await prisma.user.findFirst({ where: { id: userId, deletedAt: null }, select: { name: true } });
   return u?.name ?? `User ${userId}`;
 }
 
@@ -267,6 +267,7 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
         reportedByUser: { select: { id: true, name: true, role: { select: { name: true } } } },
         closedByUser: { select: { id: true, name: true, role: { select: { name: true } } } },
         targetDivision: { select: { id: true, name: true, code: true } },
+        actionDivision: { select: { id: true, name: true, code: true } },
         department: { select: { id: true, name: true } },
         followUpTasks: {
           where: { deletedAt: null },
@@ -326,8 +327,8 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
 export const reviewFinding = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id as string, 10);
-    const { userId, role } = req.user!;
-    const { severity, dueDate } = req.body;
+    const { userId, role, divisionId } = req.user!;
+    const { severity, dueDate, actionDivisionId } = req.body;
 
     if (!FINDING_REVIEWER_ROLES.includes(role)) {
       res.status(403).json({ message: 'Only a Manager or Director can review findings' });
@@ -340,11 +341,18 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, status: true, sourceTaskId: true }
+      select: { id: true, status: true, sourceTaskId: true, targetDivisionId: true, actionDivisionId: true }
     });
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
       return;
+    }
+    if (role === 'Manager') {
+      const canAct = finding.targetDivisionId === divisionId || finding.actionDivisionId === divisionId;
+      if (!canAct) {
+        res.status(403).json({ message: 'Your division is not assigned to action this finding' });
+        return;
+      }
     }
 
     const reviewerName = await getUserName(userId);
@@ -357,7 +365,8 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
         data: {
           severity,
           dueDate: parsedDueDate ?? undefined,
-          status: newStatus
+          status: newStatus,
+          ...(actionDivisionId !== undefined && { actionDivisionId: actionDivisionId ?? null })
         }
       });
 
@@ -417,12 +426,20 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
         status: true,
         sourceTaskId: true,
         targetDivisionId: true,
+        actionDivisionId: true,
         sourceTask: { select: { targetDivisionId: true } }
       }
     });
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
       return;
+    }
+    if (role === 'Manager') {
+      const canAct = finding.targetDivisionId === divisionId || finding.actionDivisionId === divisionId;
+      if (!canAct) {
+        res.status(403).json({ message: 'Your division is not assigned to action this finding' });
+        return;
+      }
     }
 
     // Resolve the division the follow-up tasks belong to (for taskId prefix + WP).
@@ -636,7 +653,7 @@ export const completeStage2 = async (req: Request, res: Response): Promise<void>
 export const closeFinding = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id as string, 10);
-    const { userId, role } = req.user!;
+    const { userId, role, divisionId } = req.user!;
 
     if (!FINDING_REVIEWER_ROLES.includes(role)) {
       res.status(403).json({ message: 'Only a Manager or Director can close findings' });
@@ -645,11 +662,18 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, status: true, sourceTaskId: true, rootCause: true, correctiveAction: true }
+      select: { id: true, status: true, sourceTaskId: true, rootCause: true, correctiveAction: true, targetDivisionId: true, actionDivisionId: true }
     });
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
       return;
+    }
+    if (role === 'Manager') {
+      const canAct = finding.targetDivisionId === divisionId || finding.actionDivisionId === divisionId;
+      if (!canAct) {
+        res.status(403).json({ message: 'Your division is not assigned to action this finding' });
+        return;
+      }
     }
 
     if (finding.status !== 'Pending Verification') {
