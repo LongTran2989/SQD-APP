@@ -99,10 +99,11 @@ export const requestDeadlineExtension = (
 
 export const decideDeadlineExtension = (
   id: number,
+  extensionIndex: number,
   decision: 'approved' | 'denied',
   newDeadline?: string
 ): Promise<TaskEnriched> =>
-  apiClient.put(`/tasks/${id}/deadline/decide`, { decision, newDeadline }).then((r) => r.data);
+  apiClient.put(`/tasks/${id}/deadline/decide`, { extensionIndex, decision, newDeadline }).then((r) => r.data);
 
 // ─── Rating ────────────────────────────────────────────────────────────────────
 

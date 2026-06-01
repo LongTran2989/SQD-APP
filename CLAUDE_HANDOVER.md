@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-01 (rev 6). Supersedes all previous versions.*
+*Last updated: 2026-06-01 (rev 7). Supersedes all previous versions.*
 
 ---
 
@@ -78,6 +78,21 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Routes:** `POST /api/tasks/:id/time-booking` and `PUT /api/tasks/:id/time-booking` registered in `task.routes.ts`.
   - **Frontend (`TimeBookingPanel.tsx`):** Full form (hours + notes + collaborator management), read-only summary view with budget-vs-actual comparison badge, edit mode for existing bookings, live total preview during form entry.
   - **Integration:** `TimeBookingPanel` imported and rendered in `tasks/[id]/page.tsx` (final-state tasks only).
+- **Phase 5–6 Frontend Audit Fixes** (COMPLETED 2026-06-01)
+  - **Bug fixes in `TaskActionBar.tsx`:**
+    - Post-rejection Reassign now calls `postRejectionAction` (was calling `reassignTask` which always returned 400 on Rejected status)
+    - `computeCanRate` fixed: was reading `(task.assignedToUser as any)?.role?.name` — role is a flat string, not a nested object, so Director rating was always broken. Fixed to `?.role`.
+    - `decideDeadlineExtension` now sends `extensionIndex` to the backend (was never sent; backend requires it and was returning 400 on every approve/deny action)
+  - **`taskApi.ts`:** `decideDeadlineExtension` signature updated to include `extensionIndex: number` parameter
+  - **UX fixes — user pickers replace raw numeric ID inputs:**
+    - Assign Task: `<input type="number" placeholder="Enter user ID">` replaced with `<select>` dropdown populated from `getUsers()` datasource
+    - Post-rejection Reassign: same fix
+  - **New UI added to `TaskActionBar.tsx` (backend was already complete):**
+    - General Reassign button — visible for reviewer on Assigned / In Progress / In Review / Follow-up Required; uses `reassignTask`; requires reason
+    - Transfer Issuer Rights — visible for current issuer on non-final tasks; user dropdown excluding self
+    - Set / Update Deadline — visible for reviewers on non-final non-inactive tasks; date picker
+  - **`RaiseFindingPanel.tsx`:** Event Type changed from free-text input to a `<select>` with 9 standard aviation event types (`Procedural Breach`, `Equipment Fault`, `Documentation Error`, `Maintenance Error`, `Safety Observation`, `Regulatory Non-compliance`, `Training Gap`, `Communication Failure`, `Other`). "Other" reveals a free-text fallback. Phase 7 will replace this with an admin-managed list.
+
 - **Phase 6 — Findings System** (COMPLETED 2026-06-01)
   - **Schema additions:** `Finding.departmentId Int` (required FK to Department); `Finding.category String?` (made nullable — was required but not included in the raise payload); `Task.title String?` (needed for editable follow-up task titles).
   - **Service (`findingService.ts`):** `logFindingAuditAndActivity()` (dual-write helper) and `checkAndTriggerPendingVerification()` (best-effort hook — never rethrows, wired into task.controller after reviewTask / postRejectionAction / submitTask reach final states).
@@ -845,6 +860,10 @@ All changes needed before Phase 5 development begins:
 12. **`Finding.category` is nullable**: The original Phase 5 schema had `category` as required, but the Phase 6 raise endpoint does not include it (it belongs to Stage 2 analysis). It was made nullable in Phase 6 to avoid NOT NULL violations on raise. Set it via `PUT /api/findings/:id/stage2`.
 13. **`Finding.departmentId` vs `targetDivisionId`**: Two separate fields. `departmentId` is the department where the finding occurred (operational, required at raise). `targetDivisionId` is the division used for RBAC scoping. Do not conflate them.
 14. **`seed-verification.test.ts` platform fix**: This test spawns `ts-node` as a child process. It now uses `process.platform === 'win32' ? 'ts-node.cmd' : 'ts-node'`. If tests fail on Windows with "ts-node not found", confirm the `.cmd` variant is on PATH.
+15. **Post-rejection Reassign vs General Reassign use different endpoints**: When a task is `Rejected`, the "Reassign" action must go through `POST /api/tasks/:id/post-rejection` with `action: 'reassign'` — NOT through `PUT /api/tasks/:id/reassign` (which blocks Rejected status). For all other non-final states, use `PUT /api/tasks/:id/reassign`. `TaskActionBar` has two separate handlers: `handlePostRejectReassign` and `handleGeneralReassign`.
+16. **`decideDeadlineExtension` requires `extensionIndex`**: The backend requires the index of the pending extension within the `deadlineExtensions` JSON array. The frontend uses `getPendingExtensionIndex()` to find the first entry where `decision` is null/undefined. If an extension was already decided, it won't be found and the call is blocked client-side.
+17. **`task.assignedToUser.role` is a flat string**: The user object returned in task responses has `role` as a plain string (e.g. `'Manager'`), not a nested Role object. Do not access `.role.name` — it will always be `undefined`.
+18. **Event Type in Findings is hardcoded until Phase 7**: `RaiseFindingPanel` uses a 9-item hardcoded list. Phase 7 will replace this with an admin-managed `EventType` table. The "Other" option writes a free-text value directly to `Finding.eventType`.
 
 ---
 

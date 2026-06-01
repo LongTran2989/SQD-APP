@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TaskEnriched, User, TaskStatus } from '../../types';
 import StarRating from './StarRating';
 import {
@@ -14,6 +14,9 @@ import {
   reassignTask,
   selfAssignTask,
   assignTask,
+  transferIssuerRights,
+  setDeadline,
+  getUsers,
 } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import {
@@ -31,11 +34,19 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FINAL_TASK_STATUSES: TaskStatus[] = ['Closed', 'Rejected', 'Terminated'];
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface UserOption {
+  value: string;
+  label: string;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +61,8 @@ function computeIsReviewer(user: User, task: TaskEnriched): boolean {
 function computeCanRate(user: User, task: TaskEnriched): boolean {
   if (!FINAL_TASK_STATUSES.includes(task.status)) return false;
   if (task.status === 'Inactive') return false;
-  const assigneeRole = (task.assignedToUser as any)?.role?.name;
+  // role is a flat string on the user object, not a nested relation
+  const assigneeRole = (task.assignedToUser as any)?.role;
   if (user.role === 'Director' && assigneeRole === 'Manager') return true;
   if (user.role === 'Manager' && task.targetDivisionId === user.divisionId) return true;
   return false;
@@ -61,7 +73,12 @@ function hasPendingExtensionRequest(task: TaskEnriched): boolean {
   return (task.deadlineExtensions as any[]).some((e) => !e.decision);
 }
 
-// ─── Inline action input helpers ──────────────────────────────────────────────
+function getPendingExtensionIndex(task: TaskEnriched): number {
+  if (!task.deadlineExtensions || !Array.isArray(task.deadlineExtensions)) return -1;
+  return (task.deadlineExtensions as any[]).findIndex((e) => !e.decision);
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function InlineInput({
   label,
@@ -101,7 +118,37 @@ function InlineInput({
   );
 }
 
-// ─── Action button ────────────────────────────────────────────────────────────
+function UserSelect({
+  label,
+  value,
+  onChange,
+  users,
+  placeholder = 'Select user…',
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  users: UserOption[];
+  placeholder?: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="text-xs font-semibold text-slate-500">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+      >
+        <option value="">{placeholder}</option>
+        {users.map((u) => (
+          <option key={u.value} value={u.value}>
+            {u.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 function ActionButton({
   id,
@@ -144,9 +191,9 @@ interface TaskActionBarProps {
   task: TaskEnriched;
   currentUser: User;
   onTaskUpdated: (updated: TaskEnriched) => void;
-  onSaveProgress: () => void; // triggers parent to call saveTaskData
+  onSaveProgress: () => void;
   savingProgress: boolean;
-  onSubmitTask: () => void; // triggers parent to save and submit
+  onSubmitTask: () => void;
 }
 
 export default function TaskActionBar({
@@ -158,28 +205,49 @@ export default function TaskActionBar({
   onSubmitTask,
 }: TaskActionBarProps) {
   const [loading, setLoading] = useState<string | null>(null);
+  const [allUsers, setAllUsers] = useState<UserOption[]>([]);
 
-  // Inline form states
+  // Review
   const [showReviewInput, setShowReviewInput] = useState<'follow-up' | 'reject' | null>(null);
   const [reviewComment, setReviewComment] = useState('');
 
+  // Inactivate
   const [showInactivateInput, setShowInactivateInput] = useState(false);
   const [inactivateReason, setInactivateReason] = useState('');
 
-  const [showReassignInput, setShowReassignInput] = useState(false);
-  const [reassignUserId, setReassignUserId] = useState('');
-  const [reassignReason, setReassignReason] = useState('');
-
+  // Assign unassigned task
   const [showAssignInput, setShowAssignInput] = useState(false);
   const [assignUserId, setAssignUserId] = useState('');
 
+  // Post-rejection reassign (status = Rejected — must use postRejectionAction)
+  const [showPostRejectReassign, setShowPostRejectReassign] = useState(false);
+  const [postRejectAssigneeId, setPostRejectAssigneeId] = useState('');
+  const [postRejectReason, setPostRejectReason] = useState('');
+
+  // General reassign (any non-final non-inactive non-unassigned state)
+  const [showGeneralReassign, setShowGeneralReassign] = useState(false);
+  const [generalReassignUserId, setGeneralReassignUserId] = useState('');
+  const [generalReassignReason, setGeneralReassignReason] = useState('');
+
+  // Transfer issuer rights
+  const [showTransferIssuer, setShowTransferIssuer] = useState(false);
+  const [transferToUserId, setTransferToUserId] = useState('');
+
+  // Deadline
   const [showExtensionInput, setShowExtensionInput] = useState(false);
   const [extensionReason, setExtensionReason] = useState('');
-
   const [showDecideExtension, setShowDecideExtension] = useState(false);
   const [extensionNewDeadline, setExtensionNewDeadline] = useState('');
+  const [showSetDeadline, setShowSetDeadline] = useState(false);
+  const [newDeadlineValue, setNewDeadlineValue] = useState('');
 
+  // Rating
   const [ratingValue, setRatingValue] = useState<number | null>(task.rating);
+
+  // Fetch user list for pickers
+  useEffect(() => {
+    getUsers().then(setAllUsers).catch(() => {});
+  }, []);
 
   // ── Computed permissions ──
   const isAssignee = currentUser.id === task.assignedToUserId;
@@ -202,14 +270,21 @@ export default function TaskActionBar({
     (currentUser.role === 'Director' ||
       currentUser.role === 'Admin' ||
       currentUser.divisionId === task.targetDivisionId);
-
   const canAssign =
     isUnassigned &&
     ['Director', 'Admin', 'Manager'].includes(currentUser.role);
-
-  // Self-approve guard: same person can't be issuer+assignee AND reviewer
+  // Self-approve guard: same person cannot be both issuer+assignee AND reviewer
   const selfApproveBlocked =
     task.issuerId === currentUser.id && task.assignedToUserId === currentUser.id;
+  // General reassign: reviewer rights, not final, not inactive, has an assignee
+  const canGeneralReassign =
+    isReviewer && !isFinal && !isInactive && !isUnassigned;
+  // Transfer issuer: only the current issuer, not final
+  const canTransferIssuer =
+    currentUser.id === task.issuerId && !isFinal;
+  // Set deadline: reviewer rights, not final, not inactive
+  const canSetDeadline =
+    isReviewer && !isFinal && !isInactive;
 
   // ── Action handlers ──
 
@@ -233,10 +308,7 @@ export default function TaskActionBar({
     });
 
   const handleAssign = () => {
-    if (!assignUserId) {
-      toast.error('Please enter a user ID to assign');
-      return;
-    }
+    if (!assignUserId) { toast.error('Please select a user to assign'); return; }
     handle('assign', async () => {
       const r = await assignTask(task.id, Number(assignUserId));
       toast.success('Task assigned successfully');
@@ -254,10 +326,7 @@ export default function TaskActionBar({
     });
 
   const handleReview = (action: 'follow-up' | 'reject') => {
-    if (!reviewComment.trim()) {
-      toast.error('A comment is required');
-      return;
-    }
+    if (!reviewComment.trim()) { toast.error('A comment is required'); return; }
     handle(action, async () => {
       const r = await reviewTask(task.id, action, reviewComment.trim());
       toast.success(action === 'follow-up' ? 'Follow-up requested' : 'Task rejected');
@@ -274,29 +343,57 @@ export default function TaskActionBar({
       return r;
     });
 
-  const handleReassign = () => {
-    if (!reassignUserId || !reassignReason.trim()) {
-      toast.error('User and reason are required for reassignment');
+  // Post-rejection reassign: task is Rejected, must go through postRejectionAction
+  const handlePostRejectReassign = () => {
+    if (!postRejectAssigneeId || !postRejectReason.trim()) {
+      toast.error('Assignee and reason are required');
       return;
     }
-    handle('reassign', async () => {
-      const r = await reassignTask(task.id, {
-        assignedToUserId: Number(reassignUserId),
-        reason: reassignReason.trim(),
+    handle('post-reject-reassign', async () => {
+      const r = await postRejectionAction(task.id, 'reassign', {
+        assignedToUserId: Number(postRejectAssigneeId),
+        reason: postRejectReason.trim(),
       });
       toast.success('Task reassigned');
-      setShowReassignInput(false);
-      setReassignUserId('');
-      setReassignReason('');
+      setShowPostRejectReassign(false);
+      setPostRejectAssigneeId('');
+      setPostRejectReason('');
+      return r;
+    });
+  };
+
+  // General reassign: task is in a non-final, non-inactive state with an existing assignee
+  const handleGeneralReassign = () => {
+    if (!generalReassignUserId || !generalReassignReason.trim()) {
+      toast.error('Assignee and reason are required for reassignment');
+      return;
+    }
+    handle('general-reassign', async () => {
+      const r = await reassignTask(task.id, {
+        assignedToUserId: Number(generalReassignUserId),
+        reason: generalReassignReason.trim(),
+      });
+      toast.success('Task reassigned');
+      setShowGeneralReassign(false);
+      setGeneralReassignUserId('');
+      setGeneralReassignReason('');
+      return r;
+    });
+  };
+
+  const handleTransferIssuer = () => {
+    if (!transferToUserId) { toast.error('Please select a user to transfer issuer rights to'); return; }
+    handle('transfer-issuer', async () => {
+      const r = await transferIssuerRights(task.id, Number(transferToUserId));
+      toast.success('Issuer rights transferred');
+      setShowTransferIssuer(false);
+      setTransferToUserId('');
       return r;
     });
   };
 
   const handleInactivate = () => {
-    if (!inactivateReason.trim()) {
-      toast.error('A reason is required to inactivate this task');
-      return;
-    }
+    if (!inactivateReason.trim()) { toast.error('A reason is required to inactivate this task'); return; }
     handle('inactivate', async () => {
       const r = await inactivateTask(task.id, inactivateReason.trim());
       toast.success('Task inactivated');
@@ -323,10 +420,7 @@ export default function TaskActionBar({
   };
 
   const handleRequestExtension = () => {
-    if (!extensionReason.trim()) {
-      toast.error('A reason is required for the extension request');
-      return;
-    }
+    if (!extensionReason.trim()) { toast.error('A reason is required for the extension request'); return; }
     handle('request-extension', async () => {
       const r = await requestDeadlineExtension(task.id, extensionReason.trim());
       toast.success('Deadline extension requested');
@@ -337,6 +431,11 @@ export default function TaskActionBar({
   };
 
   const handleDecideExtension = (decision: 'approved' | 'denied') => {
+    const extensionIndex = getPendingExtensionIndex(task);
+    if (extensionIndex === -1) {
+      toast.error('No pending extension request found');
+      return;
+    }
     if (decision === 'approved' && extensionNewDeadline) {
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(extensionNewDeadline) || isNaN(Date.parse(extensionNewDeadline))) {
@@ -347,6 +446,7 @@ export default function TaskActionBar({
     handle(`extension-${decision}`, async () => {
       const r = await decideDeadlineExtension(
         task.id,
+        extensionIndex,
         decision,
         decision === 'approved' && extensionNewDeadline ? extensionNewDeadline : undefined
       );
@@ -357,7 +457,18 @@ export default function TaskActionBar({
     });
   };
 
-  // If no buttons will render, return null
+  const handleSetDeadline = () => {
+    if (!newDeadlineValue) { toast.error('Please select a deadline date'); return; }
+    handle('set-deadline', async () => {
+      const r = await setDeadline(task.id, newDeadlineValue);
+      toast.success('Deadline set');
+      setShowSetDeadline(false);
+      setNewDeadlineValue('');
+      return r;
+    });
+  };
+
+  // If no actions will render, return null
   const noActions =
     !hasSelfAssignRight &&
     !canAssign &&
@@ -367,7 +478,10 @@ export default function TaskActionBar({
     !canInactivate &&
     !canReactivate &&
     !canRate &&
-    !pendingExtension;
+    !pendingExtension &&
+    !canGeneralReassign &&
+    !canTransferIssuer &&
+    !canSetDeadline;
 
   if (noActions) return null;
 
@@ -414,18 +528,12 @@ export default function TaskActionBar({
             </button>
             {showAssignInput && (
               <div className="space-y-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-500">Assignee User ID *</label>
-                  <input
-                    type="number"
-                    id="assign-user-id"
-                    value={assignUserId}
-                    onChange={(e) => setAssignUserId(e.target.value)}
-                    placeholder="Enter user ID"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <p className="text-[10px] text-slate-400">Phase 5.5: will replace with user picker</p>
-                </div>
+                <UserSelect
+                  label="Assign to *"
+                  value={assignUserId}
+                  onChange={setAssignUserId}
+                  users={allUsers}
+                />
                 <div className="flex gap-2">
                   <ActionButton
                     id="btn-confirm-assign"
@@ -607,6 +715,44 @@ export default function TaskActionBar({
           </div>
         )}
 
+        {/* ── SET / UPDATE DEADLINE — reviewer, non-final ───── */}
+        {canSetDeadline && (
+          <div>
+            <button
+              id="btn-toggle-set-deadline"
+              onClick={() => setShowSetDeadline(!showSetDeadline)}
+              className="text-xs text-slate-500 hover:text-blue-600 flex items-center gap-1 transition-colors"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              {task.deadline ? 'Update deadline' : 'Set deadline'}
+              {showSetDeadline ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {showSetDeadline && (
+              <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">
+                    {task.deadline ? 'New deadline *' : 'Deadline *'}
+                  </label>
+                  <input
+                    type="date"
+                    value={newDeadlineValue}
+                    onChange={(e) => setNewDeadlineValue(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    max="9999-12-31"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <ActionButton id="btn-confirm-deadline" onClick={handleSetDeadline} disabled={loading === 'set-deadline'} variant="primary" icon={Calendar}>
+                    {loading === 'set-deadline' ? 'Saving...' : task.deadline ? 'Update Deadline' : 'Set Deadline'}
+                  </ActionButton>
+                  <ActionButton id="btn-cancel-deadline" onClick={() => { setShowSetDeadline(false); setNewDeadlineValue(''); }} variant="ghost">Cancel</ActionButton>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── POST-REJECTION — Rejected ─────────────────────── */}
         {task.status === 'Rejected' && isReviewer && (
           <div className="space-y-2">
@@ -615,8 +761,8 @@ export default function TaskActionBar({
                 {loading === 'terminate' ? 'Terminating...' : 'Terminate'}
               </ActionButton>
               <ActionButton
-                id="btn-toggle-reassign"
-                onClick={() => setShowReassignInput(!showReassignInput)}
+                id="btn-toggle-post-reject-reassign"
+                onClick={() => setShowPostRejectReassign(!showPostRejectReassign)}
                 variant="warning"
                 icon={UserCheck}
               >
@@ -624,25 +770,83 @@ export default function TaskActionBar({
               </ActionButton>
             </div>
 
-            {showReassignInput && (
+            {showPostRejectReassign && (
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-500">New Assignee User ID *</label>
-                  <input
-                    type="number"
-                    value={reassignUserId}
-                    onChange={(e) => setReassignUserId(e.target.value)}
-                    placeholder="Enter user ID"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <p className="text-[10px] text-slate-400">Phase 5.5: will replace with user picker</p>
-                </div>
-                <InlineInput label="Reason for reassignment *" value={reassignReason} onChange={setReassignReason} placeholder="Why is this task being reassigned?" multiline />
+                <UserSelect
+                  label="New assignee *"
+                  value={postRejectAssigneeId}
+                  onChange={setPostRejectAssigneeId}
+                  users={allUsers}
+                />
+                <InlineInput label="Reason for reassignment *" value={postRejectReason} onChange={setPostRejectReason} placeholder="Why is this task being reassigned?" multiline />
                 <div className="flex gap-2">
-                  <ActionButton id="btn-confirm-reassign" onClick={handleReassign} disabled={loading === 'reassign'} variant="warning" icon={UserCheck}>
-                    {loading === 'reassign' ? 'Reassigning...' : 'Confirm Reassign'}
+                  <ActionButton id="btn-confirm-post-reject-reassign" onClick={handlePostRejectReassign} disabled={loading === 'post-reject-reassign'} variant="warning" icon={UserCheck}>
+                    {loading === 'post-reject-reassign' ? 'Reassigning...' : 'Confirm Reassign'}
                   </ActionButton>
-                  <ActionButton id="btn-cancel-reassign" onClick={() => { setShowReassignInput(false); setReassignUserId(''); setReassignReason(''); }} variant="ghost">Cancel</ActionButton>
+                  <ActionButton id="btn-cancel-post-reject-reassign" onClick={() => { setShowPostRejectReassign(false); setPostRejectAssigneeId(''); setPostRejectReason(''); }} variant="ghost">Cancel</ActionButton>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── GENERAL REASSIGN — any non-final, non-inactive, non-unassigned ── */}
+        {canGeneralReassign && (
+          <div>
+            <button
+              id="btn-toggle-general-reassign"
+              onClick={() => setShowGeneralReassign(!showGeneralReassign)}
+              className="text-xs text-slate-500 hover:text-blue-600 flex items-center gap-1 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reassign task
+              {showGeneralReassign ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {showGeneralReassign && (
+              <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <UserSelect
+                  label="New assignee *"
+                  value={generalReassignUserId}
+                  onChange={setGeneralReassignUserId}
+                  users={allUsers}
+                />
+                <InlineInput label="Reason for reassignment *" value={generalReassignReason} onChange={setGeneralReassignReason} placeholder="Why is this task being reassigned?" multiline />
+                <div className="flex gap-2">
+                  <ActionButton id="btn-confirm-general-reassign" onClick={handleGeneralReassign} disabled={loading === 'general-reassign'} variant="warning" icon={RefreshCw}>
+                    {loading === 'general-reassign' ? 'Reassigning...' : 'Confirm Reassign'}
+                  </ActionButton>
+                  <ActionButton id="btn-cancel-general-reassign" onClick={() => { setShowGeneralReassign(false); setGeneralReassignUserId(''); setGeneralReassignReason(''); }} variant="ghost">Cancel</ActionButton>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── TRANSFER ISSUER RIGHTS ────────────────────────── */}
+        {canTransferIssuer && (
+          <div>
+            <button
+              id="btn-toggle-transfer-issuer"
+              onClick={() => setShowTransferIssuer(!showTransferIssuer)}
+              className="text-xs text-slate-500 hover:text-blue-600 flex items-center gap-1 transition-colors"
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              Transfer issuer rights
+              {showTransferIssuer ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {showTransferIssuer && (
+              <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <UserSelect
+                  label="Transfer issuer rights to *"
+                  value={transferToUserId}
+                  onChange={setTransferToUserId}
+                  users={allUsers.filter((u) => Number(u.value) !== currentUser.id)}
+                />
+                <div className="flex gap-2">
+                  <ActionButton id="btn-confirm-transfer-issuer" onClick={handleTransferIssuer} disabled={loading === 'transfer-issuer'} variant="primary" icon={UserCheck}>
+                    {loading === 'transfer-issuer' ? 'Transferring...' : 'Transfer Rights'}
+                  </ActionButton>
+                  <ActionButton id="btn-cancel-transfer-issuer" onClick={() => { setShowTransferIssuer(false); setTransferToUserId(''); }} variant="ghost">Cancel</ActionButton>
                 </div>
               </div>
             )}

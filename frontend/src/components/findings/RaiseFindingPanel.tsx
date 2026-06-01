@@ -12,9 +12,23 @@ interface Props {
   onRaised: () => void;
 }
 
+// Standard aviation event types — admin-configurable in Phase 7
+const EVENT_TYPES = [
+  'Procedural Breach',
+  'Equipment Fault',
+  'Documentation Error',
+  'Maintenance Error',
+  'Safety Observation',
+  'Regulatory Non-compliance',
+  'Training Gap',
+  'Communication Failure',
+  'Other',
+];
+
 export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) {
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
   const [eventType, setEventType] = useState('');
+  const [eventTypeOther, setEventTypeOther] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [aircraftRegistration, setAircraftRegistration] = useState('');
   const [regulatoryReference, setRegulatoryReference] = useState('');
@@ -26,8 +40,11 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
     getDatasource('departments').then(setDepartments).catch(() => {});
   }, []);
 
+  const resolvedEventType = eventType === 'Other' ? eventTypeOther.trim() : eventType;
+
   const handleSubmit = async () => {
-    if (!eventType.trim()) return toast.error('Event type is required');
+    if (!eventType) return toast.error('Event type is required');
+    if (eventType === 'Other' && !eventTypeOther.trim()) return toast.error('Please specify the event type');
     if (!departmentId) return toast.error('Department is required');
     if (!description.trim()) return toast.error('Description is required');
 
@@ -35,7 +52,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
     try {
       const finding = await raiseFinding({
         taskId,
-        eventType: eventType.trim(),
+        eventType: resolvedEventType,
         departmentId: Number(departmentId),
         description: description.trim(),
         aircraftRegistration: aircraftRegistration.trim() || undefined,
@@ -71,13 +88,25 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
               Event Type <span className="text-red-400">*</span>
             </label>
-            <input
-              type="text"
+            <select
               value={eventType}
-              onChange={(e) => setEventType(e.target.value)}
-              placeholder="e.g. Procedural Breach, Equipment Fault"
+              onChange={(e) => { setEventType(e.target.value); setEventTypeOther(''); }}
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            >
+              <option value="">Select event type…</option>
+              {EVENT_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+            {eventType === 'Other' && (
+              <input
+                type="text"
+                value={eventTypeOther}
+                onChange={(e) => setEventTypeOther(e.target.value)}
+                placeholder="Specify event type…"
+                className="mt-2 w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            )}
           </div>
 
           <div>
