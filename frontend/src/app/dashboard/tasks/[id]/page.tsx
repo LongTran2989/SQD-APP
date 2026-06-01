@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
-import { TaskEnriched, TaskActivityEnriched, FormField, FindingListItem } from '../../../../types';
+import { TaskEnriched, FeedPostEnriched, FormField, FindingListItem } from '../../../../types';
 import { getTaskById, getTaskActivity, saveTaskData } from '../../../../api/taskApi';
 import { getFindingsByTask } from '../../../../api/findingApi';
 import TaskDetailPanel from '../../../../components/tasks/TaskDetailPanel';
@@ -29,7 +29,7 @@ export default function TaskDetailPage() {
 
   // ── State ──
   const [task, setTask] = useState<TaskEnriched | null>(null);
-  const [activities, setActivities] = useState<TaskActivityEnriched[]>([]);
+  const [activities, setActivities] = useState<FeedPostEnriched[]>([]);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [savingProgress, setSavingProgress] = useState(false);
@@ -175,7 +175,7 @@ export default function TaskDetailPage() {
   };
 
   // ── New activity from comment box ──
-  const handleNewActivity = (activity: TaskActivityEnriched) => {
+  const handleNewActivity = (activity: FeedPostEnriched) => {
     setActivities((prev) => [...prev, activity]);
   };
 

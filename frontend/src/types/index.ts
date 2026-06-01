@@ -180,18 +180,30 @@ export interface WorkPackageDetail extends WorkPackage {
   tasks: WpTaskRow[];
 }
 
-export interface TaskActivity {
+export interface FeedPost {
   id: number;
-  taskId: number;
+  type: 'COMMENT' | 'SYSTEM_EVENT' | 'ESCALATION_CARD' | 'INFO_CARD';
+  scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG';
+  scopeId: number | null;
   authorId: number | null;
-  type: 'SYSTEM_EVENT' | 'COMMENT';
   content: string;
+  sourcePostId: number | null;
+  sourceExcerpt: string | null;
+  sourceTaskId: number | null;
+  sourceWpId: number | null;
+  flagId: number | null;
+  taggedDivisionIds: number[] | null;
   metadata: Record<string, unknown> | null;
   createdAt: string;
+  author?: {
+    id: number;
+    name: string;
+    role: string;
+  } | null;
 }
 
 // Enriched — server-side joined author name
-export interface TaskActivityEnriched extends TaskActivity {
+export interface FeedPostEnriched extends Omit<FeedPost, 'author'> {
   author: { id: number; name: string | null } | null;
 }
 

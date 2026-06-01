@@ -54,9 +54,10 @@ async function logActivityAndAudit(
   });
 
   try {
-    await prisma.taskActivity.create({
+    await prisma.feedPost.create({
       data: {
-        taskId,
+        scope: 'TASK',
+        scopeId: taskId,
         type: 'SYSTEM_EVENT',
         content,
         metadata: metadata as any,

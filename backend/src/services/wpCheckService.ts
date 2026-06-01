@@ -155,10 +155,11 @@ export async function generateDailyCheckTasks(
     }
   });
 
-  // 9. Log a SYSTEM_EVENT in TaskActivity
-  await db.taskActivity.create({
+  // 9. Log a SYSTEM_EVENT in the FeedPost feed
+  await db.feedPost.create({
     data: {
-      taskId: task.id,
+      scope: 'TASK',
+      scopeId: task.id,
       type: 'SYSTEM_EVENT',
       content: `Task auto-generated from CHECK Work Package ${wp.wpId}`,
       metadata: {
