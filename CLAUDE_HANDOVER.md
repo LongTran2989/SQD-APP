@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-01 (rev 7). Supersedes all previous versions.*
+*Last updated: 2026-06-01 (rev 8). Supersedes all previous versions.*
 
 ---
 
@@ -115,8 +115,19 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **`seed-verification.test.ts` fix:** hardcoded `ts-node.cmd` (Windows binary) replaced with platform-aware `process.platform === 'win32' ? 'ts-node.cmd' : 'ts-node'`.
   - **Deferred (not in Phase 6):** `violatorIds` multi-select search against external personnel DB; Findings analytics/charts dashboard.
 
+- **Phase 8.0 — FeedPost Migration (COMPLETED 2026-06-01)**
+  - **Migration only — no new functionality. External behaviour identical.** Replaced the `TaskActivity` model with a unified `FeedPost` model in preparation for the cross-scope feed system (Task / WP / Division / Org).
+  - **Schema (`schema.prisma`):**
+    - `TaskActivity` model **removed entirely**.
+    - New `FeedPost` model added — generalises the per-task feed. Field mapping from the old model: `taskId` → `scopeId` (always paired with `scope: 'TASK'` for all writes in this phase); `authorId`, `type`, `content`, `metadata` unchanged. Adds forward-looking columns (`sourcePostId`, `sourceExcerpt`, `sourceTaskId`, `sourceWpId`, `flagId`, `taggedDivisionIds`) that are unused in this phase. `@@index([scope, scopeId])`. `author User?` relation back-referenced on `User.feedPosts`.
+    - New `EscalationFlag` model added as a **structure-only placeholder** — no endpoints, routes, or logic yet. Back-referenced on `User.flaggedEscalations` / `User.reviewedEscalations`.
+    - `Task.activities` relation removed (FeedPost links by `scopeId`, not a Prisma relation).
+  - **Backend writes/reads migrated** (`scope: 'TASK'`, `taskId` → `scopeId`, no logic change): `task.controller.ts` (`logTaskActivity` helper, `getTaskActivity` read, `postTaskComment` write), `timebooking.controller.ts`, `findingService.ts` (`logFindingAuditAndActivity`), `wpCheckService.ts`. The `/api/tasks/:id/activity` response now carries `scopeId` in place of `taskId`. Dual-write rule preserved — every event still writes to BOTH `AuditLog` AND `FeedPost`.
+  - **Frontend types (`types/index.ts`):** `TaskActivity` interface replaced with `FeedPost`; `TaskActivityEnriched` renamed `FeedPostEnriched` (extends `Omit<FeedPost, 'author'>`). Component `TaskActivityFeed` and API helper `getTaskActivity` retain their names (feature/endpoint identifiers, not the data model) and the `/activity` route is unchanged.
+  - **Tests:** all `prisma.taskActivity.*` calls in `task.test.ts`, `wp.test.ts`, `finding.test.ts`, and `clean.ts` migrated to `prisma.feedPost.*` with `scope: 'TASK'` / `scopeId`. Suite now **189/189 passing**.
+
 ### Test Suite
-- All **187 integration tests passing** as of 2026-06-01
+- All **189 integration tests passing** as of 2026-06-01 (Phase 8.0)
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -246,11 +257,13 @@ The models `User`, `Task`, `Finding`, and `WorkPackage` now have a `deletedAt Da
 - Phase 5.4 — Add `File Upload` field type to Template builder
 - Phase 6 — File attachments on Findings
 
-### 3.6 Audit Trail vs TaskActivity — Important Distinction
+### 3.6 Audit Trail vs FeedPost — Important Distinction
+
+> **Phase 8.0:** `TaskActivity` was replaced by the unified `FeedPost` model. All existing per-task writes use `scope: 'TASK'` with `scopeId` = the task's DB id (formerly `taskId`). The distinction below is unchanged — only the model name. `FeedPost` is forward-structured for future WP / Division / Org feeds, but in this phase it behaves exactly as the old per-task feed.
 
 These are two separate systems that serve different purposes. **Both** are written to when significant events occur.
 
-| | `AuditLog` | `TaskActivity` |
+| | `AuditLog` | `FeedPost` (scope `TASK`) |
 |---|---|---|
 | **Scope** | System-wide — all entities | Per-Task only |
 | **Purpose** | Compliance & regulatory record | Operational communication feed |
@@ -721,8 +734,11 @@ All changes needed before Phase 5 development begins:
 | `User`, `Task`, `Finding` | ADD field | `deletedAt DateTime?` (soft delete) |
 | **NEW** | CREATE model | `WorkPackage` |
 | **NEW** | CREATE model | `WorkPackageAssignment` (join table: WP ↔ Users) |
-| **NEW** | CREATE model | `TaskActivity` |
+| **NEW** | CREATE model | ~~`TaskActivity`~~ → replaced by `FeedPost` in Phase 8.0 (see below) |
 | **NEW** | CREATE model | `TimeBooking` |
+| **Phase 8.0 additions** | | |
+| **REPLACE** | model | `TaskActivity` → `FeedPost`. `taskId` → `scopeId` (always with `scope: 'TASK'` for existing writes); other fields unchanged. Adds unused-for-now columns: `sourcePostId`, `sourceExcerpt`, `sourceTaskId`, `sourceWpId`, `flagId`, `taggedDivisionIds`. `@@index([scope, scopeId])` |
+| **NEW** | CREATE model | `EscalationFlag` — structure-only placeholder (no endpoints/logic yet) |
 | **NEW** | CREATE model | `WpType` (DB table, Admin-extensible — not hardcoded enum) |
 | **NEW** | CREATE model | `PrivilegeConfig` (Phase 7 — stores Admin-configurable role permissions) |
 | **NEW** | CREATE model | `Attachment` — `fileName`, `fileType`, `fileSize`, `storageKey`, `entityType`, `entityId`, `uploadedById` |

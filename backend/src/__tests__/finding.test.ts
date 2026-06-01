@@ -82,7 +82,7 @@ describe('Findings Backend (Phase 6)', () => {
 
   beforeEach(async () => {
     // FK-safe wipe (Task <-> Finding are mutually referential).
-    await prisma.taskActivity.deleteMany({});
+    await prisma.feedPost.deleteMany({});
     await prisma.timeBooking.deleteMany({});
     await prisma.taskData.deleteMany({});
     await prisma.task.updateMany({ data: { parentFindingId: null } });
@@ -108,7 +108,7 @@ describe('Findings Backend (Phase 6)', () => {
   });
 
   afterAll(async () => {
-    await prisma.taskActivity.deleteMany({});
+    await prisma.feedPost.deleteMany({});
     await prisma.timeBooking.deleteMany({});
     await prisma.taskData.deleteMany({});
     await prisma.task.updateMany({ data: { parentFindingId: null } });
@@ -168,7 +168,7 @@ describe('Findings Backend (Phase 6)', () => {
       const res = await raiseFinding(managerToken);
       const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(res.body.id), actionType: 'CREATED' } });
       expect(audit).not.toBeNull();
-      const activity = await prisma.taskActivity.findFirst({ where: { taskId: sourceTaskId, type: 'SYSTEM_EVENT' } });
+      const activity = await prisma.feedPost.findFirst({ where: { scope: 'TASK', scopeId: sourceTaskId, type: 'SYSTEM_EVENT' } });
       expect(activity).not.toBeNull();
     });
   });

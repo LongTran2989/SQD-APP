@@ -6,7 +6,7 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 async function main() {
   await prisma.workPackageAssignment.deleteMany({});
-  await prisma.taskActivity.deleteMany({});
+  await prisma.feedPost.deleteMany({});
   await prisma.taskData.deleteMany({});
   await prisma.task.deleteMany({});
   await prisma.workPackage.deleteMany({});

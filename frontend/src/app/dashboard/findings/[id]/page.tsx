@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
-import { FindingDetail, TaskEnriched, TaskActivityEnriched } from '../../../../types';
+import { FindingDetail, TaskEnriched, FeedPostEnriched } from '../../../../types';
 import { getFindingById, closeFinding } from '../../../../api/findingApi';
 import { getTaskById, getTaskActivity } from '../../../../api/taskApi';
 import { SeverityBadge, FindingStatusBadge } from '../../../../components/findings/FindingBadges';
@@ -35,7 +35,7 @@ export default function FindingDetailPage() {
 
   const [finding, setFinding] = useState<FindingDetail | null>(null);
   const [sourceTask, setSourceTask] = useState<TaskEnriched | null>(null);
-  const [activities, setActivities] = useState<TaskActivityEnriched[]>([]);
+  const [activities, setActivities] = useState<FeedPostEnriched[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

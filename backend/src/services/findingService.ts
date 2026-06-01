@@ -42,9 +42,10 @@ export async function logFindingAuditAndActivity(
   });
 
   if (sourceTaskId) {
-    await client.taskActivity.create({
+    await client.feedPost.create({
       data: {
-        taskId: sourceTaskId,
+        scope: 'TASK',
+        scopeId: sourceTaskId,
         type: 'SYSTEM_EVENT',
         content: activityContent,
         metadata: (details as any) ?? Prisma.DbNull,

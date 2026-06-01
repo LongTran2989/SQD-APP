@@ -54,9 +54,10 @@ async function logTaskActivity(
   authorId?: number
 ): Promise<void> {
   try {
-    await prisma.taskActivity.create({
+    await prisma.feedPost.create({
       data: {
-        taskId,
+        scope: 'TASK',
+        scopeId: taskId,
         type,
         content,
         metadata: (metadata as any) ?? Prisma.DbNull,
@@ -1591,8 +1592,8 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
     // Access control: Transparent viewing model
     // All authenticated users can view the task activity feed.
 
-    const activities = await prisma.taskActivity.findMany({
-      where: { taskId: id },
+    const activities = await prisma.feedPost.findMany({
+      where: { scope: 'TASK', scopeId: id },
       orderBy: { createdAt: 'asc' },
       include: {
         // Include author info — authorId is null for SYSTEM_EVENTs
@@ -1649,9 +1650,10 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
 
     // Access control: Anyone can comment on tasks (Transparent commenting model)
 
-    const activity = await prisma.taskActivity.create({
+    const activity = await prisma.feedPost.create({
       data: {
-        taskId: id,
+        scope: 'TASK',
+        scopeId: id,
         type: 'COMMENT',
         content: content.trim(),
         authorId: userId,

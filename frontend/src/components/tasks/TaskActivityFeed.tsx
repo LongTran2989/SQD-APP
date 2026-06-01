@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { TaskEnriched, TaskActivityEnriched, User } from '../../types';
+import { TaskEnriched, FeedPostEnriched, User } from '../../types';
 import { postTaskComment } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
@@ -28,9 +28,9 @@ function getInitials(name: string): string {
 
 interface TaskActivityFeedProps {
   task: TaskEnriched;
-  activities: TaskActivityEnriched[];
+  activities: FeedPostEnriched[];
   currentUser: User;
-  onNewActivity: (activity: TaskActivityEnriched) => void;
+  onNewActivity: (activity: FeedPostEnriched) => void;
   // When true the comment composer is hidden — e.g. the Finding detail page
   // shows the source task's feed read-only.
   readOnly?: boolean;

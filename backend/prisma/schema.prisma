@@ -79,6 +79,10 @@ model User {
   workPackageAssignments WorkPackageAssignment[]
   createdWorkPackages WorkPackage[] @relation("WorkPackageCreator")
 
+  feedPosts           FeedPost[]
+  flaggedEscalations  EscalationFlag[] @relation("FlaggedBy")
+  reviewedEscalations EscalationFlag[] @relation("ReviewedBy")
+
   deletedAt           DateTime?
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
@@ -227,7 +231,6 @@ model Task {
   
   taskData           TaskData?
   sourceFindings     Finding[]  @relation("FindingSourceTask")
-  activities         TaskActivity[]
   timeBooking        TimeBooking?
   
   deletedAt          DateTime?
@@ -374,15 +377,42 @@ model WpType {
 // Task Additions (Activity & Time)
 // -----------------------------------------------------------------------
 
-model TaskActivity {
-  id          Int      @id @default(autoincrement())
-  taskId      Int
-  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  authorId    Int?
-  type        String   // SYSTEM_EVENT or COMMENT
-  content     String
-  metadata    Json?
-  createdAt   DateTime @default(now())
+model FeedPost {
+  id                Int       @id @default(autoincrement())
+  type              String    // COMMENT | SYSTEM_EVENT | ESCALATION_CARD | INFO_CARD
+  scope             String    // TASK | WP | DIVISION | ORG
+  scopeId           Int?      // taskId | wpId | divisionId | null for ORG scope
+  authorId          Int?      // null for SYSTEM_EVENT entries
+  content           String
+  sourcePostId      Int?      // ESCALATION_CARD and INFO_CARD point to origin FeedPost
+  sourceExcerpt     String?   // denormalized excerpt for display without join
+  sourceTaskId      Int?      // denormalized origin task ID for breadcrumb/link
+  sourceWpId        Int?      // denormalized origin WP ID for breadcrumb/link
+  flagId            Int?      // link to EscalationFlag that spawned this card
+  taggedDivisionIds Json?     // [divisionId, ...] — Org Feed tagging only
+  metadata          Json?     // { fromStatus, toStatus, extensionDecision, etc. }
+  createdAt         DateTime  @default(now())
+
+  author            User?     @relation(fields: [authorId], references: [id])
+
+  @@index([scope, scopeId])
+}
+
+model EscalationFlag {
+  id                Int       @id @default(autoincrement())
+  sourcePostId      Int
+  flaggedByUserId   Int
+  reason            String?
+  targetScope       String    // WP | DIVISION | ORG
+  status            String    @default("PENDING") // PENDING | ACTIONED | DISMISSED
+  reviewedByUserId  Int?
+  action            String?   // ACKNOWLEDGED | FINDING_RAISED | DISSEMINATED | TASK_CREATED | REASSIGNED
+  actionedAt        DateTime?
+  linkedEntityId    String?   // Finding ID or Task ID created from this flag
+  createdAt         DateTime  @default(now())
+
+  flaggedByUser     User      @relation("FlaggedBy", fields: [flaggedByUserId], references: [id])
+  reviewedByUser    User?     @relation("ReviewedBy", fields: [reviewedByUserId], references: [id])
 }
 
 model TimeBooking {

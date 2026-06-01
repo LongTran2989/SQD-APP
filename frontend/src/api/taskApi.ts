@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry } from '../types';
+import { TaskEnriched, FeedPostEnriched, TimeBooking, TimeBookingEntry } from '../types';
 
 // ─── List endpoints ────────────────────────────────────────────────────────────
 
@@ -112,13 +112,13 @@ export const rateTask = (id: number, rating: number): Promise<TaskEnriched> =>
 
 // ─── Activity feed ─────────────────────────────────────────────────────────────
 
-export const getTaskActivity = (id: number): Promise<TaskActivityEnriched[]> =>
+export const getTaskActivity = (id: number): Promise<FeedPostEnriched[]> =>
   apiClient.get(`/tasks/${id}/activity`).then((r) => r.data);
 
 export const postTaskComment = (
   id: number,
   content: string
-): Promise<TaskActivityEnriched> =>
+): Promise<FeedPostEnriched> =>
   apiClient.post(`/tasks/${id}/activity`, { content }).then((r) => r.data);
 
 // ─── Time Booking (Phase 5.6) ─────────────────────────────────────────────────

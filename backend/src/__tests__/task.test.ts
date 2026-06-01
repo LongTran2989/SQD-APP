@@ -124,7 +124,7 @@ describe('Task Backend (Phase 5.2)', () => {
   });
 
   beforeEach(async () => {
-    await prisma.taskActivity.deleteMany({});
+    await prisma.feedPost.deleteMany({});
     await prisma.taskData.deleteMany({});
     await prisma.task.deleteMany({});
     await prisma.auditLog.deleteMany({});
@@ -132,7 +132,7 @@ describe('Task Backend (Phase 5.2)', () => {
 
   afterAll(async () => {
     await prisma.workPackageAssignment.deleteMany({});
-    await prisma.taskActivity.deleteMany({});
+    await prisma.feedPost.deleteMany({});
     await prisma.taskData.deleteMany({});
     await prisma.task.deleteMany({});
     await prisma.workPackage.deleteMany({});
@@ -348,7 +348,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .send({ templateId: publishedTemplateId, targetDivisionId: divisionId });
 
       expect(res.status).toBe(201);
-      const activities = await prisma.taskActivity.findMany({ where: { taskId: res.body.id } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: res.body.id } });
       expect(activities.length).toBeGreaterThan(0);
       expect(activities[0]!.type).toBe('SYSTEM_EVENT');
     });
@@ -772,7 +772,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ assignedToUserId: staffId });
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       const assignEvent = activities.find(a => a.content.includes('assigned'));
       expect(assignEvent).toBeDefined();
       expect(assignEvent!.type).toBe('SYSTEM_EVENT');
@@ -851,7 +851,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${staffToken}`)
         .send({ data: { '1': 'Pass' } });
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       const inProgressEvent = activities.find(a => a.content.includes('In Progress'));
       expect(inProgressEvent).toBeDefined();
     });
@@ -930,7 +930,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .put(`/api/tasks/${taskId}/submit`)
         .set('Authorization', `Bearer ${staffToken}`);
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       const submitEvent = activities.find(a => a.content.toLowerCase().includes('review') || a.content.toLowerCase().includes('submit'));
       expect(submitEvent).toBeDefined();
     });
@@ -1064,7 +1064,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ action: 'approve' });
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       const reviewEvent = activities.find(a => a.content.toLowerCase().includes('approved') || a.content.toLowerCase().includes('closed'));
       expect(reviewEvent).toBeDefined();
       expect(reviewEvent!.type).toBe('SYSTEM_EVENT');
@@ -1171,7 +1171,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ action: 'terminate' });
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       expect(activities.some(a => a.type === 'SYSTEM_EVENT')).toBe(true);
     });
   });
@@ -1273,7 +1273,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .put(`/api/tasks/${taskId}/reactivate`)
         .set('Authorization', `Bearer ${managerToken}`);
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       expect(activities.some(a => a.content.includes('inactivated') || a.content.includes('Inactive'))).toBe(true);
       expect(activities.some(a => a.content.includes('reactivated') || a.content.includes('Reactivated'))).toBe(true);
     });
@@ -1394,7 +1394,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ extensionIndex: 0, decision: 'approve', newDeadline: '2026-12-01' });
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       expect(activities.some(a => a.content.toLowerCase().includes('extension'))).toBe(true);
     });
   });
@@ -1485,7 +1485,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ newIssuerId: directorId });
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       expect(activities.some(a => a.content.toLowerCase().includes('issuer') || a.content.toLowerCase().includes('transferred'))).toBe(true);
     });
   });
@@ -1585,7 +1585,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${directorToken}`)
         .send({ rating: 3 });
 
-      const activities = await prisma.taskActivity.findMany({ where: { taskId } });
+      const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       const revisionEvent = activities.find(a => a.content.includes('re-rated'));
       expect(revisionEvent).toBeDefined();
     });
@@ -1621,10 +1621,10 @@ describe('Task Backend (Phase 5.2)', () => {
         }
       });
       // Seed some activity
-      await prisma.taskActivity.createMany({
+      await prisma.feedPost.createMany({
         data: [
-          { taskId: t.id, type: 'SYSTEM_EVENT', content: 'Task created', authorId: null },
-          { taskId: t.id, type: 'COMMENT', content: 'Please check section 3', authorId: managerId }
+          { scope: 'TASK', scopeId: t.id, type: 'SYSTEM_EVENT', content: 'Task created', authorId: null },
+          { scope: 'TASK', scopeId: t.id, type: 'COMMENT', content: 'Please check section 3', authorId: managerId }
         ]
       });
       return { taskId: t.id };
@@ -2047,8 +2047,8 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(auditEntry).not.toBeNull();
 
       // TaskActivity SYSTEM_EVENT
-      const activityEntry = await prisma.taskActivity.findFirst({
-        where: { taskId: id, type: 'SYSTEM_EVENT', content: { contains: 'Time logged' } }
+      const activityEntry = await prisma.feedPost.findFirst({
+        where: { scope: 'TASK', scopeId: id, type: 'SYSTEM_EVENT', content: { contains: 'Time logged' } }
       });
       expect(activityEntry).not.toBeNull();
     });
