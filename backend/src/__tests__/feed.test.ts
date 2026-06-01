@@ -30,6 +30,7 @@ describe('Feed & Escalation Backend (Phase 8.1)', () => {
   let divisionId: number;   // FED
   let division2Id: number;  // FE2
   let templateId: number;
+  let deptId: number;
 
   // Recreated each test (wiped in beforeEach).
   let wpId: number;          // WP in division FED
@@ -42,6 +43,7 @@ describe('Feed & Escalation Backend (Phase 8.1)', () => {
     const staffRole = await prisma.role.upsert({ where: { name: 'Staff' }, update: {}, create: { name: 'Staff' } });
 
     const dept = await prisma.department.upsert({ where: { name: 'Feed Test Dept' }, update: {}, create: { name: 'Feed Test Dept' } });
+    deptId = dept.id;
     const div = await prisma.division.upsert({ where: { code: 'FED' }, update: {}, create: { name: 'Feed Test Div', code: 'FED', departmentId: dept.id } });
     const div2 = await prisma.division.upsert({ where: { code: 'FE2' }, update: {}, create: { name: 'Feed Test Div 2', code: 'FE2', departmentId: dept.id } });
     divisionId = div.id;
@@ -406,6 +408,336 @@ describe('Feed & Escalation Backend (Phase 8.1)', () => {
       const audit = await prisma.auditLog.findFirst({ where: { entityType: 'EscalationFlag', entityId: String(res.body.flag.id), actionType: 'ESCALATION_FLAG_CREATED' } });
       expect(audit).not.toBeNull();
       expect(audit?.performedByUserId).toBe(staffId);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase 8.2 helpers
+  // ────────────────────────────────────────────────────────────────────────
+
+  // Escalate a task comment and return the created flag id.
+  async function escalate(token: string, postId: number, targetScope: string): Promise<number> {
+    const res = await request(app)
+      .post(`/api/feed/posts/${postId}/escalate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ targetScope });
+    return res.body.flag.id;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 9 — getDivisionFeed
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('getDivisionFeed', () => {
+    it('FE80: returns 200 with posts for a valid division', async () => {
+      await request(app).post(`/api/feed/division/${divisionId}`).set('Authorization', `Bearer ${staffToken}`).send({ content: 'div note' });
+      const res = await request(app).get(`/api/feed/division/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.posts).toHaveLength(1);
+      expect(res.body.posts[0].scope).toBe('DIVISION');
+      expect(res.body.posts[0].scopeId).toBe(divisionId);
+      expect(res.body.posts[0].content).toBe('div note');
+    });
+
+    it('FE81: returns 404 for a non-existent division', async () => {
+      const res = await request(app).get('/api/feed/division/999999').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('FE82: requires authentication → 401', async () => {
+      const res = await request(app).get(`/api/feed/division/${divisionId}`);
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 10 — postDivisionMessage
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('postDivisionMessage', () => {
+    it('FE90: returns 201 for a division member posting a message', async () => {
+      const res = await request(app).post(`/api/feed/division/${divisionId}`).set('Authorization', `Bearer ${staffToken}`).send({ content: 'member message' });
+      expect(res.status).toBe(201);
+      expect(res.body.type).toBe('COMMENT');
+      expect(res.body.scope).toBe('DIVISION');
+      expect(res.body.scopeId).toBe(divisionId);
+      expect(res.body.authorId).toBe(staffId);
+    });
+
+    it('FE91: returns 403 for a user from a different division', async () => {
+      // Staff identity but token carries a different divisionId.
+      const otherDivToken = makeToken(staffId, 'Staff', division2Id);
+      const res = await request(app).post(`/api/feed/division/${divisionId}`).set('Authorization', `Bearer ${otherDivToken}`).send({ content: 'outsider' });
+      expect(res.status).toBe(403);
+    });
+
+    it('FE92: Director can post to any division', async () => {
+      // Director carries divisionId FED but posts to FE2.
+      const res = await request(app).post(`/api/feed/division/${division2Id}`).set('Authorization', `Bearer ${directorToken}`).send({ content: 'director note' });
+      expect(res.status).toBe(201);
+      expect(res.body.scopeId).toBe(division2Id);
+    });
+
+    it('FE93: returns 400 for empty content', async () => {
+      const res = await request(app).post(`/api/feed/division/${divisionId}`).set('Authorization', `Bearer ${staffToken}`).send({ content: '   ' });
+      expect(res.status).toBe(400);
+    });
+
+    it('FE94: requires authentication → 401', async () => {
+      const res = await request(app).post(`/api/feed/division/${divisionId}`).send({ content: 'x' });
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 11 — getOrgFeed
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('getOrgFeed', () => {
+    it('FE100: returns 200 with all ORG scope posts when no filter', async () => {
+      await request(app).post('/api/feed/org').set('Authorization', `Bearer ${directorToken}`).send({ content: 'org a' });
+      await request(app).post('/api/feed/org').set('Authorization', `Bearer ${managerToken}`).send({ content: 'org b', taggedDivisionIds: [division2Id] });
+      const res = await request(app).get('/api/feed/org').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.posts).toHaveLength(2);
+      expect(res.body.posts.every((p: any) => p.scope === 'ORG')).toBe(true);
+    });
+
+    it('FE101: returns only tagged posts when ?divisionTag= is provided', async () => {
+      await request(app).post('/api/feed/org').set('Authorization', `Bearer ${directorToken}`).send({ content: 'untagged org' });
+      await request(app).post('/api/feed/org').set('Authorization', `Bearer ${managerToken}`).send({ content: 'tagged org', taggedDivisionIds: [division2Id] });
+      const res = await request(app).get(`/api/feed/org?divisionTag=${division2Id}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.posts).toHaveLength(1);
+      expect(res.body.posts[0].content).toBe('tagged org');
+    });
+
+    it('FE102: posts without taggedDivisionIds are included when no filter', async () => {
+      await request(app).post('/api/feed/org').set('Authorization', `Bearer ${directorToken}`).send({ content: 'plain org' });
+      const res = await request(app).get('/api/feed/org').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.posts.some((p: any) => p.content === 'plain org' && (p.taggedDivisionIds === null || p.taggedDivisionIds === undefined))).toBe(true);
+    });
+
+    it('FE103: requires authentication → 401', async () => {
+      const res = await request(app).get('/api/feed/org');
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 12 — postOrgMessage
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('postOrgMessage', () => {
+    it('FE110: Director can post to Org Feed', async () => {
+      const res = await request(app).post('/api/feed/org').set('Authorization', `Bearer ${directorToken}`).send({ content: 'director org' });
+      expect(res.status).toBe(201);
+      expect(res.body.scope).toBe('ORG');
+      expect(res.body.scopeId).toBeNull();
+    });
+
+    it('FE111: Manager can post to Org Feed', async () => {
+      const res = await request(app).post('/api/feed/org').set('Authorization', `Bearer ${managerToken}`).send({ content: 'manager org' });
+      expect(res.status).toBe(201);
+      expect(res.body.scope).toBe('ORG');
+    });
+
+    it('FE112: Staff cannot post to Org Feed → 403', async () => {
+      const res = await request(app).post('/api/feed/org').set('Authorization', `Bearer ${staffToken}`).send({ content: 'staff org' });
+      expect(res.status).toBe(403);
+    });
+
+    it('FE113: taggedDivisionIds is stored and returned correctly', async () => {
+      const res = await request(app).post('/api/feed/org').set('Authorization', `Bearer ${managerToken}`).send({ content: 'tagged', taggedDivisionIds: [divisionId, division2Id] });
+      expect(res.status).toBe(201);
+      expect(res.body.taggedDivisionIds).toEqual([divisionId, division2Id]);
+      const stored = await prisma.feedPost.findUnique({ where: { id: res.body.id } });
+      expect(stored?.taggedDivisionIds).toEqual([divisionId, division2Id]);
+    });
+
+    it('FE114: requires authentication → 401', async () => {
+      const res = await request(app).post('/api/feed/org').send({ content: 'x' });
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 13 — getPendingFlags
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('getPendingFlags', () => {
+    it('FE120: Director sees all pending flags', async () => {
+      const p1 = await postTaskComment(staffToken, taskWithWpId, 'c1');
+      await escalate(staffToken, p1, 'WP');
+      const p2 = await postTaskComment(staffToken, taskWithWpId, 'c2');
+      await escalate(staffToken, p2, 'ORG');
+
+      const res = await request(app).get('/api/feed/flags/pending').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.flags).toHaveLength(2);
+    });
+
+    it('FE121: Manager sees flags from their division + ORG flags', async () => {
+      const p1 = await postTaskComment(staffToken, taskWithWpId, 'div flag'); // task in FED
+      await escalate(staffToken, p1, 'DIVISION');
+      const p2 = await postTaskComment(staffToken, taskWithWpId, 'org flag');
+      await escalate(staffToken, p2, 'ORG');
+
+      const res = await request(app).get('/api/feed/flags/pending').set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.flags).toHaveLength(2);
+    });
+
+    it('FE122: Manager does not see flags from another division', async () => {
+      // Task targeting division2 — escalate to DIVISION (FE2). FED manager must not see it.
+      const otherTask = await prisma.task.create({
+        data: { taskId: 'FED-900003', templateId, issuerId: managerId, targetDivisionId: division2Id, status: 'InProgress', schemaSnapshot: [] as any, assignmentType: 'INDIVIDUAL' }
+      });
+      const comment = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'TASK', scopeId: otherTask.id, authorId: staffId, content: 'other div' } });
+      await escalate(staffToken, comment.id, 'DIVISION');
+
+      const res = await request(app).get('/api/feed/flags/pending').set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.flags).toHaveLength(0);
+    });
+
+    it('FE123: Staff gets 403', async () => {
+      const res = await request(app).get('/api/feed/flags/pending').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(403);
+    });
+
+    it('FE124: requires authentication → 401', async () => {
+      const res = await request(app).get('/api/feed/flags/pending');
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 14 — actOnFlag: validation
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('actOnFlag — validation', () => {
+    it('FE130: returns 404 for non-existent flag', async () => {
+      const res = await request(app).put('/api/feed/flags/999999/action').set('Authorization', `Bearer ${managerToken}`).send({ action: 'ACKNOWLEDGED' });
+      expect(res.status).toBe(404);
+    });
+
+    it('FE131: returns 400 for already-actioned flag', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'to ack');
+      const flagId = await escalate(staffToken, postId, 'WP');
+      await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${managerToken}`).send({ action: 'ACKNOWLEDGED' });
+      const res = await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${managerToken}`).send({ action: 'ACKNOWLEDGED' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/already been actioned/i);
+    });
+
+    it('FE132: returns 400 for invalid action value', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'bad action');
+      const flagId = await escalate(staffToken, postId, 'WP');
+      const res = await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${managerToken}`).send({ action: 'NUKE' });
+      expect(res.status).toBe(400);
+    });
+
+    it('FE133: Staff gets 403', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'staff acts');
+      const flagId = await escalate(staffToken, postId, 'WP');
+      const res = await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${staffToken}`).send({ action: 'ACKNOWLEDGED' });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 15 — actOnFlag: ACKNOWLEDGED
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('actOnFlag — ACKNOWLEDGED', () => {
+    it('FE140: flag moves to ACTIONED with action ACKNOWLEDGED', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'ack me');
+      const flagId = await escalate(staffToken, postId, 'WP');
+      const res = await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${managerToken}`).send({ action: 'ACKNOWLEDGED' });
+      expect(res.status).toBe(200);
+      expect(res.body.flag.status).toBe('ACTIONED');
+      expect(res.body.flag.action).toBe('ACKNOWLEDGED');
+      expect(res.body.flag.reviewedByUserId).toBe(managerId);
+    });
+
+    it('FE141: writes an AuditLog entry', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'ack audit');
+      const flagId = await escalate(staffToken, postId, 'WP');
+      await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${managerToken}`).send({ action: 'ACKNOWLEDGED' });
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'EscalationFlag', entityId: String(flagId), actionType: 'ESCALATION_FLAG_ACTIONED' } });
+      expect(audit).not.toBeNull();
+      expect(audit?.performedByUserId).toBe(managerId);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 16 — actOnFlag: DISSEMINATED
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('actOnFlag — DISSEMINATED', () => {
+    it('FE150: creates an ESCALATION_CARD at ORG scope and moves flag to ACTIONED', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'disseminate me');
+      const flagId = await escalate(staffToken, postId, 'DIVISION');
+      const res = await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${directorToken}`).send({ action: 'DISSEMINATED', taggedDivisionIds: [division2Id] });
+      expect(res.status).toBe(200);
+      expect(res.body.flag.status).toBe('ACTIONED');
+      expect(res.body.flag.action).toBe('DISSEMINATED');
+
+      const orgCard = await prisma.feedPost.findFirst({ where: { type: 'ESCALATION_CARD', scope: 'ORG', flagId } });
+      expect(orgCard).not.toBeNull();
+      expect(orgCard?.taggedDivisionIds).toEqual([division2Id]);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 17 — actOnFlag: FINDING_RAISED
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('actOnFlag — FINDING_RAISED', () => {
+    it('FE160: creates a Finding with correct fields and links it to the flag', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'raise finding from this');
+      const flagId = await escalate(staffToken, postId, 'WP');
+      const res = await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${managerToken}`).send({
+        action: 'FINDING_RAISED',
+        findingOverride: { eventType: 'Procedural Breach', departmentId: deptId, description: 'Override desc' }
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.flag.status).toBe('ACTIONED');
+      expect(res.body.flag.action).toBe('FINDING_RAISED');
+      expect(res.body.flag.linkedEntityId).not.toBeNull();
+
+      const finding = await prisma.finding.findUnique({ where: { id: parseInt(res.body.flag.linkedEntityId, 10) } });
+      expect(finding).not.toBeNull();
+      expect(finding?.eventType).toBe('Procedural Breach');
+      expect(finding?.departmentId).toBe(deptId);
+      expect(finding?.description).toBe('Override desc');
+      expect(finding?.sourceTaskId).toBe(taskWithWpId);
+      expect(finding?.status).toBe('Open');
+    });
+
+    it('FE161: returns 400 if departmentId or eventType is missing', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'missing fields');
+      const flagId = await escalate(staffToken, postId, 'WP');
+      const res = await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${managerToken}`).send({
+        action: 'FINDING_RAISED',
+        findingOverride: { description: 'no event/dept' }
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/departmentId and eventType/i);
+    });
+
+    it('FE162: description falls back to the source comment content when not overridden', async () => {
+      const postId = await postTaskComment(staffToken, taskWithWpId, 'fallback description content');
+      const flagId = await escalate(staffToken, postId, 'WP');
+      const res = await request(app).put(`/api/feed/flags/${flagId}/action`).set('Authorization', `Bearer ${managerToken}`).send({
+        action: 'FINDING_RAISED',
+        findingOverride: { eventType: 'Safety Observation', departmentId: deptId }
+      });
+      expect(res.status).toBe(200);
+      const finding = await prisma.finding.findUnique({ where: { id: parseInt(res.body.flag.linkedEntityId, 10) } });
+      expect(finding?.description).toBe('fallback description content');
     });
   });
 });
