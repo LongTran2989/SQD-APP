@@ -808,6 +808,7 @@ All changes needed before Phase 5 development begins:
 4. **Checkbox icon bug**: In Template Builder preview, checkmark icon sometimes fails to render on toggle. Known visual glitch, not yet fixed.
 5. ~~**`AuditLog.entityId` is `Int`**~~ — **RESOLVED in Phase 5.0**: successfully migrated to `String` via `prisma db push`. No further action needed.
 6. **Prisma generation**: Always run `npx prisma generate` in `/backend` after schema changes.
+6a. **Schema migration strategy**: Use `prisma db push` during active development (Phases 1–6). Before the first production deployment: run `npx prisma migrate dev --name init` once to snapshot the current schema, then use `prisma migrate dev` for all future schema changes. `db push` must never be used in production — it is non-reversible and leaves no auditable migration trail, which is non-compliant for an aviation maintenance system.
 7. **Port conflict**: Backend must stay on `:5000`. Frontend on `:3000`.
 8. **CORS**: `app.use(cors())` allows all origins — local dev only. Restrict before any deployment.
 9. **`draftSchema` leak risk**: When publishing, the controller MUST set `draftSchema: null`. If this is missed, the draft will persist and be exposed to the owner on next load as if unpublished changes exist.
@@ -821,7 +822,8 @@ All changes needed before Phase 5 development begins:
 | `npm run dev` | `/frontend` + `/backend` | Start both servers |
 | `npm run test` | `/backend` | Run Jest + Supertest suite |
 | `npx prisma generate` | `/backend` | Regenerate Prisma client after schema changes |
-| `npx prisma db push` | `/backend` | Sync schema to DB (run on both dev + test DBs) |
+| `npx prisma db push` | `/backend` | Sync schema to DB — **dev/test only**, never production |
+| `npx prisma migrate dev --name <name>` | `/backend` | Create a tracked migration — use from first production deploy onward |
 
 - **Backend port:** `5000`
 - **Frontend port:** `3000`

@@ -29,6 +29,7 @@ Violating any of these rules silently breaks data integrity, compliance, or RBAC
 7. **Reassignment.** Permitted at any non-final stage, mandatory reason, all TaskData preserved. BLOCKED on Closed, Terminated, Rejected.
 8. **Test DB isolation.** Tests ALWAYS run against `sqd_qa_test_db`. Never `sqd_qa_db`. Confirm `.env.test` is loaded before running tests.
 9. **Prisma generate.** Run `npx prisma generate` in `/backend` after every `schema.prisma` change.
+9a. **Schema migration strategy.** Use `prisma db push` during active development. Before the first production deployment, snapshot the schema with `npx prisma migrate dev --name init`, then use `prisma migrate dev` for all subsequent changes. Never deploy schema changes to production via `db push` — it is not reversible and leaves no migration history, which is non-compliant for an aviation system.
 10. **File Upload deferred.** Do not implement File Upload field type until MinIO is configured (Phase 5.4+). Never hardcode file size/type limits — Admin-configurable only.
 11. **Terminal — cmd only.** Always use cmd syntax. Never PowerShell syntax (`$env:VAR`, backtick line continuation, etc.).
 12. **Update `CLAUDE_HANDOVER.md` after every completed feature.** Once the user confirms a feature is complete and all tests pass, update `CLAUDE_HANDOVER.md` — phase status, completed items, test count, new gotchas. Do this before ending the session. Never update it before the user confirms completion.
