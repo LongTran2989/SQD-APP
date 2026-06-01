@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-05-31 (rev 5). Supersedes all previous versions.*
+*Last updated: 2026-06-01 (rev 6). Supersedes all previous versions.*
 
 ---
 
@@ -78,9 +78,30 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Routes:** `POST /api/tasks/:id/time-booking` and `PUT /api/tasks/:id/time-booking` registered in `task.routes.ts`.
   - **Frontend (`TimeBookingPanel.tsx`):** Full form (hours + notes + collaborator management), read-only summary view with budget-vs-actual comparison badge, edit mode for existing bookings, live total preview during form entry.
   - **Integration:** `TimeBookingPanel` imported and rendered in `tasks/[id]/page.tsx` (final-state tasks only).
+- **Phase 6 — Findings System** (COMPLETED 2026-06-01)
+  - **Schema additions:** `Finding.departmentId Int` (required FK to Department); `Finding.category String?` (made nullable — was required but not included in the raise payload); `Task.title String?` (needed for editable follow-up task titles).
+  - **Service (`findingService.ts`):** `logFindingAuditAndActivity()` (dual-write helper) and `checkAndTriggerPendingVerification()` (best-effort hook — never rethrows, wired into task.controller after reviewTask / postRejectionAction / submitTask reach final states).
+  - **Backend (`finding.controller.ts` + `finding.routes.ts`):** 7 endpoints registered under `/api/findings`:
+    - `POST /api/findings` — raise finding (requires taskId, eventType, departmentId, description; template must have `allowsFindings = true`; task must be non-final)
+    - `GET /api/findings` — list with RBAC scoping + filters (status, severity, page, pageSize)
+    - `GET /api/findings/:id` — full detail with nested sourceTask, followUpTasks, reportedByUser, department
+    - `PUT /api/findings/:id/review` — set severity + dueDate; status Open → In Progress (Manager/Director only)
+    - `POST /api/findings/:id/tasks` — generate follow-up tasks (atomically validated; tasks created as Unassigned, linked via `parentFindingId`)
+    - `PUT /api/findings/:id/stage2` — save analytical fields (rootCause, correctiveAction, errorCode, recurrence, category)
+    - `PUT /api/findings/:id/close` — close finding from Pending Verification (Manager/Director only)
+  - **RBAC scoping:** Director/Admin = all findings; Manager = own division; Group Leader/Staff = own findings + follow-up task assignee.
+  - **Pending Verification hook:** fires when all follow-up tasks for a finding reach a final state (Closed/Rejected/Terminated). Writes to AuditLog + source task's TaskActivity feed. Best-effort — never breaks the triggering task action.
+  - **Tests (`finding.test.ts`):** 37 new tests across 8 groups. All 187 tests passing.
+  - **Frontend components:** `FindingBadges.tsx` (SeverityBadge, FindingStatusBadge); `ReviewPanel.tsx` (Stage 1 review form, read-only for non-reviewers); `GenerateFollowUpModal.tsx` (multi-row task generation with template+title per row); `Stage2Form.tsx` (analytical fields, editable/read-only by role); `RaiseFindingPanel.tsx` (slide-over raise form with department datasource).
+  - **Frontend pages:** `/dashboard/findings` (list with filter bar, severity + status filters); `/dashboard/findings/[id]` (two-column detail: metadata, review, follow-up tasks, stage 2, close, activity feed).
+  - **Task integration:** "Raise Finding" button gated on `template.allowsFindings && non-final status`; Linked Findings section on task detail; `RaiseFindingPanel` slide-over; activity feed updated after raise.
+  - **Sidebar:** Findings nav item (all roles); amber badge showing Open + In Progress count scoped to RBAC visibility.
+  - **`task.controller.ts` addition:** `allowsFindings` added to `taskInclude()` so the template flag is available in task detail responses.
+  - **`seed-verification.test.ts` fix:** hardcoded `ts-node.cmd` (Windows binary) replaced with platform-aware `process.platform === 'win32' ? 'ts-node.cmd' : 'ts-node'`.
+  - **Deferred (not in Phase 6):** `violatorIds` multi-select search against external personnel DB; Findings analytics/charts dashboard.
 
 ### Test Suite
-- All **150 integration tests passing** as of 2026-05-31
+- All **187 integration tests passing** as of 2026-06-01
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -608,12 +629,11 @@ These are two separate systems that serve different purposes. **Both** are writt
 2. Manager/Director reviews Finding, sets severity
 3. Manager/Director decides to generate one or more follow-up Tasks
 4. Follow-up Tasks based on pre-defined regular Templates (e.g. "Non-conformity Report", "Corrective Action Request") — managed by Admin/Director
-5. Finding raiser **automatically becomes the Task assignee**
-6. Issuer/Director/Manager can override assignee (standard reassignment rules, all data preserved)
-7. One Finding can generate multiple Tasks (supported but not common)
-8. Each generated Task linked to source Finding via `parentFindingId`
-9. When all follow-up Tasks reach a final state → Finding status → `Pending Verification` → system prompts reporter to return
-10. Reporter completes Stage 2 fields → Manager/Director signs off → Finding → `Closed`
+5. Follow-up Tasks are created as **`Unassigned`** — Issuer/Director/Manager assigns them (standard assignment rules)
+6. One Finding can generate multiple Tasks (supported but not common)
+7. Each generated Task linked to source Finding via `parentFindingId`
+8. When all follow-up Tasks reach a final state → Finding status → `Pending Verification` → system prompts reporter to return
+9. Reporter completes Stage 2 fields → Manager/Director signs off → Finding → `Closed`
 
 **Future — Findings Dashboard (Phase 6+):**
 Dedicated analytics view with charts and filters across severity, eventType, errorCode, department, aircraft, recurrence, time period. Deferred — implement list view first.
@@ -678,6 +698,10 @@ All changes needed before Phase 5 development begins:
 | `Finding` | ADD field | `violatorIds Json?` — Stage 2; array of personnel IDs from external DB |
 | `Finding` | CHANGE field | `severity` values → `Observation`, `Level 1`, `Level 2` (set by Manager/Director, not reporter) |
 | `Finding` | EXPAND | `status` values: Open, In Progress, Pending Verification, Closed |
+| **Phase 6 additions** | | |
+| `Finding` | ADD field | `departmentId Int` — required FK to Department; separate from `targetDivisionId` (RBAC) |
+| `Finding` | CHANGE field | `category String?` — made nullable (was required; raise payload does not include it) |
+| `Task` | ADD field | `title String?` — nullable; used for editable follow-up task titles |
 | `AuditLog` | CHANGE | `entityId Int` → `entityId String` |
 | `User`, `Task`, `Finding` | ADD field | `deletedAt DateTime?` (soft delete) |
 | **NEW** | CREATE model | `WorkPackage` |
@@ -774,18 +798,23 @@ All changes needed before Phase 5 development begins:
 - [x] Time Booking UI on Task detail page (available at final state only)
 - [x] Collaborator addition (assignee only); budget-vs-actual comparison display
 
-### Phase 6 — Findings System
-- [ ] `finding.routes.ts` + `finding.controller.ts`
-- [ ] Stage 1 create endpoint — enforce required fields (eventType, departmentId, aircraftRegistration, regulatoryReference)
-- [ ] Manager/Director review endpoint — set severity, generate follow-up Task(s)
-- [ ] Follow-up Task generation from pre-defined Templates — auto-assign Finding raiser
-- [ ] `parentFindingId` linkage on generated Tasks
-- [ ] Stage 2 hook — when all linked follow-up Tasks reach final state, set Finding → `Pending Verification` and notify reporter
-- [ ] Stage 2 update endpoint — reporter fills analytical fields (errorCode, rootCause, correctiveAction, recurrence, violatorIds)
-- [ ] violatorIds search integration — searchable multi-select UI against external personnel DB (5000+ records)
-- [ ] Finding close endpoint (Manager/Director sign-off after Stage 2)
-- [ ] `/dashboard/findings` — list view with tabs: Open / In Progress / Pending Verification / Closed
-- [ ] Findings dashboard with charts/filters (deferred — list view first)
+### Phase 6 — Findings System (COMPLETED 2026-06-01)
+- [x] `finding.routes.ts` + `finding.controller.ts` (7 endpoints)
+- [x] Stage 1 create endpoint — `POST /api/findings` (enforces eventType, departmentId, description; template `allowsFindings` gate; non-final task gate)
+- [x] Manager/Director review endpoint — `PUT /api/findings/:id/review` (sets severity + dueDate; Open → In Progress)
+- [x] Follow-up Task generation — `POST /api/findings/:id/tasks` (multi-row, atomically validated; tasks created as **Unassigned** — NOT auto-assigned to raiser)
+- [x] `parentFindingId` linkage on generated Tasks
+- [x] Stage 2 hook (`findingService.checkAndTriggerPendingVerification`) — fires from task.controller after Closed/Rejected/Terminated; best-effort, never rethrows
+- [x] Stage 2 update endpoint — `PUT /api/findings/:id/stage2` (rootCause, correctiveAction, errorCode, recurrence, category)
+- [x] Finding close endpoint — `PUT /api/findings/:id/close` (Manager/Director from Pending Verification)
+- [x] `/dashboard/findings` — list page with severity + status filters, RBAC-scoped, paginated
+- [x] `/dashboard/findings/[id]` — detail page (all 6 sections: metadata, review, follow-up tasks, stage 2, close, activity feed)
+- [x] Raise Finding slide-over from Task detail page (gated on `allowsFindings` + non-final status)
+- [x] Linked Findings section on Task detail page
+- [x] Sidebar Findings nav item (all roles) with amber Open+In-Progress badge
+- [x] `finding.test.ts` — 37 tests, 8 groups; 187 / 187 total passing
+- [ ] `violatorIds` search integration — deferred (external personnel DB, 5000+ records, Phase 7+)
+- [ ] Findings analytics dashboard with charts/filters — deferred (Phase 7+)
 
 ### Phase 7 — User Management & Settings
 - [ ] `/dashboard/users` — Admin only: manage users, roles, divisions
@@ -811,6 +840,11 @@ All changes needed before Phase 5 development begins:
 7. **Port conflict**: Backend must stay on `:5000`. Frontend on `:3000`.
 8. **CORS**: `app.use(cors())` allows all origins — local dev only. Restrict before any deployment.
 9. **`draftSchema` leak risk**: When publishing, the controller MUST set `draftSchema: null`. If this is missed, the draft will persist and be exposed to the owner on next load as if unpublished changes exist.
+10. **Finding follow-up tasks are Unassigned**: The original spec in OBJECT F said "Finding raiser automatically becomes the Task assignee." The actual implementation creates follow-up tasks as `Unassigned`. An Issuer/Manager/Director must manually assign them. Do not change this without a deliberate decision.
+11. **`checkAndTriggerPendingVerification` is best-effort**: The hook in `findingService.ts` is wrapped in try/catch and never rethrows. If it fails silently, a finding will remain `In Progress` even after all follow-up tasks close. This is intentional — the hook must never break the task action that triggered it.
+12. **`Finding.category` is nullable**: The original Phase 5 schema had `category` as required, but the Phase 6 raise endpoint does not include it (it belongs to Stage 2 analysis). It was made nullable in Phase 6 to avoid NOT NULL violations on raise. Set it via `PUT /api/findings/:id/stage2`.
+13. **`Finding.departmentId` vs `targetDivisionId`**: Two separate fields. `departmentId` is the department where the finding occurred (operational, required at raise). `targetDivisionId` is the division used for RBAC scoping. Do not conflate them.
+14. **`seed-verification.test.ts` platform fix**: This test spawns `ts-node` as a child process. It now uses `process.platform === 'win32' ? 'ts-node.cmd' : 'ts-node'`. If tests fail on Windows with "ts-node not found", confirm the `.cmd` variant is on PATH.
 
 ---
 

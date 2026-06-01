@@ -22,10 +22,14 @@ This document outlines the high-level business logic and application workflow fo
 - **Time Booking:** Once a Task reaches a final state (`Closed`, `Rejected`, or `Terminated`), the assignee can log actual hours worked, including collaborators. A budget-vs-actual comparison is shown when the source Template had an `estimatedHours` value. The booking is revisable by the assignee, Admin, or Director. Each create/update is written to both the `AuditLog` and the Task's `TaskActivity` feed.
 
 ## 4. Findings & Corrective Action Loop
-- **Raising Findings:** Staff can raise multiple findings from a single Task. A finding requires key information (e.g., Event Type, Aircraft Registration, Dept).
-- **Severity & Review:** A Manager/Director reviews the finding and assigns a severity (Observation, Level 1, Level 2).
-- **Follow-Up Tasks:** The reviewer generates Corrective Action follow-up Tasks linked to the finding. 
-- **Closure:** Once all follow-up Tasks close, the finding moves to `Pending Verification`. The original reporter then completes analytical fields (Root Cause, Corrective Action taken) before final sign-off.
+- **Raising Findings:** Any user can raise one or more findings from a Task, provided the source template has `allowsFindings = true` and the task is not in a final state (Closed/Terminated/Inactive). A finding requires Event Type, Department, and Description at minimum. Aircraft Registration, Regulatory Reference, and Field Reference are optional.
+- **Severity & Review:** A Manager/Director reviews the finding and assigns a severity (`Observation`, `Level 1`, `Level 2`) and a due date. This transitions the finding from `Open` to `In Progress`.
+- **Follow-Up Tasks:** The reviewer generates one or more corrective-action Tasks from existing Templates. Each task is created as `Unassigned` and linked to the finding via `parentFindingId`. An Issuer/Manager/Director then assigns them through the standard task assignment flow.
+- **Pending Verification Hook:** When every follow-up Task linked to a finding reaches a final state (Closed, Rejected, or Terminated), the finding automatically transitions to `Pending Verification`. This is a best-effort background operation wired into the task review/submission actions.
+- **Stage 2 Analysis:** The reporter (or a Manager/Director) fills in analytical fields on the finding: Root Cause, Corrective Action taken, Error Code, Category, and Recurrence flag.
+- **Closure:** A Manager/Director signs off and closes the finding from `Pending Verification` → `Closed`.
+- **RBAC Visibility:** Director/Admin see all findings system-wide. Managers see findings in their division. Group Leaders and Staff see only findings they raised or are assigned a follow-up task on.
+- **Sidebar Badge:** The Findings nav item shows an amber badge with the count of Open + In Progress findings within the viewer's RBAC scope.
 
 ## 5. The Immutable Audit Trail
 - The `AuditLog` table is the source of truth for compliance. 
