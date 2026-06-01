@@ -65,19 +65,8 @@ export const getWorkPackages = async (req: Request, res: Response): Promise<void
 
     let where: any = { deletedAt: null };
 
-    if (role === 'Director' || role === 'Admin') {
-      // system-wide visibility — no further filter
-    } else if (role === 'Manager') {
-      where.divisionId = divisionId;
-    } else {
-      // Staff / Group Leader: only WPs they are explicitly assigned to
-      const assignments = await prisma.workPackageAssignment.findMany({
-        where: { userId },
-        select: { wpId: true }
-      });
-      const assignedWpIds = assignments.map((a) => a.wpId);
-      where.id = { in: assignedWpIds };
-    }
+    // Transparency model: all users can view system-wide WP list.
+    // Filtering to prevent clutter will be handled on the frontend.
 
     const wps = await prisma.workPackage.findMany({
       where,
@@ -138,23 +127,9 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Access control: Director/Admin see any WP; Manager sees own-division WPs;
-    // Staff/Group Leader can only access WPs they are assigned to.
-    const { userId, role, divisionId } = req.user!;
-    let canAccess = role === 'Director' || role === 'Admin';
-    if (!canAccess && role === 'Manager') {
-      canAccess = wp.divisionId === divisionId;
-    }
-    if (!canAccess) {
-      const assignment = await prisma.workPackageAssignment.findUnique({
-        where: { wpId_userId: { wpId: wp.id, userId } }
-      });
-      canAccess = assignment !== null;
-    }
-    if (!canAccess) {
-      res.status(403).json({ message: 'You do not have permission to view this work package' });
-      return;
-    }
+    // Access control: Transparent view model
+    // Any authenticated user can view the WP details.
+    // Modifications are restricted in action endpoints (PUT/POST/DELETE).
 
     const computedStatus = await computeWpStatus(wp);
 

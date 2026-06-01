@@ -4,13 +4,17 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
-import { TaskEnriched, TaskActivityEnriched, FormField } from '../../../../types';
+import { TaskEnriched, TaskActivityEnriched, FormField, FindingListItem } from '../../../../types';
 import { getTaskById, getTaskActivity, saveTaskData } from '../../../../api/taskApi';
+import { getFindingsByTask } from '../../../../api/findingApi';
 import TaskDetailPanel from '../../../../components/tasks/TaskDetailPanel';
 import TaskActionBar from '../../../../components/tasks/TaskActionBar';
 import TaskFormPanel from '../../../../components/tasks/TaskFormPanel';
 import TaskActivityFeed from '../../../../components/tasks/TaskActivityFeed';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
+import TimeBookingPanel from '../../../../components/tasks/TimeBookingPanel';
+import RaiseFindingPanel from '../../../../components/findings/RaiseFindingPanel';
+import { SeverityBadge, FindingStatusBadge } from '../../../../components/findings/FindingBadges';
 import toast from 'react-hot-toast';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
 
@@ -31,6 +35,8 @@ export default function TaskDetailPage() {
   const [savingProgress, setSavingProgress] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [linkedFindings, setLinkedFindings] = useState<FindingListItem[]>([]);
+  const [showRaiseFinding, setShowRaiseFinding] = useState(false);
 
   // ── beforeunload guard (same pattern as TemplateBuilder) ──
   useEffect(() => {
@@ -57,6 +63,8 @@ export default function TaskDetailPage() {
       // Pre-fill form with saved taskData
       const saved = taskData.taskData?.data ?? {};
       setFormData(saved as Record<string, unknown>);
+      // Findings raised on this task (non-fatal)
+      getFindingsByTask(taskId).then(setLinkedFindings).catch(() => {});
     } catch (err: any) {
       if (err.response?.status === 403) {
         setError('You do not have permission to view this task.');
@@ -98,18 +106,58 @@ export default function TaskDetailPage() {
     }
   };
 
+  // ── Submit task ──
+  const handleSubmitTask = async () => {
+    if (!task) return;
+    if (!validateRequiredFields()) return;
+    setSavingProgress(true);
+    try {
+      // 1. Save form data
+      await saveTaskData(task.id, formData);
+      setHasUnsavedChanges(false);
+      
+      // 2. Submit task
+      const { submitTask } = await import('../../../../api/taskApi');
+      const updated = await submitTask(task.id);
+      toast.success('Task submitted for review');
+      
+      // 3. Update task state
+      setTask(updated);
+      
+      // 4. Refresh activity feed
+      getTaskActivity(task.id).then(setActivities).catch(() => {});
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to submit task');
+    } finally {
+      setSavingProgress(false);
+    }
+  };
+
   // ── Required field validation before submit ──
   const validateRequiredFields = (): boolean => {
     if (!task) return false;
     const schema: FormField[] = task.schemaSnapshot;
     const missing: string[] = [];
+    
     for (const field of schema) {
-      if (!field.required) continue;
       const val = formData[field.fieldId];
+      
+      // Date format validation
+      if (field.type === 'date' && val) {
+        const dateStr = String(val);
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(dateStr) || isNaN(Date.parse(dateStr))) {
+          toast.error(`Invalid date format for ${field.label}. Please use a valid date.`);
+          return false;
+        }
+      }
+
+      if (!field.required) continue;
       if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) {
         missing.push(field.label);
       }
     }
+    
     if (missing.length > 0) {
       toast.error(`Please fill in required fields: ${missing.join(', ')}`);
       return false;
@@ -182,6 +230,18 @@ export default function TaskDetailPage() {
             {task.template?.title ?? 'Task'}
           </h1>
         </div>
+
+        {/* Raise Finding — only when the template allows findings and the task is still actionable */}
+        {task.template?.allowsFindings &&
+          !['Closed', 'Terminated', 'Inactive'].includes(task.status) && (
+            <button
+              onClick={() => setShowRaiseFinding(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-xl shadow-sm transition-colors flex-shrink-0"
+            >
+              <AlertTriangle className="w-4 h-4" />
+              Raise Finding
+            </button>
+          )}
       </div>
 
       {/* Unsaved changes banner */}
@@ -207,6 +267,7 @@ export default function TaskDetailPage() {
             onTaskUpdated={handleTaskUpdated}
             onSaveProgress={handleSaveProgress}
             savingProgress={savingProgress}
+            onSubmitTask={handleSubmitTask}
           />
 
           {/* Dynamic form */}
@@ -217,6 +278,42 @@ export default function TaskDetailPage() {
               formData={formData}
               onDataChange={handleDataChange}
             />
+          )}
+
+          {/* Time Booking — available only once task reaches a final state */}
+          {['Closed', 'Rejected', 'Terminated'].includes(task.status) && (
+            <TimeBookingPanel
+              task={task}
+              currentUser={user}
+              onBookingChange={loadTask}
+            />
+          )}
+
+          {/* Linked Findings — findings raised on this task */}
+          {linkedFindings.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-4">
+                Linked Findings ({linkedFindings.length})
+              </h3>
+              <div className="space-y-2">
+                {linkedFindings.map((f) => (
+                  <Link
+                    key={f.id}
+                    href={`/dashboard/findings/${f.id}`}
+                    className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-xs font-mono font-bold text-slate-600 flex-shrink-0">#{f.id}</span>
+                      <span className="text-sm text-slate-700 truncate">{f.description}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <SeverityBadge severity={f.severity} />
+                      <FindingStatusBadge status={f.status} />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
@@ -232,6 +329,20 @@ export default function TaskDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Raise Finding slide-over */}
+      {showRaiseFinding && (
+        <RaiseFindingPanel
+          taskId={task.id}
+          onClose={() => setShowRaiseFinding(false)}
+          onRaised={() => {
+            setShowRaiseFinding(false);
+            // Refresh linked findings + the activity feed (a SYSTEM_EVENT was logged).
+            getFindingsByTask(task.id).then(setLinkedFindings).catch(() => {});
+            getTaskActivity(task.id).then(setActivities).catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 }

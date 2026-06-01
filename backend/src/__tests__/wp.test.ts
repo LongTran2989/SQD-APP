@@ -736,7 +736,7 @@ describe('Work Package Backend', () => {
   // ─── WP VISIBILITY (RBAC) ────────────────────────────────────────────
 
   describe('WP Visibility (RBAC)', () => {
-    it('WV1: Staff sees only WPs they are assigned to in the list', async () => {
+    it('WV1: Staff sees all WPs in the list (Transparent Model)', async () => {
       const assignedWp = await prisma.workPackage.create({
         data: {
           wpId: 'WPT-WP-VIS001',
@@ -770,11 +770,11 @@ describe('Work Package Backend', () => {
       expect(res.status).toBe(200);
       const ids = res.body.map((w: any) => w.id);
       expect(ids).toContain(assignedWp.id);
-      expect(ids).not.toContain(unassignedWp.id);
+      expect(ids).toContain(unassignedWp.id);
     });
 
-    it('WV2: Staff with no WP assignments sees empty list', async () => {
-      await prisma.workPackage.create({
+    it('WV2: Staff with no WP assignments sees all WPs in list (Transparent Model)', async () => {
+      const wp = await prisma.workPackage.create({
         data: {
           wpId: 'WPT-WP-VIS003',
           name: 'Some WP',
@@ -792,14 +792,15 @@ describe('Work Package Backend', () => {
         .set('Authorization', `Bearer ${staffToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body).toHaveLength(0);
+      const ids = res.body.map((w: any) => w.id);
+      expect(ids).toContain(wp.id);
     });
 
-    it('WV3: Staff NOT assigned to WP gets 403 on GET /work-packages/:id', async () => {
+    it('WV3: Staff NOT assigned to WP gets 200 on GET /work-packages/:id (Transparent Model)', async () => {
       const wp = await prisma.workPackage.create({
         data: {
           wpId: 'WPT-WP-VIS004',
-          name: 'Hidden WP',
+          name: 'Transparent WP',
           type: 'AUDIT',
           divisionId,
           timeframeFrom: new Date('2026-06-01'),
@@ -813,7 +814,8 @@ describe('Work Package Backend', () => {
         .get(`/api/work-packages/${wp.id}`)
         .set('Authorization', `Bearer ${staffToken}`);
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(wp.id);
     });
 
     it('WV4: Staff assigned to WP can access its detail → 200', async () => {
@@ -839,7 +841,7 @@ describe('Work Package Backend', () => {
       expect(res.body.id).toBe(wp.id);
     });
 
-    it('WV5: Manager sees all WPs in their division only', async () => {
+    it('WV5: Manager sees all WPs system-wide (Transparent Model)', async () => {
       const ownDivWp = await prisma.workPackage.create({
         data: {
           wpId: 'WPT-WP-VIS006',
@@ -872,7 +874,7 @@ describe('Work Package Backend', () => {
       expect(res.status).toBe(200);
       const ids = res.body.map((w: any) => w.id);
       expect(ids).toContain(ownDivWp.id);
-      expect(ids).not.toContain(otherDivWp.id);
+      expect(ids).toContain(otherDivWp.id);
     });
 
     it('WV6: Director sees all WPs across divisions', async () => {

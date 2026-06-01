@@ -305,7 +305,7 @@ export default function TemplateDetailPage({ params }: { params: Promise<{ id: s
                   
                   {f.type === 'text' && <input type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" placeholder="Text input" disabled />}
                   {f.type === 'number' && <input type="number" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" placeholder="0" disabled />}
-                  {f.type === 'date' && <input type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" disabled />}
+                  {f.type === 'date' && <input type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" max="9999-12-31" disabled />}
                   {f.type === 'textarea' && <textarea className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" rows={3} placeholder="Text area" disabled />}
                   {f.type === 'select' && (
                     <select className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white mt-1" disabled>

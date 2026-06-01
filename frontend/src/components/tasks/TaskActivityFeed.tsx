@@ -31,6 +31,9 @@ interface TaskActivityFeedProps {
   activities: TaskActivityEnriched[];
   currentUser: User;
   onNewActivity: (activity: TaskActivityEnriched) => void;
+  // When true the comment composer is hidden — e.g. the Finding detail page
+  // shows the source task's feed read-only.
+  readOnly?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -40,6 +43,7 @@ export default function TaskActivityFeed({
   activities,
   currentUser,
   onNewActivity,
+  readOnly = false,
 }: TaskActivityFeedProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const [comment, setComment] = useState('');
@@ -54,10 +58,11 @@ export default function TaskActivityFeed({
 
   // OQ-6: Comment box visible for all statuses to authorised users
   const canComment =
-    currentUser.id === task.assignedToUserId ||
-    currentUser.id === task.issuerId ||
-    currentUser.role === 'Director' ||
-    (currentUser.role === 'Manager' && currentUser.divisionId === task.targetDivisionId);
+    !readOnly &&
+    (currentUser.id === task.assignedToUserId ||
+      currentUser.id === task.issuerId ||
+      currentUser.role === 'Director' ||
+      (currentUser.role === 'Manager' && currentUser.divisionId === task.targetDivisionId));
 
   const handlePostComment = async () => {
     if (!comment.trim()) return;

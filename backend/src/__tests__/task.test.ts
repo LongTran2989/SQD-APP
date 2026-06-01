@@ -131,9 +131,11 @@ describe('Task Backend (Phase 5.2)', () => {
   });
 
   afterAll(async () => {
+    await prisma.workPackageAssignment.deleteMany({});
     await prisma.taskActivity.deleteMany({});
     await prisma.taskData.deleteMany({});
     await prisma.task.deleteMany({});
+    await prisma.workPackage.deleteMany({});
     await prisma.auditLog.deleteMany({});
     // Delete ALL templates that were created by test users (includes dynamically created ones in Submission group)
     // Must happen before user deletion to avoid FK constraint violation on Template.ownerId
@@ -615,7 +617,7 @@ describe('Task Backend (Phase 5.2)', () => {
       await prisma.workPackage.delete({ where: { id: wp.id } });
     });
 
-    it('T14d: Staff NOT assigned to a WP cannot view a task inside it → 403', async () => {
+    it('T14d: Staff NOT assigned to a WP can view a task inside it (Transparent Model) → 200', async () => {
       const wp = await prisma.workPackage.create({
         data: {
           wpId: `TSK-WP-14D${String(Date.now()).slice(-4)}`,
@@ -646,7 +648,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .get(`/api/tasks/${task.id}`)
         .set('Authorization', `Bearer ${staffToken}`);
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
 
       // Cleanup
       await prisma.task.delete({ where: { id: task.id } });
@@ -1680,16 +1682,16 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.status).toBe(201);
     });
 
-    it('T68: User without task access cannot post comment → 403', async () => {
+    it('T68: User without task access can post comment (Transparent Model) → 201', async () => {
       const { taskId } = await createTaskWithActivity();
 
       // manager2 is in a different division and is not issuer/assignee
       const res = await request(app)
         .post(`/api/tasks/${taskId}/activity`)
         .set('Authorization', `Bearer ${manager2Token}`)
-        .send({ content: 'Unauthorized comment' });
+        .send({ content: 'Transparent comment' });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(201);
     });
 
     it('T69: No PATCH or DELETE endpoint exists for activity entries → 404', async () => {
@@ -1836,6 +1838,219 @@ describe('Task Backend (Phase 5.2)', () => {
       res.body.forEach((t: any) => {
         expect(t.status).toBe('Unassigned');
       });
+    });
+  });
+
+  // ─── Time Booking (Phase 5.6) ──────────────────────────────────────────────
+
+  describe('Time Booking', () => {
+    // Helper: create a fresh task per-test (beforeEach wipes all tasks)
+    async function makeTask(
+      status: string,
+      opts: { assigneeId?: number; estimatedHours?: number } = {}
+    ): Promise<{ id: number; taskId: string }> {
+      const t = await prisma.task.create({
+        data: {
+          taskId: `TSK-TB-${Date.now()}-${Math.floor(Math.random() * 9999)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          assignedToUserId: opts.assigneeId ?? staffId,
+          targetDivisionId: divisionId,
+          status,
+          schemaSnapshot: [],
+          assignmentType: 'INDIVIDUAL',
+          estimatedHours: opts.estimatedHours ?? null
+        }
+      });
+      return { id: t.id, taskId: t.taskId };
+    }
+
+    it('T74: Assignee POSTs booking on Closed task → 201 with correct structure', async () => {
+      const { id } = await makeTask('Closed', { estimatedHours: 4.0 });
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 3.0, notes: 'Main work' },
+        collaborators: []
+      };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(201);
+      expect(res.body.taskId).toBe(id);
+      expect(res.body.totalHours).toBe(3.0);
+      expect(res.body.estimatedHours).toBe(4.0);
+      expect(res.body.collaborators).toEqual([]);
+    });
+
+    it('T75: Non-assignee (Manager) attempts POST → 403', async () => {
+      const { id } = await makeTask('Closed');
+
+      const payload = { assigneeEntry: { userId: managerId, hoursLogged: 1.0, notes: '' }, collaborators: [] };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(403);
+    });
+
+    it('T76: POST on non-final state task → 400', async () => {
+      const { id } = await makeTask('In Progress');
+
+      const payload = { assigneeEntry: { userId: staffId, hoursLogged: 2.0, notes: '' }, collaborators: [] };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/Closed.*Rejected.*Terminated/i);
+    });
+
+    it('T77: Duplicate POST (booking already exists) → 409', async () => {
+      const { id } = await makeTask('Closed');
+
+      const payload = { assigneeEntry: { userId: staffId, hoursLogged: 1.0, notes: '' }, collaborators: [] };
+      // First POST — should succeed
+      await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      // Second POST — should be duplicate
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(409);
+    });
+
+    it('T78: PUT by assignee — update hours → 200, totalHours recalculated', async () => {
+      const { id } = await makeTask('Closed');
+
+      // Create booking first
+      await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ assigneeEntry: { userId: staffId, hoursLogged: 1.0, notes: '' }, collaborators: [] });
+
+      // Update with collaborator
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 5.0, notes: 'Revised' },
+        collaborators: [{ userId: managerId, hoursLogged: 1.5, notes: 'Assisted' }]
+      };
+      const res = await request(app)
+        .put(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(200);
+      expect(res.body.totalHours).toBe(6.5);
+      expect(res.body.collaborators).toHaveLength(1);
+    });
+
+    it('T79: PUT by Director (override) → 200', async () => {
+      const { id } = await makeTask('Closed');
+
+      // Create booking as assignee first
+      await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ assigneeEntry: { userId: staffId, hoursLogged: 2.0, notes: '' }, collaborators: [] });
+
+      // Director override
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 4.0, notes: 'Director corrected' },
+        collaborators: []
+      };
+      const res = await request(app)
+        .put(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(200);
+      expect(res.body.totalHours).toBe(4.0);
+    });
+
+    it('T80: PUT by non-assignee Manager → 403', async () => {
+      const { id } = await makeTask('Closed');
+
+      // Create booking as assignee first
+      await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ assigneeEntry: { userId: staffId, hoursLogged: 2.0, notes: '' }, collaborators: [] });
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 3.0, notes: '' },
+        collaborators: []
+      };
+      const res = await request(app)
+        .put(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(403);
+    });
+
+    it('T81: POST with collaborator userId == assignee userId → 400', async () => {
+      const { id } = await makeTask('Closed');
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 2.0, notes: '' },
+        collaborators: [{ userId: staffId, hoursLogged: 1.0, notes: 'Self as collaborator' }]
+      };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/assignee cannot also appear as a collaborator/i);
+    });
+
+    it('T82: POST with negative hoursLogged → 400', async () => {
+      const { id } = await makeTask('Closed');
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: -1.0, notes: '' },
+        collaborators: []
+      };
+      const res = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(400);
+    });
+
+    it('T83: AuditLog + TaskActivity SYSTEM_EVENT written on POST', async () => {
+      const { id, taskId } = await makeTask('Terminated');
+
+      const payload = {
+        assigneeEntry: { userId: staffId, hoursLogged: 2.5, notes: 'Final hours' },
+        collaborators: []
+      };
+      const postRes = await request(app)
+        .post(`/api/tasks/${id}/time-booking`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send(payload);
+      expect(postRes.status).toBe(201);
+
+      // AuditLog record
+      const auditEntry = await prisma.auditLog.findFirst({
+        where: { entityType: 'TimeBooking', entityId: taskId, actionType: 'TIME_BOOKING_CREATE' }
+      });
+      expect(auditEntry).not.toBeNull();
+
+      // TaskActivity SYSTEM_EVENT
+      const activityEntry = await prisma.taskActivity.findFirst({
+        where: { taskId: id, type: 'SYSTEM_EVENT', content: { contains: 'Time logged' } }
+      });
+      expect(activityEntry).not.toBeNull();
     });
   });
 });

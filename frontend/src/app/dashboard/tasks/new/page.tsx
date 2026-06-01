@@ -40,15 +40,15 @@ export default function NewTaskPage() {
   const searchParams = useSearchParams();
   const { user } = useAuthStore();
 
+  // ── Prefill from query params ──
+  const prefilledWpId = searchParams.get('wpId') ? Number(searchParams.get('wpId')) : null;
+
   // Role gate on mount — redirect staff who arrive without a WP context
   useEffect(() => {
     if (user && !canAccessNewTaskPage(user.role, prefilledWpId)) {
       router.replace('/dashboard/tasks');
     }
   }, [user, router, prefilledWpId]);
-
-  // ── Prefill from query params ──
-  const prefilledWpId = searchParams.get('wpId') ? Number(searchParams.get('wpId')) : null;
 
   // ── Form state ──
   const [templateId, setTemplateId] = useState<number | ''>('');
@@ -121,6 +121,13 @@ export default function NewTaskPage() {
     if (!targetDivisionId) {
       toast.error('Please select a target division');
       return;
+    }
+    if (deadline) {
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(deadline) || isNaN(Date.parse(deadline))) {
+        toast.error('Invalid deadline date format. Please use a valid date.');
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -275,6 +282,7 @@ export default function NewTaskPage() {
                 type="date"
                 value={deadline}
                 min={new Date().toISOString().split('T')[0]}
+                max="9999-12-31"
                 onChange={(e) => setDeadline(e.target.value)}
                 className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
               />

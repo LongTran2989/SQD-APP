@@ -146,6 +146,7 @@ interface TaskActionBarProps {
   onTaskUpdated: (updated: TaskEnriched) => void;
   onSaveProgress: () => void; // triggers parent to call saveTaskData
   savingProgress: boolean;
+  onSubmitTask: () => void; // triggers parent to save and submit
 }
 
 export default function TaskActionBar({
@@ -154,6 +155,7 @@ export default function TaskActionBar({
   onTaskUpdated,
   onSaveProgress,
   savingProgress,
+  onSubmitTask,
 }: TaskActionBarProps) {
   const [loading, setLoading] = useState<string | null>(null);
 
@@ -334,7 +336,14 @@ export default function TaskActionBar({
     });
   };
 
-  const handleDecideExtension = (decision: 'approved' | 'denied') =>
+  const handleDecideExtension = (decision: 'approved' | 'denied') => {
+    if (decision === 'approved' && extensionNewDeadline) {
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(extensionNewDeadline) || isNaN(Date.parse(extensionNewDeadline))) {
+        toast.error('Invalid date format for new deadline. Please use a valid date.');
+        return;
+      }
+    }
     handle(`extension-${decision}`, async () => {
       const r = await decideDeadlineExtension(
         task.id,
@@ -346,6 +355,7 @@ export default function TaskActionBar({
       setExtensionNewDeadline('');
       return r;
     });
+  };
 
   // If no buttons will render, return null
   const noActions =
@@ -453,17 +463,8 @@ export default function TaskActionBar({
             </ActionButton>
             <ActionButton
               id="btn-submit"
-              onClick={() =>
-                handle('submit', async () => {
-                  // Submit is handled by parent — just trigger via onSaveProgress + submit flag
-                  // We need a separate submit handler
-                  const { submitTask } = await import('../../api/taskApi');
-                  const r = await submitTask(task.id);
-                  toast.success('Task submitted for review');
-                  return r;
-                })
-              }
-              disabled={loading === 'submit'}
+              onClick={onSubmitTask}
+              disabled={savingProgress || loading === 'submit'}
               variant="primary"
               icon={Send}
             >
@@ -589,6 +590,7 @@ export default function TaskActionBar({
                     value={extensionNewDeadline}
                     onChange={(e) => setExtensionNewDeadline(e.target.value)}
                     min={new Date().toISOString().split('T')[0]}
+                    max="9999-12-31"
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

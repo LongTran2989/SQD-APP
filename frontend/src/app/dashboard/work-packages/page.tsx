@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
 import { WorkPackageEnriched, WpStatus } from '../../../types';
@@ -35,7 +35,19 @@ export default function WorkPackageListPage() {
   const [wps, setWps] = useState<WorkPackageEnriched[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<WpStatus | 'all'>('all');
+  const [viewFilter, setViewFilter] = useState<'my' | 'division' | 'all'>('my');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const defaultSetRef = useRef(false);
+
+  useEffect(() => {
+    if (user && !defaultSetRef.current) {
+      if (user.role === 'Director' || user.role === 'Admin') {
+        setViewFilter('all');
+      }
+      defaultSetRef.current = true;
+    }
+  }, [user]);
 
   const fetchWps = useCallback(async () => {
     setLoading(true);
@@ -54,7 +66,19 @@ export default function WorkPackageListPage() {
   }, [fetchWps]);
 
   const filtered = wps.filter((wp) => {
+    // 1. View Filter
+    if (viewFilter === 'my') {
+      const isAssigned = wp.assignments?.some((a) => a.userId === user?.id);
+      const isCreator = wp.creator?.id === user?.id;
+      if (!isAssigned && !isCreator) return false;
+    } else if (viewFilter === 'division') {
+      if (wp.divisionId !== user?.divisionId) return false;
+    }
+
+    // 2. Status Filter
     if (statusFilter !== 'all' && wp.computedStatus !== statusFilter) return false;
+    
+    // 3. Search Query
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (
@@ -93,17 +117,54 @@ export default function WorkPackageListPage() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
 
         {/* Filter bar */}
-        <div className="p-4 flex flex-col sm:flex-row gap-3 border-b border-slate-100">
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search by WP ID, name, type, or division..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-            />
+        <div className="p-4 flex flex-col xl:flex-row gap-4 border-b border-slate-100 items-start xl:items-center justify-between">
+          
+          <div className="flex flex-col sm:flex-row gap-4 w-full xl:w-auto flex-1">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search by WP ID, name, type, or division..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              />
+            </div>
+            
+            {/* View filter pills */}
+            <div className="flex items-center bg-slate-100/50 p-1 rounded-xl border border-slate-200">
+              <button
+                onClick={() => setViewFilter('my')}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  viewFilter === 'my'
+                    ? 'bg-white text-blue-700 shadow-sm border border-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                My WP
+              </button>
+              <button
+                onClick={() => setViewFilter('division')}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  viewFilter === 'division'
+                    ? 'bg-white text-blue-700 shadow-sm border border-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                Division WP
+              </button>
+              <button
+                onClick={() => setViewFilter('all')}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  viewFilter === 'all'
+                    ? 'bg-white text-blue-700 shadow-sm border border-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                All WP
+              </button>
+            </div>
           </div>
 
           {/* Status filter pills */}
@@ -116,7 +177,7 @@ export default function WorkPackageListPage() {
                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
             >
-              All
+              All Statuses
             </button>
             {ALL_WP_STATUSES.map((s) => {
               const cfg = WP_STATUS_CONFIG[s];

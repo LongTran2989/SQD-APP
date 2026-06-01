@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { checkAndTriggerPendingVerification } from '../services/findingService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -134,11 +135,12 @@ function computeIsOverdue(task: { deadline: Date | null; status: string }): bool
  */
 function taskInclude() {
   return {
-    template: { select: { id: true, templateId: true, title: true } },
+    template: { select: { id: true, templateId: true, title: true, allowsFindings: true } },
     issuer: { select: { id: true, name: true } },
     assignedToUser: { select: { id: true, name: true, role: { select: { name: true } } } },
     targetDivision: { select: { id: true, name: true, code: true } },
-    wp: { select: { id: true, wpId: true, name: true } }
+    wp: { select: { id: true, wpId: true, name: true } },
+    timeBooking: true
   };
 }
 
@@ -285,28 +287,9 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Role-based visibility check
-    const isWpMember = task.wpId
-      ? (await prisma.workPackageAssignment.findUnique({
-          where: { wpId_userId: { wpId: task.wpId, userId } }
-        })) !== null
-      : false;
-
-    const canView =
-      role === 'Director' ||
-      role === 'Admin' ||
-      task.issuerId === userId ||
-      task.assignedToUserId === userId ||
-      (role === 'Manager' && task.targetDivisionId === divisionId) ||
-      // Staff/Group Leader can view any Unassigned task in their division (to claim it)
-      (task.status === 'Unassigned' && task.targetDivisionId === divisionId) ||
-      // Any user assigned to the parent WP can view all tasks within it
-      isWpMember;
-
-    if (!canView) {
-      res.status(403).json({ message: 'You do not have permission to view this task' });
-      return;
-    }
+    // Access control: Transparent viewing model
+    // All authenticated users can view the task details.
+    // Action endpoints (PUT/POST) remain strictly controlled.
 
     res.json({ ...task, isOverdue: computeIsOverdue(task) });
   } catch (error) {
@@ -760,6 +743,11 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       { fromStatus: task.status, toStatus: newStatus }
     );
 
+    // Finding Pending-Verification hook: auto-close may finalise a follow-up task.
+    if (newStatus === 'Closed') {
+      await checkAndTriggerPendingVerification(task.id, userId);
+    }
+
     res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
   } catch (error) {
     console.error('Error submitting task:', error);
@@ -857,6 +845,11 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
       comment
     );
 
+    // Finding Pending-Verification hook: approve/reject can finalise a follow-up task.
+    if (FINAL_TASK_STATUSES.includes(newStatus)) {
+      await checkAndTriggerPendingVerification(task.id, userId);
+    }
+
     res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
   } catch (error) {
     console.error('Error reviewing task:', error);
@@ -952,6 +945,11 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       { fromStatus: 'Rejected', toStatus: updateData.status, reason },
       reason
     );
+
+    // Finding Pending-Verification hook: termination finalises a follow-up task.
+    if (FINAL_TASK_STATUSES.includes(updateData.status)) {
+      await checkAndTriggerPendingVerification(task.id, userId);
+    }
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
   } catch (error) {
@@ -1590,25 +1588,8 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const isWpMember = task.wpId
-      ? (await prisma.workPackageAssignment.findUnique({
-          where: { wpId_userId: { wpId: task.wpId, userId } }
-        })) !== null
-      : false;
-
-    // Must have view access to the task (mirrors getTaskById canView logic)
-    const canView =
-      role === 'Director' ||
-      role === 'Admin' ||
-      task.issuerId === userId ||
-      task.assignedToUserId === userId ||
-      (role === 'Manager' && task.targetDivisionId === divisionId) ||
-      isWpMember;
-
-    if (!canView) {
-      res.status(403).json({ message: 'You do not have permission to view this task activity' });
-      return;
-    }
+    // Access control: Transparent viewing model
+    // All authenticated users can view the task activity feed.
 
     const activities = await prisma.taskActivity.findMany({
       where: { taskId: id },
@@ -1666,23 +1647,7 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const isWpMember = task.wpId
-      ? (await prisma.workPackageAssignment.findUnique({
-          where: { wpId_userId: { wpId: task.wpId, userId } }
-        })) !== null
-      : false;
-
-    // RBAC: Assignee + Issuer + Director + Managers of same Division + WP members
-    // Admin excluded from comment posting (system/user management role only)
-    const canComment =
-      task.assignedToUserId === userId ||
-      isReviewer(userId, role, divisionId, task) ||
-      isWpMember;
-
-    if (!canComment) {
-      res.status(403).json({ message: 'You do not have permission to post comments on this task' });
-      return;
-    }
+    // Access control: Anyone can comment on tasks (Transparent commenting model)
 
     const activity = await prisma.taskActivity.create({
       data: {
