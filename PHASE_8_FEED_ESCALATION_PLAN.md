@@ -345,6 +345,9 @@ function escalatePost(postId, targetScope, flaggedByUserId, reason):
 
 **Recommended model:** Opus Mid
 
+Status: COMPLETE — branch `phase/8.1-feed-escalation-backend`.
+217/217 tests passing (189 prior + 28 new in `feed.test.ts`). Created `feed.routes.ts`, `feed.controller.ts` (5 endpoints), registered at `/api/feed` in `index.ts`. Escalation flagging fully implemented: EscalationFlag (PENDING) + ESCALATION_CARD at target + INFO_CARDs at skipped scopes, all in one transaction; AuditLog `ESCALATION_FLAG_CREATED` best-effort. Legacy `/api/tasks/:id/activity` left untouched (frontend migrates in Phase 8.3). The standalone `escalationService.ts` from the plan was not split out — the escalation logic lives inline in `feed.controller.escalatePost`; extract it in 8.2 if the flag-action handler needs to reuse it. No deprecation/proxy of the old activity endpoints was added (deferred to 8.3 per gotcha #2).
+
 ---
 
 ### Phase 8.2 — Division Board + Org Feed + Flag Actions Backend
