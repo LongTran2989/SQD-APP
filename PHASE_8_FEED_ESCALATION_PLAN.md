@@ -435,6 +435,10 @@ Status: COMPLETE — branch `claude/exciting-keller-r1uUR`.
 
 10. **Test baseline** — As of Phase 8.0 completion: 187 tests. Each sub-phase adds tests. Never reduce the count.
 
+11. **EscalationFlag has no `sourcePost` relation in Prisma** — Despite `sourcePostId` existing as a field, there is no declared Prisma relation. Load the source FeedPost separately via `prisma.feedPost.findUnique({ where: { id: flag.sourcePostId } })`. Do not attempt `include: { sourcePost: true }` on EscalationFlag.
+
+12. **Template has no `deletedAt` column** — The soft-delete pattern does not apply to Template. Filter Published templates using `status: 'Published'` only. Never add `deletedAt: null` to Template queries.
+
 ---
 
 ## 10. DEFERRED (OUT OF SCOPE FOR PHASE 8)
