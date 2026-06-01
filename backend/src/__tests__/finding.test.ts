@@ -268,6 +268,13 @@ describe('Findings Backend (Phase 6)', () => {
       const res = await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Catastrophic' });
       expect(res.status).toBe(400);
     });
+
+    it('F24: re-reviewing an already-reviewed finding → 400', async () => {
+      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+      const res = await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 2' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/already been reviewed/i);
+    });
   });
 
   // ────────────────────────────────────────────────────────────────────────
@@ -425,6 +432,13 @@ describe('Findings Backend (Phase 6)', () => {
       const res = await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${outsiderToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
       expect(res.status).toBe(403);
       await prisma.user.delete({ where: { id: outsider.id } });
+    });
+
+    it('F56: category field is persisted when provided', async () => {
+      const { findingId } = await makePendingVerification(staffToken);
+      const res = await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${directorToken}`).send({ rootCause: 'rc', correctiveAction: 'ca', category: 'Training' });
+      expect(res.status).toBe(200);
+      expect(res.body.category).toBe('Training');
     });
   });
 

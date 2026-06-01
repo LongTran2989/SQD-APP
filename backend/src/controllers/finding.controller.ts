@@ -346,9 +346,13 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
+    if (finding.status !== 'Open') {
+      res.status(400).json({ message: 'Finding has already been reviewed' });
+      return;
+    }
 
     const reviewerName = await getUserName(userId);
-    const newStatus = finding.status === 'Open' ? 'In Progress' : finding.status;
+    const newStatus = 'In Progress';
     const parsedDueDate = dueDate ? new Date(dueDate) : null;
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -356,7 +360,7 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
         where: { id },
         data: {
           severity,
-          dueDate: parsedDueDate ?? undefined,
+          dueDate: parsedDueDate,
           status: newStatus
         }
       });
@@ -566,7 +570,7 @@ export const completeStage2 = async (req: Request, res: Response): Promise<void>
   try {
     const id = parseInt(req.params.id as string, 10);
     const { userId, role } = req.user!;
-    const { errorCode, rootCause, correctiveAction, recurrence, violatorIds } = req.body;
+    const { errorCode, rootCause, correctiveAction, recurrence, violatorIds, category } = req.body;
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
@@ -603,11 +607,12 @@ export const completeStage2 = async (req: Request, res: Response): Promise<void>
       const result = await tx.finding.update({
         where: { id },
         data: {
-          errorCode: errorCode ?? undefined,
-          rootCause: rootCause ?? undefined,
-          correctiveAction: correctiveAction ?? undefined,
-          recurrence: typeof recurrence === 'boolean' ? recurrence : undefined,
-          violatorIds: violatorIds !== undefined ? (violatorIds as any) : undefined
+          ...(errorCode !== undefined ? { errorCode } : {}),
+          ...(rootCause !== undefined ? { rootCause } : {}),
+          ...(correctiveAction !== undefined ? { correctiveAction } : {}),
+          recurrence: typeof recurrence === 'boolean' ? recurrence : null,
+          ...(violatorIds !== undefined ? { violatorIds: violatorIds as any } : {}),
+          ...(category !== undefined ? { category } : {})
         }
       });
 
