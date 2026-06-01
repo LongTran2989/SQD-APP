@@ -126,8 +126,22 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Frontend types (`types/index.ts`):** `TaskActivity` interface replaced with `FeedPost`; `TaskActivityEnriched` renamed `FeedPostEnriched` (extends `Omit<FeedPost, 'author'>`). Component `TaskActivityFeed` and API helper `getTaskActivity` retain their names (feature/endpoint identifiers, not the data model) and the `/activity` route is unchanged.
   - **Tests:** all `prisma.taskActivity.*` calls in `task.test.ts`, `wp.test.ts`, `finding.test.ts`, and `clean.ts` migrated to `prisma.feedPost.*` with `scope: 'TASK'` / `scopeId`. Suite now **189/189 passing**.
 
+- **Phase 8.1 — Task Feed + WP Feed + Escalation Backend (COMPLETED 2026-06-01)**
+  - **Backend-only.** No frontend or schema changes. The legacy `GET`/`POST /api/tasks/:id/activity` endpoints are left **completely untouched** (still consumed by the current frontend until Phase 8.3).
+  - **New router (`feed.routes.ts`)** registered at `/api/feed` in `index.ts`. All routes require `authenticateJWT`.
+  - **New controller (`feed.controller.ts`)** — 5 endpoints:
+    - `GET /api/feed/task/:taskId` — task feed (soft-delete guard; any authenticated reader). Returns `{ posts }` ordered `createdAt asc`, author flattened to `{ id, name, role }` (null for SYSTEM_EVENT).
+    - `POST /api/feed/task/:taskId` — post a COMMENT (`scope: 'TASK'`). 400 on empty content, 404 on missing task.
+    - `GET /api/feed/wp/:wpId` — WP feed (soft-delete guard). Same `{ posts }` shape.
+    - `POST /api/feed/wp/:wpId` — post a COMMENT (`scope: 'WP'`).
+    - `POST /api/feed/posts/:postId/escalate` — flag a COMMENT and surface it upward. Body `{ targetScope: 'WP'|'DIVISION'|'ORG', reason? }`.
+  - **Escalation logic:** validates targetScope is strictly higher than the source scope (rank TASK<WP<DIVISION<ORG; Org cannot be escalated from); resolves origin context (`sourceTaskId`/`sourceWpId`/`sourceDivisionId`) from the source post's scope; in a single `$transaction` creates the `EscalationFlag` (PENDING), an `ESCALATION_CARD` at the target scope, stamps the source post's `flagId`, and an `INFO_CARD` at every **skipped** intermediate scope (TASK→DIVISION skips WP; TASK→ORG skips WP+DIVISION; WP→ORG skips DIVISION — each only if that scope id exists). `sourceExcerpt` truncated to 200 chars. AuditLog `ESCALATION_FLAG_CREATED` written best-effort outside the transaction (never breaks the escalation).
+  - **Guards:** 404 unknown post; 400 non-COMMENT post; 400 already-escalated (has `flagId`); 400 invalid targetScope; 400 escalate-to-WP when the task has no `wpId`.
+  - **Tests (`feed.test.ts`):** 28 new tests across 8 groups (task feed read/write, WP feed read/write, escalation validation, TASK→WP, TASK→DIVISION, TASK→ORG). **217/217 total passing.**
+  - **Gotcha confirmed:** `req.user` carries `{ userId, role, divisionId }` only — no `name`. The escalation card's actor name is fetched via a `getUserName(userId)` helper, mirroring `finding.controller`. `AuditLog` uses `actionType` + `performedByUserId` + `details` (Json object, not stringified).
+
 ### Test Suite
-- All **189 integration tests passing** as of 2026-06-01 (Phase 8.0)
+- All **217 integration tests passing** as of 2026-06-01 (Phase 8.1)
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
