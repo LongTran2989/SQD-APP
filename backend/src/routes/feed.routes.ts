@@ -5,7 +5,13 @@ import {
   postTaskComment,
   getWpFeed,
   postWpComment,
-  escalatePost
+  escalatePost,
+  getDivisionFeed,
+  postDivisionMessage,
+  getOrgFeed,
+  postOrgMessage,
+  getPendingFlags,
+  actOnFlag
 } from '../controllers/feed.controller';
 
 const router = Router();
@@ -23,5 +29,17 @@ router.post('/wp/:wpId', postWpComment);
 
 // ─── Escalation ─────────────────────────────────────────────────────
 router.post('/posts/:postId/escalate', escalatePost);
+
+// ─── Division Board ─────────────────────────────────────────────────
+router.get('/division/:divisionId', getDivisionFeed);
+router.post('/division/:divisionId', postDivisionMessage);
+
+// ─── Org Feed ───────────────────────────────────────────────────────
+router.get('/org', getOrgFeed);
+router.post('/org', postOrgMessage);
+
+// ─── Flag Actions ───────────────────────────────────────────────────
+router.put('/flags/:flagId/action', actOnFlag);
+router.get('/flags/pending', getPendingFlags);
 
 export default router;

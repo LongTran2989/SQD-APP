@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-01 (rev 8). Supersedes all previous versions.*
+*Last updated: 2026-06-01 (rev 9). Supersedes all previous versions.*
 
 ---
 
@@ -126,6 +126,18 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Frontend types (`types/index.ts`):** `TaskActivity` interface replaced with `FeedPost`; `TaskActivityEnriched` renamed `FeedPostEnriched` (extends `Omit<FeedPost, 'author'>`). Component `TaskActivityFeed` and API helper `getTaskActivity` retain their names (feature/endpoint identifiers, not the data model) and the `/activity` route is unchanged.
   - **Tests:** all `prisma.taskActivity.*` calls in `task.test.ts`, `wp.test.ts`, `finding.test.ts`, and `clean.ts` migrated to `prisma.feedPost.*` with `scope: 'TASK'` / `scopeId`. Suite now **189/189 passing**.
 
+- **Phase 8.2 — Division Board + Org Feed + Flag Actions Backend (COMPLETED 2026-06-01)**
+  - **Backend-only.** No schema or frontend changes. Extended `feed.controller.ts` + `feed.routes.ts` with six new endpoints (all require `authenticateJWT`):
+    - `GET /api/feed/division/:divisionId` — Division Board feed (any authenticated reader; 404 on unknown division). Returns `{ posts }` ordered `createdAt asc`, author flattened to `{ id, name, role }`.
+    - `POST /api/feed/division/:divisionId` — post an original `COMMENT` at `scope: 'DIVISION'`. RBAC: only members of that division (`req.user.divisionId === divisionId`); Directors bypass. 403 otherwise, 400 on empty content, 404 on unknown division.
+    - `GET /api/feed/org` — Org Feed. Optional `?divisionTag=<divisionId>` filters to posts whose `taggedDivisionIds` JSON array contains that id (Prisma `array_contains`). Default returns ALL `scope: 'ORG'` posts.
+    - `POST /api/feed/org` — post an original `COMMENT` at `scope: 'ORG'` (`scopeId: null`). RBAC: Director or Manager only (403 otherwise). Accepts optional `taggedDivisionIds: number[]`.
+    - `GET /api/feed/flags/pending` — list `PENDING` `EscalationFlag`s scoped to the caller. Director sees all; Manager sees flags whose origin (traced via the ESCALATION_CARD's `sourceTaskId`/`sourceWpId`) belongs to their division, plus all `ORG`-scope flags. Group Leader/Staff → 403.
+    - `PUT /api/feed/flags/:flagId/action` — Director/Manager acts on a `PENDING` flag. 404 unknown flag, 400 already-actioned, 400 invalid action, 403 for non-Director/Manager.
+  - **Flag action types** (`action` in body): `ACKNOWLEDGED` (mark reviewed), `DISMISSED` (status → DISMISSED), `FINDING_RAISED` (creates a `Finding` — requires `findingOverride.eventType` + `departmentId`; description falls back to source excerpt/content; `linkedEntityId` = finding id), `TASK_CREATED` (requires `taskOverride.templateId`, template must be Published; creates Unassigned/Assigned task with `schemaSnapshot` from the template; `linkedEntityId` = human-readable `taskId`), `REASSIGNED` (requires `newAssigneeId` + `reason`; reassigns the source task if non-final; dual-writes SYSTEM_EVENT FeedPost + `TASK_REASSIGNED` AuditLog; `linkedEntityId` = task DB id), `DISSEMINATED` (creates an `ESCALATION_CARD` at `ORG` scope with optional `taggedDivisionIds`). Every action writes an `ESCALATION_FLAG_ACTIONED` AuditLog (best-effort) and moves the flag to `ACTIONED` (or `DISMISSED`).
+  - **Gotchas:** `EscalationFlag` has NO Prisma relation to its source post — load the `FeedPost` via `flag.sourcePostId` separately (do not `include: { sourcePost: true }`). `Template` has no `deletedAt` column — the TASK_CREATED lookup filters on `status: 'Published'` only. Org posts use `scopeId: null`.
+  - **Tests (`feed.test.ts`):** 32 new tests across groups 9–17. **249/249 total passing.**
+
 - **Phase 8.1 — Task Feed + WP Feed + Escalation Backend (COMPLETED 2026-06-01)**
   - **Backend-only.** No frontend or schema changes. The legacy `GET`/`POST /api/tasks/:id/activity` endpoints are left **completely untouched** (still consumed by the current frontend until Phase 8.3).
   - **New router (`feed.routes.ts`)** registered at `/api/feed` in `index.ts`. All routes require `authenticateJWT`.
@@ -141,7 +153,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Gotcha confirmed:** `req.user` carries `{ userId, role, divisionId }` only — no `name`. The escalation card's actor name is fetched via a `getUserName(userId)` helper, mirroring `finding.controller`. `AuditLog` uses `actionType` + `performedByUserId` + `details` (Json object, not stringified).
 
 ### Test Suite
-- All **217 integration tests passing** as of 2026-06-01 (Phase 8.1)
+- All **249 integration tests passing** as of 2026-06-01 (Phase 8.2)
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`

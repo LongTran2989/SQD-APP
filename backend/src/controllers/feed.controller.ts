@@ -353,3 +353,532 @@ export const escalatePost = async (req: Request, res: Response): Promise<void> =
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+// ─── Phase 8.2 Constants ───────────────────────────────────────────────────────
+
+// Task states from which a reassign is blocked (mirrors task.controller.ts).
+const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
+
+// Valid flag actions. DISMISSED is included (handled like a terminal dismissal).
+const VALID_FLAG_ACTIONS = [
+  'ACKNOWLEDGED',
+  'FINDING_RAISED',
+  'DISSEMINATED',
+  'TASK_CREATED',
+  'REASSIGNED',
+  'DISMISSED'
+];
+
+/** Generates the next sequential human-readable taskId for a division code. Call inside a $transaction. */
+async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
+  const lastTask = await tx.task.findFirst({
+    where: { taskId: { startsWith: `${divisionCode}-` }, deletedAt: null },
+    orderBy: { id: 'desc' },
+    select: { taskId: true }
+  });
+
+  let nextSeq = 1;
+  if (lastTask?.taskId) {
+    const parts = lastTask.taskId.split('-');
+    const seqPart = parts[parts.length - 1];
+    if (seqPart) nextSeq = parseInt(seqPart, 10) + 1;
+  }
+
+  return `${divisionCode}-${String(nextSeq).padStart(6, '0')}`;
+}
+
+// ─── GET /api/feed/division/:divisionId ────────────────────────────────────────
+
+export const getDivisionFeed = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const divisionId = parseInt(req.params.divisionId as string, 10);
+
+    const division = await prisma.division.findUnique({ where: { id: divisionId }, select: { id: true } });
+    if (!division) {
+      res.status(404).json({ message: 'Division not found' });
+      return;
+    }
+
+    // Transparent viewing model — any authenticated user may read.
+    const posts = await loadFeed('DIVISION', divisionId);
+    res.json({ posts });
+  } catch (error) {
+    console.error('Error fetching division feed:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── POST /api/feed/division/:divisionId ───────────────────────────────────────
+
+export const postDivisionMessage = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const divisionId = parseInt(req.params.divisionId as string, 10);
+    const { userId, role, divisionId: userDivisionId } = req.user!;
+    const { content } = req.body;
+
+    const division = await prisma.division.findUnique({ where: { id: divisionId }, select: { id: true } });
+    if (!division) {
+      res.status(404).json({ message: 'Division not found' });
+      return;
+    }
+
+    if (!content || !String(content).trim()) {
+      res.status(400).json({ message: 'content is required' });
+      return;
+    }
+
+    // RBAC: only members of that division can post original messages. Directors bypass.
+    if (role !== 'Director' && userDivisionId !== divisionId) {
+      res.status(403).json({ message: 'Only members of this division can post to its board' });
+      return;
+    }
+
+    const post = await prisma.feedPost.create({
+      data: {
+        type: 'COMMENT',
+        scope: 'DIVISION',
+        scopeId: divisionId,
+        authorId: userId,
+        content: String(content).trim(),
+        metadata: Prisma.DbNull
+      },
+      include: { author: { select: { id: true, name: true, role: { select: { name: true } } } } }
+    });
+
+    res.status(201).json({
+      ...post,
+      author: post.author ? { id: post.author.id, name: post.author.name, role: post.author.role?.name ?? null } : null
+    });
+  } catch (error) {
+    console.error('Error posting division message:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/feed/org ─────────────────────────────────────────────────────────
+
+export const getOrgFeed = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const divisionTagRaw = req.query.divisionTag as string | undefined;
+    const divisionTag = divisionTagRaw ? parseInt(divisionTagRaw, 10) : undefined;
+
+    // Approach: Prisma JSON `array_contains` filter on taggedDivisionIds.
+    // Falls back to fetching all ORG posts (no scopeId — Org posts have scopeId: null).
+    const where: Prisma.FeedPostWhereInput =
+      divisionTag !== undefined && !Number.isNaN(divisionTag)
+        ? { scope: 'ORG', taggedDivisionIds: { array_contains: divisionTag } }
+        : { scope: 'ORG' };
+
+    const rawPosts = await prisma.feedPost.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      include: { author: { select: { id: true, name: true, role: { select: { name: true } } } } }
+    });
+
+    const posts = rawPosts.map((p) => ({
+      ...p,
+      author: p.author ? { id: p.author.id, name: p.author.name, role: p.author.role?.name ?? null } : null
+    }));
+
+    res.json({ posts });
+  } catch (error) {
+    console.error('Error fetching org feed:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── POST /api/feed/org ────────────────────────────────────────────────────────
+
+export const postOrgMessage = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role } = req.user!;
+    const { content, taggedDivisionIds } = req.body;
+
+    // RBAC: Director or Manager only.
+    if (role !== 'Director' && role !== 'Manager') {
+      res.status(403).json({ message: 'Only Directors and Managers can post to the Org Feed' });
+      return;
+    }
+
+    if (!content || !String(content).trim()) {
+      res.status(400).json({ message: 'content is required' });
+      return;
+    }
+
+    const post = await prisma.feedPost.create({
+      data: {
+        type: 'COMMENT',
+        scope: 'ORG',
+        scopeId: null,
+        authorId: userId,
+        content: String(content).trim(),
+        taggedDivisionIds: taggedDivisionIds ?? Prisma.DbNull,
+        metadata: Prisma.DbNull
+      },
+      include: { author: { select: { id: true, name: true, role: { select: { name: true } } } } }
+    });
+
+    res.status(201).json({
+      ...post,
+      author: post.author ? { id: post.author.id, name: post.author.name, role: post.author.role?.name ?? null } : null
+    });
+  } catch (error) {
+    console.error('Error posting org message:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/feed/flags/pending ───────────────────────────────────────────────
+
+export const getPendingFlags = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { role, divisionId, userId } = req.user!;
+
+    if (role !== 'Director' && role !== 'Manager') {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
+
+    let flags;
+
+    if (role === 'Director') {
+      // Director sees ALL pending flags regardless of scope or division.
+      flags = await prisma.escalationFlag.findMany({
+        where: { status: 'PENDING' },
+        include: {
+          flaggedByUser: { select: { id: true, name: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+      });
+    } else {
+      // Manager — scope to their division (WP/DIVISION flags) + all ORG-level flags.
+      const allPending = await prisma.escalationFlag.findMany({
+        where: { status: 'PENDING' },
+        include: {
+          flaggedByUser: { select: { id: true, name: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+      });
+
+      // The ESCALATION_CARD carries the denormalized origin context for each flag.
+      const flagIds = allPending.map((f) => f.id);
+      const escalationCards = await prisma.feedPost.findMany({
+        where: { flagId: { in: flagIds }, type: 'ESCALATION_CARD' }
+      });
+      const cardByFlagId: Record<number, (typeof escalationCards)[number]> = Object.fromEntries(
+        escalationCards.map((c) => [c.flagId!, c])
+      );
+
+      // Resolve the origin division via the card's sourceTaskId / sourceWpId.
+      const taskIds = escalationCards.filter((c) => c.sourceTaskId).map((c) => c.sourceTaskId!);
+      const wpIds = escalationCards.filter((c) => c.sourceWpId).map((c) => c.sourceWpId!);
+
+      const [tasks, wps] = await Promise.all([
+        taskIds.length > 0
+          ? prisma.task.findMany({
+              where: { id: { in: taskIds }, deletedAt: null },
+              select: { id: true, targetDivisionId: true }
+            })
+          : Promise.resolve([] as { id: number; targetDivisionId: number | null }[]),
+        wpIds.length > 0
+          ? prisma.workPackage.findMany({
+              where: { id: { in: wpIds }, deletedAt: null },
+              select: { id: true, divisionId: true }
+            })
+          : Promise.resolve([] as { id: number; divisionId: number }[])
+      ]);
+
+      const taskDivMap: Record<number, number | null> = Object.fromEntries(
+        tasks.map((t) => [t.id, t.targetDivisionId])
+      );
+      const wpDivMap: Record<number, number> = Object.fromEntries(wps.map((w) => [w.id, w.divisionId]));
+
+      flags = allPending.filter((flag) => {
+        const card = cardByFlagId[flag.id];
+        if (!card) return false;
+        if (card.scope === 'ORG') return true; // Managers can act on Org-level flags.
+        const taskDiv = card.sourceTaskId ? taskDivMap[card.sourceTaskId] : null;
+        const wpDiv = card.sourceWpId ? wpDivMap[card.sourceWpId] : null;
+        return taskDiv === divisionId || wpDiv === divisionId;
+      });
+    }
+
+    res.status(200).json({ flags });
+  } catch (error) {
+    console.error('Error fetching pending flags:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/feed/flags/:flagId/action ────────────────────────────────────────
+
+export const actOnFlag = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const flagId = parseInt(req.params.flagId as string, 10);
+    const { userId, role, divisionId } = req.user!;
+    const { action, taggedDivisionIds, findingOverride, taskOverride, newAssigneeId, reason } = req.body;
+
+    // RBAC: Director or Manager only.
+    if (role !== 'Director' && role !== 'Manager') {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
+
+    // Validate action value up-front.
+    if (!action || !VALID_FLAG_ACTIONS.includes(action)) {
+      res.status(400).json({ message: `action is required and must be one of: ${VALID_FLAG_ACTIONS.join(', ')}` });
+      return;
+    }
+
+    const flag = await prisma.escalationFlag.findUnique({ where: { id: flagId } });
+    if (!flag) {
+      res.status(404).json({ message: 'Flag not found' });
+      return;
+    }
+    if (flag.status !== 'PENDING') {
+      res.status(400).json({ message: 'Flag has already been actioned' });
+      return;
+    }
+
+    // EscalationFlag has no Prisma relation to its source post — load it by id.
+    const sourcePost = await prisma.feedPost.findUnique({ where: { id: flag.sourcePostId } });
+    if (!sourcePost) {
+      res.status(404).json({ message: 'Source post for this flag no longer exists' });
+      return;
+    }
+    let linkedEntityId: string | null = null;
+
+    // ─── ACKNOWLEDGED ───────────────────────────────────────────────────────
+    if (action === 'ACKNOWLEDGED') {
+      await prisma.escalationFlag.update({
+        where: { id: flag.id },
+        data: {
+          status: 'ACTIONED',
+          action: 'ACKNOWLEDGED',
+          reviewedByUserId: userId,
+          actionedAt: new Date()
+        }
+      });
+
+      // ─── DISMISSED ──────────────────────────────────────────────────────────
+    } else if (action === 'DISMISSED') {
+      await prisma.escalationFlag.update({
+        where: { id: flag.id },
+        data: {
+          status: 'DISMISSED',
+          action: 'DISMISSED',
+          reviewedByUserId: userId,
+          actionedAt: new Date()
+        }
+      });
+
+      // ─── FINDING_RAISED ──────────────────────────────────────────────────────
+    } else if (action === 'FINDING_RAISED') {
+      const eventType = findingOverride?.eventType;
+      const departmentId = findingOverride?.departmentId;
+      if (!eventType || !departmentId) {
+        res.status(400).json({ message: 'departmentId and eventType are required to raise a finding' });
+        return;
+      }
+
+      const sourceTaskId = sourcePost.sourceTaskId ?? sourcePost.scopeId;
+      const finding = await prisma.finding.create({
+        data: {
+          sourceTaskId: sourceTaskId ?? null,
+          reportedByUserId: userId,
+          eventType,
+          departmentId,
+          description: findingOverride?.description ?? sourcePost.sourceExcerpt ?? sourcePost.content,
+          status: 'Open'
+        }
+      });
+      linkedEntityId = String(finding.id);
+
+      await prisma.escalationFlag.update({
+        where: { id: flag.id },
+        data: {
+          status: 'ACTIONED',
+          action: 'FINDING_RAISED',
+          reviewedByUserId: userId,
+          actionedAt: new Date(),
+          linkedEntityId
+        }
+      });
+
+      // ─── TASK_CREATED ────────────────────────────────────────────────────────
+    } else if (action === 'TASK_CREATED') {
+      const templateId = taskOverride?.templateId;
+      if (!templateId) {
+        res.status(400).json({ message: 'taskOverride.templateId is required to create a task' });
+        return;
+      }
+
+      // Template model has no deletedAt — must exist and be Published.
+      const template = await prisma.template.findFirst({
+        where: { id: templateId, status: 'Published' },
+        select: { id: true, formSchema: true, divisionId: true, division: { select: { id: true, code: true } } }
+      });
+      if (!template) {
+        res.status(400).json({ message: 'Template not found or not published' });
+        return;
+      }
+
+      const assignedToUserId: number | undefined = taskOverride?.assignedToUserId;
+
+      const newTask = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Division" WHERE id = ${template.divisionId} FOR UPDATE`;
+        const newTaskId = await generateTaskId(template.division.code, tx);
+        return tx.task.create({
+          data: {
+            taskId: newTaskId,
+            title: taskOverride?.title ?? null,
+            templateId: template.id,
+            issuerId: userId,
+            assignedToUserId: assignedToUserId ?? null,
+            targetDivisionId: template.divisionId,
+            status: assignedToUserId ? 'Assigned' : 'Unassigned',
+            schemaSnapshot: template.formSchema as any,
+            assignmentType: 'INDIVIDUAL'
+          }
+        });
+      });
+      linkedEntityId = newTask.taskId;
+
+      await prisma.escalationFlag.update({
+        where: { id: flag.id },
+        data: {
+          status: 'ACTIONED',
+          action: 'TASK_CREATED',
+          reviewedByUserId: userId,
+          actionedAt: new Date(),
+          linkedEntityId
+        }
+      });
+
+      // ─── REASSIGNED ──────────────────────────────────────────────────────────
+    } else if (action === 'REASSIGNED') {
+      if (!newAssigneeId || !reason?.trim()) {
+        res.status(400).json({ message: 'newAssigneeId and reason are required to reassign' });
+        return;
+      }
+
+      const sourceTaskId =
+        sourcePost.sourceTaskId ?? (sourcePost.scope === 'TASK' ? sourcePost.scopeId : null);
+      if (!sourceTaskId) {
+        res.status(400).json({ message: 'Cannot reassign: no source task found' });
+        return;
+      }
+
+      const sourceTask = await prisma.task.findUnique({
+        where: { id: sourceTaskId, deletedAt: null },
+        select: { id: true, status: true }
+      });
+      if (!sourceTask) {
+        res.status(400).json({ message: 'Cannot reassign: no source task found' });
+        return;
+      }
+      if (FINAL_TASK_STATUSES.includes(sourceTask.status)) {
+        res.status(400).json({ message: `Cannot reassign a task in a final state (${sourceTask.status})` });
+        return;
+      }
+
+      const assignee = await prisma.user.findUnique({
+        where: { id: newAssigneeId, deletedAt: null },
+        select: { id: true, name: true }
+      });
+      if (!assignee) {
+        res.status(404).json({ message: 'New assignee not found' });
+        return;
+      }
+
+      await prisma.task.update({
+        where: { id: sourceTask.id },
+        data: { assignedToUserId: newAssigneeId, status: 'Assigned' }
+      });
+
+      // Dual write: SYSTEM_EVENT on the task feed + AuditLog.
+      await prisma.feedPost.create({
+        data: {
+          type: 'SYSTEM_EVENT',
+          scope: 'TASK',
+          scopeId: sourceTask.id,
+          authorId: null,
+          content: `Task reassigned to ${assignee.name} via escalation flag. Reason: ${reason}`,
+          metadata: { fromStatus: sourceTask.status, toStatus: 'Assigned', newAssigneeId } as any
+        }
+      });
+      await prisma.auditLog.create({
+        data: {
+          actionType: 'TASK_REASSIGNED',
+          entityType: 'Task',
+          entityId: String(sourceTask.id),
+          performedByUserId: userId,
+          comment: reason,
+          details: { fromStatus: sourceTask.status, toStatus: 'Assigned', newAssigneeId, viaFlagId: flag.id } as any
+        }
+      });
+
+      linkedEntityId = String(sourceTask.id);
+
+      await prisma.escalationFlag.update({
+        where: { id: flag.id },
+        data: {
+          status: 'ACTIONED',
+          action: 'REASSIGNED',
+          reviewedByUserId: userId,
+          actionedAt: new Date(),
+          linkedEntityId
+        }
+      });
+
+      // ─── DISSEMINATED ────────────────────────────────────────────────────────
+    } else if (action === 'DISSEMINATED') {
+      await prisma.feedPost.create({
+        data: {
+          type: 'ESCALATION_CARD',
+          scope: 'ORG',
+          scopeId: null,
+          authorId: null,
+          content: sourcePost.sourceExcerpt ?? sourcePost.content,
+          sourcePostId: sourcePost.id,
+          sourceExcerpt: sourcePost.sourceExcerpt,
+          sourceTaskId: sourcePost.sourceTaskId,
+          sourceWpId: sourcePost.sourceWpId,
+          flagId: flag.id,
+          taggedDivisionIds: taggedDivisionIds ?? Prisma.DbNull
+        }
+      });
+
+      await prisma.escalationFlag.update({
+        where: { id: flag.id },
+        data: {
+          status: 'ACTIONED',
+          action: 'DISSEMINATED',
+          reviewedByUserId: userId,
+          actionedAt: new Date()
+        }
+      });
+    }
+
+    // Compliance audit — written after every action.
+    try {
+      await prisma.auditLog.create({
+        data: {
+          actionType: 'ESCALATION_FLAG_ACTIONED',
+          entityType: 'EscalationFlag',
+          entityId: String(flag.id),
+          performedByUserId: userId,
+          details: { action, linkedEntityId: linkedEntityId ?? null } as any
+        }
+      });
+    } catch (err) {
+      console.error('AuditLog write failed for flag action:', err);
+    }
+
+    const updatedFlag = await prisma.escalationFlag.findUnique({ where: { id: flag.id } });
+    res.status(200).json({ flag: updatedFlag });
+  } catch (error) {
+    console.error('Error acting on flag:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};

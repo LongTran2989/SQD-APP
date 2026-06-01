@@ -384,6 +384,9 @@ PUT /api/feed/flags/:flagId/action
 
 **Recommended model:** Opus Mid
 
+Status: COMPLETE — branch `claude/exciting-keller-r1uUR`.
+249/249 tests passing (217 prior + 32 new in `feed.test.ts`, groups 9–17). Added to `feed.controller.ts`: `getDivisionFeed`, `postDivisionMessage`, `getOrgFeed`, `postOrgMessage`, `getPendingFlags`, `actOnFlag`; registered in `feed.routes.ts`. All six PUT/GET/POST routes require `authenticateJWT`. Flag action handler implements all six action values (ACKNOWLEDGED, DISMISSED, FINDING_RAISED, TASK_CREATED, REASSIGNED, DISSEMINATED) with `linkedEntityId` set for the entity-creating actions and an `ESCALATION_FLAG_ACTIONED` AuditLog written after every action. Gotchas confirmed: (a) `EscalationFlag` has no Prisma relation to its source post — the source `FeedPost` is loaded by `flag.sourcePostId` separately (not via `include: { sourcePost: true }`). (b) Org Feed `?divisionTag=` filter uses Prisma's native JSON `array_contains` operator — confirmed working on Prisma v7 + adapter-pg. (c) `Template` has no `deletedAt` column, so the TASK_CREATED template lookup filters only on `status: 'Published'`. (d) Org posts store `scopeId: null`; queries use `where: { scope: 'ORG' }` with no scopeId. Manager flag visibility is resolved by tracing each pending flag's ESCALATION_CARD `sourceTaskId`/`sourceWpId` back to a division; ORG-scope cards are visible to all Managers.
+
 ---
 
 ### Phase 8.3 — Frontend
@@ -431,6 +434,10 @@ PUT /api/feed/flags/:flagId/action
 9. **TASK_CREATED action requires a templateId** — Creating a task always requires a published template. The flag action request for TASK_CREATED must include `templateId`. The frontend FlagActionPanel must show a template picker for this action.
 
 10. **Test baseline** — As of Phase 8.0 completion: 187 tests. Each sub-phase adds tests. Never reduce the count.
+
+11. **EscalationFlag has no `sourcePost` relation in Prisma** — Despite `sourcePostId` existing as a field, there is no declared Prisma relation. Load the source FeedPost separately via `prisma.feedPost.findUnique({ where: { id: flag.sourcePostId } })`. Do not attempt `include: { sourcePost: true }` on EscalationFlag.
+
+12. **Template has no `deletedAt` column** — The soft-delete pattern does not apply to Template. Filter Published templates using `status: 'Published'` only. Never add `deletedAt: null` to Template queries.
 
 ---
 
