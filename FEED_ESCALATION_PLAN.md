@@ -253,6 +253,10 @@ Goal: managers/directors action a PENDING flag; reuse existing workflows; single
 - Verify Header/Sidebar badge counts are RBAC-correct and refresh after actions.
 - Empty states, loading, error toasts consistent with existing components.
 - Full regression: `cd backend && npm run test` (all green) + `cd frontend && npm run lint` + `npm run build`.
+- **Lint-debt burn-down (optional, scoped — not a blocker).** Baseline is **70 errors / 23 warnings** of *pre-existing* repo debt (verified Phase 2: `tsc --noEmit` = 0, `next build` exit 0 — none of it breaks compile or build; `next dev`/Jest unaffected). Each phase only held the line ("zero new"). If burning it down here, prioritise the *behavioral-smell* rules over cosmetics, and do it as its own commit (no feature changes) so the diff is reviewable:
+  - **Priority 1 (behavioral):** `react-hooks/set-state-in-effect` (11) + `react-hooks/exhaustive-deps` (2) + `react-hooks/immutability` (3). Fix by adopting the Sidebar/`FeedPanel` pattern (`getX().then(setState)` + `cancelled` flag) instead of `useEffect(() => loadX())`. **Use this pattern in Phase 3/4 too (escalation loaders, Header bell poller) so the bucket doesn't grow.**
+  - **Priority 2 (mechanical):** `@typescript-eslint/no-explicit-any` (51) — mostly `catch (err: any)` → `catch (err: unknown)` + a narrow type guard, and JSON payload casts. Safe, repetitive.
+  - **Priority 3 (cosmetic):** `react/no-unescaped-entities` (5), `no-unused-vars` (18), `@next/next/no-img-element` (3).
 - Update `CLAUDE_HANDOVER.md` (phase status, object reference for FeedPost/EscalationFlag, RBAC, gotchas) and `BUSINESS_WORKFLOW.md` (feeds + escalation loop) — Rule 12, only after user confirms.
 
 **Done / Gotchas:** _…_
