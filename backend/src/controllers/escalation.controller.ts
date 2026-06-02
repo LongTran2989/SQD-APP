@@ -88,7 +88,7 @@ export const flagPost = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const flagger = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true } });
+    const flagger = await prisma.user.findFirst({ where: { id: userId, deletedAt: null }, select: { id: true, name: true } });
     const flaggedByName = flagger?.name ?? `User ${userId}`;
 
     const result = await prisma.$transaction(async (tx) => {
@@ -171,7 +171,7 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
         .map((f) => f.cards[0]?.scopeId)
         .filter((id): id is number => typeof id === 'number');
       const wps = wpTargetIds.length
-        ? await prisma.workPackage.findMany({ where: { id: { in: wpTargetIds } }, select: { id: true, divisionId: true } })
+        ? await prisma.workPackage.findMany({ where: { id: { in: wpTargetIds }, deletedAt: null }, select: { id: true, divisionId: true } })
         : [];
       const wpDiv = new Map(wps.map((w) => [w.id, w.divisionId]));
 
@@ -187,7 +187,7 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
 
     const flaggerIds = [...new Set(actionable.map((f) => f.flaggedByUserId))];
     const users = flaggerIds.length
-      ? await prisma.user.findMany({ where: { id: { in: flaggerIds } }, select: { id: true, name: true } })
+      ? await prisma.user.findMany({ where: { id: { in: flaggerIds }, deletedAt: null }, select: { id: true, name: true } })
       : [];
     const nameMap = new Map(users.map((u) => [u.id, u.name]));
 
