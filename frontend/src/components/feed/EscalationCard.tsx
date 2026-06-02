@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { AlertTriangle, ArrowUpRight } from 'lucide-react';
-import { FeedPostEnriched, User, EscalationFlagStatus } from '../../types';
+import { FeedPostEnriched, EscalationFlagStatus } from '../../types';
 import { actionEscalation } from '../../api/escalationApi';
 import EscalationActionModal, { ModalAction } from './EscalationActionModal';
 
@@ -36,25 +36,20 @@ const STATUS_LABEL: Record<EscalationFlagStatus, string> = {
   DISMISSED: 'Dismissed',
 };
 
-// Only Director/Admin/Manager can action a flag (the backend enforces precise
-// own-division scoping and re-checks; this is a UI convenience gate).
-function canActionRole(role?: string): boolean {
-  return role === 'Director' || role === 'Admin' || role === 'Manager';
-}
-
 interface EscalationCardProps {
   post: FeedPostEnriched;
-  currentUser?: User;
   onActioned?: () => void;
 }
 
-export default function EscalationCard({ post, currentUser, onActioned }: EscalationCardProps) {
+export default function EscalationCard({ post, onActioned }: EscalationCardProps) {
   const [busy, setBusy] = useState(false);
   const [modalAction, setModalAction] = useState<ModalAction | null>(null);
 
   const href = sourceHref(post);
   const status: EscalationFlagStatus = post.flagStatus ?? 'PENDING';
-  const showActions = status === 'PENDING' && canActionRole(currentUser?.role) && post.flagId != null;
+  // post.canAction is computed server-side (canActionFlag) — it already encodes
+  // the Manager own-division rule, so a cross-division Manager sees no buttons.
+  const showActions = status === 'PENDING' && post.canAction === true && post.flagId != null;
 
   const runSimple = async (action: 'ACKNOWLEDGE' | 'DISMISS') => {
     if (post.flagId == null) return;

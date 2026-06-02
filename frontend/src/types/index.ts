@@ -226,6 +226,10 @@ export interface FeedPostEnriched extends FeedPost {
   // Live status of the linked EscalationFlag (cards only) — keeps the card badge
   // honest after the flag is actioned (Phase 4). Null for non-card posts.
   flagStatus?: EscalationFlagStatus | null;
+  // Whether the requesting viewer may action this escalation card. Computed
+  // server-side (canActionFlag) so the UI gate matches backend RBAC exactly,
+  // including the Manager own-division rule the client can't resolve alone.
+  canAction?: boolean;
 }
 
 // ── Escalation (Phase 3) ─────────────────────────────────────────────────────

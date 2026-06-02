@@ -1,7 +1,7 @@
 'use client';
 
 import { Settings } from 'lucide-react';
-import { FeedPostEnriched, EscalationTargetScope, User } from '../../types';
+import { FeedPostEnriched, EscalationTargetScope } from '../../types';
 import EscalationCard from './EscalationCard';
 import InfoCard from './InfoCard';
 import FlagButton from './FlagButton';
@@ -31,9 +31,6 @@ function getInitials(name: string): string {
 interface FeedPostItemProps {
   post: FeedPostEnriched;
   currentUserId: number;
-  // Full viewer (role-gates the escalation action buttons on cards). Optional so
-  // the task feed, which never renders cards, can keep passing just currentUserId.
-  currentUser?: User;
   // Scopes a COMMENT on this feed may be escalated to (empty/omitted = no flag
   // button). Computed by the parent FeedPanel from its own scope.
   flagTargets?: EscalationTargetScope[];
@@ -45,9 +42,9 @@ interface FeedPostItemProps {
 
 // Renders a single feed entry: SYSTEM_EVENT, COMMENT (with an optional escalate
 // button), or the real ESCALATION_CARD / INFO_CARD renderers.
-export default function FeedPostItem({ post, currentUserId, currentUser, flagTargets, onFlagged, onActioned }: FeedPostItemProps) {
+export default function FeedPostItem({ post, currentUserId, flagTargets, onFlagged, onActioned }: FeedPostItemProps) {
   if (post.type === 'ESCALATION_CARD') {
-    return <EscalationCard post={post} currentUser={currentUser} onActioned={onActioned} />;
+    return <EscalationCard post={post} onActioned={onActioned} />;
   }
 
   if (post.type === 'INFO_CARD') {

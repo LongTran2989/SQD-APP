@@ -9,6 +9,7 @@ import {
   isFeedScope,
   FeedScope,
 } from '../services/feedService';
+import { canActionFlag } from '../services/escalationService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -111,7 +112,29 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       orderBy: { createdAt: 'asc' },
     });
 
-    res.json(await enrichFlagStatus(await enrichAuthors(posts)));
+    const enriched = await enrichFlagStatus(await enrichAuthors(posts));
+
+    // Whether THIS viewer may action the escalation cards on this feed. Computed
+    // server-side with the same canActionFlag the action endpoint uses (single
+    // source of truth) — the client can't resolve a WP's division on its own.
+    // Every ESCALATION_CARD on a feed shares the feed's scope + division, so we
+    // resolve it once (and only when a card is actually present).
+    let viewerCanAction = false;
+    if (req.user && enriched.some((p) => p.type === 'ESCALATION_CARD')) {
+      let feedDivisionId: number | null = null;
+      if (target.scope === 'DIVISION') {
+        feedDivisionId = target.scopeId;
+      } else if (target.scope === 'WP' && target.scopeId != null) {
+        const wp = await prisma.workPackage.findUnique({ where: { id: target.scopeId, deletedAt: null }, select: { divisionId: true } });
+        feedDivisionId = wp?.divisionId ?? null;
+      }
+      viewerCanAction = canActionFlag(
+        { role: req.user.role, divisionId: req.user.divisionId },
+        { targetScope: target.scope, divisionId: feedDivisionId }
+      );
+    }
+
+    res.json(enriched.map((p) => ({ ...p, canAction: p.type === 'ESCALATION_CARD' ? viewerCanAction : false })));
   } catch (error) {
     console.error('Error fetching feed:', error);
     res.status(500).json({ message: 'Internal server error' });

@@ -120,7 +120,6 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
               key={post.id}
               post={post}
               currentUserId={currentUser.id}
-              currentUser={currentUser}
               flagTargets={flagTargets}
               onFlagged={reloadFeed}
               onActioned={reloadFeed}

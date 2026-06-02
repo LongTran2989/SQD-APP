@@ -548,4 +548,35 @@ describe('Escalation core (Phase 3)', () => {
       });
     });
   });
+
+  // ─── getFeed canAction gate (Phase 4) ───────────────────────────────────────
+  // The feed marks each ESCALATION_CARD with whether THIS viewer may action it
+  // (server-side canActionFlag) so the UI never shows buttons that would 403.
+
+  describe('GET feed — per-card canAction gate', () => {
+    const cardOnFeed = async (scope: string, scopeId: number, token: string) => {
+      const res = await request(app).get(`/api/feeds/${scope}/${scopeId}`).set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body.find((p: { type: string }) => p.type === 'ESCALATION_CARD');
+    };
+
+    it('a Division-A card is actionable by Director and the div-A Manager, not by a div-B Manager or Staff', async () => {
+      await flag(taskComment, 'DIVISION', staffToken); // ESCALATION_CARD on Division A board
+      expect((await cardOnFeed('DIVISION', divAId, directorToken)).canAction).toBe(true);
+      expect((await cardOnFeed('DIVISION', divAId, managerAToken)).canAction).toBe(true);
+      expect((await cardOnFeed('DIVISION', divAId, managerBToken)).canAction).toBe(false);
+      expect((await cardOnFeed('DIVISION', divAId, staffToken)).canAction).toBe(false);
+    });
+
+    it('a WP-A card resolves the WP division: actionable by the div-A Manager, not the div-B Manager', async () => {
+      await flag(taskComment, 'WP', staffToken); // ESCALATION_CARD on WP A feed (WP A is in div A)
+      expect((await cardOnFeed('WP', wpAId, managerAToken)).canAction).toBe(true);
+      expect((await cardOnFeed('WP', wpAId, managerBToken)).canAction).toBe(false);
+    });
+
+    it('an Org card is actionable by any Manager', async () => {
+      await flag(divAComment, 'ORG', staffToken); // ESCALATION_CARD on the Org feed
+      expect((await cardOnFeed('ORG', 0, managerBToken)).canAction).toBe(true);
+    });
+  });
 });
