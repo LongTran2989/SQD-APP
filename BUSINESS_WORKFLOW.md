@@ -18,7 +18,7 @@ This document outlines the high-level business logic and application workflow fo
 - **Lifecycle:** A task originates from a Template. Tasks can be created explicitly with an assignee, or left Unassigned in a pool for eligible users to click "Perform This Task" (self-serve).
 - **Task Data Immutable Snapshot:** When a Task is created, it captures a snapshot of the Template schema. If the Template is deleted or changed, the Task remains completely unaffected.
 - **Review Loop:** Completed tasks go to `In Review`. A reviewer (Issuer, Manager, or Director) can Approve (closing it), Reject, or send it back for Follow-up. 
-- **Activity Feed:** Every task maintains a chronological, immutable feed (`TaskActivity`) of system events (status changes, deadlines) and human comments.
+- **Activity Feed:** Every task maintains a chronological, immutable feed of system events (status changes, deadlines) and human comments. This is now the **Task scope of the unified `FeedPost` feed** (see Section 4a); the endpoints and behaviour are unchanged.
 - **Time Booking:** Once a Task reaches a final state (`Closed`, `Rejected`, or `Terminated`), the assignee can log actual hours worked, including collaborators. A budget-vs-actual comparison is shown when the source Template had an `estimatedHours` value. The booking is revisable by the assignee, Admin, or Director. Each create/update is written to both the `AuditLog` and the Task's `TaskActivity` feed.
 
 ## 4. Findings & Corrective Action Loop
@@ -31,9 +31,18 @@ This document outlines the high-level business logic and application workflow fo
 - **RBAC Visibility:** Director/Admin see all findings system-wide. Managers see findings in their division. Group Leaders and Staff see only findings they raised or are assigned a follow-up task on.
 - **Sidebar Badge:** The Findings nav item shows an amber badge with the count of Open + In Progress findings within the viewer's RBAC scope.
 
+## 4a. Unified Feed & Escalation Loop
+- **One feed, four scopes:** All discussion and system events live in a single `FeedPost` model across four scopes — **Task**, **Work Package**, **Division Board**, and a single org-wide **Org Feed**. The per-task activity feed is just the Task scope of this feed.
+- **Reading is open; posting is scoped:** Any authenticated user may read any feed (transparency). Posting comments: Task/WP — anyone; Division Board — own division (Director/Admin any); Org Feed — Director/Admin/Manager only.
+- **Flagging (escalation):** Any user may flag a **comment** to raise a concern to a higher scope. A flag creates one `EscalationFlag` (status `PENDING`) that tracks the escalation through its entire life — there are no flag chains.
+- **Where cards appear (placement rule):** Scopes are ordered Task < WP < Division < Org. An **Escalation Card** is posted at the *target* scope, and an **Info Card** is posted at every level strictly *between* origin and target — so no skipped level is blind to a concern that passed it by. Valid escalations: Task→WP, WP→Division, Task→Division, WP→Org, Task→Org, Division→Org; anything else is rejected.
+- **Never copies content:** Cards carry only a short **excerpt** of the flagged comment plus a deep-link to the source — never the full text (compliance requirement).
+- **See vs. action:** Everyone *sees* the cards on the feeds. Only Directors/Admins (any) and Managers (own-division WP/Division flags + all Org flags) can **action** a flag. The Header bell shows each viewer's count of pending escalations they can action.
+- **Actions reuse existing workflows (Phase 4):** Acknowledge, Dismiss, Raise Finding (only when the source is a task comment whose template `allowsFindings`), Create Task, Reassign Task, or Disseminate to the Org Feed. Every action dual-writes the `AuditLog` + a feed `SYSTEM_EVENT`, and reuses the same flag (no second flag) for Disseminate.
+
 ## 5. The Immutable Audit Trail
 - The `AuditLog` table is the source of truth for compliance. 
-- **Rule:** Every critical state change MUST be recorded in the `AuditLog` table. This is separate from the `TaskActivity` feed (which is operational communication). The `AuditLog` is an immutable, system-wide compliance record.
+- **Rule:** Every critical state change MUST be recorded in the `AuditLog` table. This is separate from the unified **`FeedPost`** feed (operational communication). The `AuditLog` is an immutable, system-wide compliance record. Escalations dual-write both: `AuditLog('ESCALATION_RAISED')` + a `SYSTEM_EVENT` on the source feed.
 
 ## 6. Data Visibility Rules (RBAC)
 - **All users (system-wide transparency):** All authenticated users can view all Work Packages and Tasks across the system, regardless of division or assignment. This supports operational transparency in an aviation maintenance environment where awareness of ongoing work matters for safety.
@@ -42,3 +51,4 @@ This document outlines the high-level business logic and application workflow fo
 - **Group Leaders / Managers:** Have action rights scoped to their Division. Managers can assign tasks and WPs across their entire division.
 - **Directors:** Have global action rights across all departments and divisions. They can assign tasks to anyone system-wide and act as reviewers globally.
 - **Global Privilege Config:** Granular privilege toggles are configured by Admins to modify standard roles (Phase 7).
+- **Feeds & Escalation:** Reading any feed is open to all (transparency). Posting follows the scope rules in Section 4a. Flagging a comment is open to all; **actioning** an escalation is limited to Directors/Admins (any) and Managers (own-division WP/Division flags + all Org flags).
