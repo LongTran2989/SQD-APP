@@ -1,6 +1,7 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { createFeedPost } from './feedService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -14,7 +15,7 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 /**
  * Writes a Finding event to BOTH AuditLog (entityType 'Finding', system-wide
- * compliance) AND the source Task's TaskActivity feed (SYSTEM_EVENT).
+ * compliance) AND the source Task's feed (FeedPost, scope 'TASK', SYSTEM_EVENT).
  *
  * Accepts a Prisma client OR a transaction client so callers that mutate the
  * Finding inside a $transaction keep the dual write atomic. When `sourceTaskId`
@@ -42,14 +43,13 @@ export async function logFindingAuditAndActivity(
   });
 
   if (sourceTaskId) {
-    await client.taskActivity.create({
-      data: {
-        taskId: sourceTaskId,
-        type: 'SYSTEM_EVENT',
-        content: activityContent,
-        metadata: (details as any) ?? Prisma.DbNull,
-        authorId: null
-      }
+    await createFeedPost(client, {
+      type: 'SYSTEM_EVENT',
+      scope: 'TASK',
+      scopeId: sourceTaskId,
+      content: activityContent,
+      metadata: details,
+      authorId: null
     });
   }
 }

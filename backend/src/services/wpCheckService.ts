@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { createFeedPost } from './feedService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -155,17 +156,16 @@ export async function generateDailyCheckTasks(
     }
   });
 
-  // 9. Log a SYSTEM_EVENT in TaskActivity
-  await db.taskActivity.create({
-    data: {
-      taskId: task.id,
-      type: 'SYSTEM_EVENT',
-      content: `Task auto-generated from CHECK Work Package ${wp.wpId}`,
-      metadata: {
-        wpId: wp.wpId,
-        templateId: template.templateId,
-        generationType: 'CHECK_DAILY'
-      }
+  // 9. Log a SYSTEM_EVENT in the Task feed
+  await createFeedPost(db, {
+    type: 'SYSTEM_EVENT',
+    scope: 'TASK',
+    scopeId: task.id,
+    content: `Task auto-generated from CHECK Work Package ${wp.wpId}`,
+    metadata: {
+      wpId: wp.wpId,
+      templateId: template.templateId,
+      generationType: 'CHECK_DAILY'
     }
   });
 

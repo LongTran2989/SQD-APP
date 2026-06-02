@@ -180,9 +180,13 @@ export interface WorkPackageDetail extends WorkPackage {
   tasks: WpTaskRow[];
 }
 
+// Backed by the unified FeedPost model. The Task feed is scope 'TASK',
+// scopeId = task.id. (Phase 2 introduces dedicated FeedPost types for the
+// WP / Division / Org feeds; this alias keeps the existing Task feed wiring.)
 export interface TaskActivity {
   id: number;
-  taskId: number;
+  scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG';
+  scopeId: number | null;
   authorId: number | null;
   type: 'SYSTEM_EVENT' | 'COMMENT';
   content: string;

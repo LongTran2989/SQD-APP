@@ -73,7 +73,7 @@ describe('Work Package Backend', () => {
 
   beforeEach(async () => {
     // Clean up WP-related data between tests
-    await prisma.taskActivity.deleteMany({});
+    await prisma.feedPost.deleteMany({});
     await prisma.task.deleteMany({});
     await prisma.workPackageAssignment.deleteMany({});
     await prisma.auditLog.deleteMany({});
@@ -83,7 +83,7 @@ describe('Work Package Backend', () => {
   });
 
   afterAll(async () => {
-    await prisma.taskActivity.deleteMany({});
+    await prisma.feedPost.deleteMany({});
     await prisma.task.deleteMany({});
     await prisma.workPackageAssignment.deleteMany({});
     await prisma.auditLog.deleteMany({});
@@ -462,8 +462,8 @@ describe('Work Package Backend', () => {
       expect(task!.schemaSnapshot).toBeDefined();
 
       // Verify TaskActivity was logged
-      const activity = await prisma.taskActivity.findFirst({
-        where: { taskId: result.taskDbId! }
+      const activity = await prisma.feedPost.findFirst({
+        where: { scope: 'TASK', scopeId: result.taskDbId! }
       });
       expect(activity).not.toBeNull();
       expect(activity!.type).toBe('SYSTEM_EVENT');

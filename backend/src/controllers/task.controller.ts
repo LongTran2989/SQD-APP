@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
+import { createFeedPost } from '../services/feedService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -43,7 +44,7 @@ async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient
 }
 
 /**
- * Logs a SYSTEM_EVENT or COMMENT entry to TaskActivity.
+ * Logs a SYSTEM_EVENT or COMMENT entry to the Task feed (FeedPost, scope 'TASK').
  * Never throws — errors are logged with taskId + context for debugging.
  */
 async function logTaskActivity(
@@ -54,14 +55,13 @@ async function logTaskActivity(
   authorId?: number
 ): Promise<void> {
   try {
-    await prisma.taskActivity.create({
-      data: {
-        taskId,
-        type,
-        content,
-        metadata: (metadata as any) ?? Prisma.DbNull,
-        authorId: authorId ?? null
-      }
+    await createFeedPost(prisma, {
+      type,
+      scope: 'TASK',
+      scopeId: taskId,
+      content,
+      metadata,
+      authorId: authorId ?? null
     });
   } catch (err) {
     console.error(
@@ -1591,14 +1591,9 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
     // Access control: Transparent viewing model
     // All authenticated users can view the task activity feed.
 
-    const activities = await prisma.taskActivity.findMany({
-      where: { taskId: id },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        // Include author info — authorId is null for SYSTEM_EVENTs
-        // We cannot use include with nullable relations easily in Prisma without a relation,
-        // so we do a manual join below.
-      }
+    const activities = await prisma.feedPost.findMany({
+      where: { scope: 'TASK', scopeId: id },
+      orderBy: { createdAt: 'asc' }
     });
 
     // Enrich with author name where authorId is present
@@ -1649,14 +1644,12 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
 
     // Access control: Anyone can comment on tasks (Transparent commenting model)
 
-    const activity = await prisma.taskActivity.create({
-      data: {
-        taskId: id,
-        type: 'COMMENT',
-        content: content.trim(),
-        authorId: userId,
-        metadata: Prisma.DbNull
-      }
+    const activity = await createFeedPost(prisma, {
+      type: 'COMMENT',
+      scope: 'TASK',
+      scopeId: id,
+      content: content.trim(),
+      authorId: userId
     });
 
     // Enrich with author name

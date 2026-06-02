@@ -78,6 +78,7 @@ model User {
   closedFindings      Finding[]  @relation("FindingClosedBy")
   workPackageAssignments WorkPackageAssignment[]
   createdWorkPackages WorkPackage[] @relation("WorkPackageCreator")
+  feedPosts           FeedPost[]
 
   deletedAt           DateTime?
   createdAt           DateTime   @default(now())
@@ -227,7 +228,6 @@ model Task {
   
   taskData           TaskData?
   sourceFindings     Finding[]  @relation("FindingSourceTask")
-  activities         TaskActivity[]
   timeBooking        TimeBooking?
   
   deletedAt          DateTime?
@@ -374,15 +374,58 @@ model WpType {
 // Task Additions (Activity & Time)
 // -----------------------------------------------------------------------
 
-model TaskActivity {
-  id          Int      @id @default(autoincrement())
-  taskId      Int
-  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  authorId    Int?
-  type        String   // SYSTEM_EVENT or COMMENT
-  content     String
-  metadata    Json?
-  createdAt   DateTime @default(now())
+// -----------------------------------------------------------------------
+// Feed & Escalation System
+// -----------------------------------------------------------------------
+
+// Unified feed post across all four scopes. Replaces the former TaskActivity
+// model (Task feed = scope 'TASK', scopeId = task.id). scopeId is polymorphic
+// (taskId / wpId / divisionId; NULL for the singleton ORG feed) so it carries
+// no foreign key — feeds are queried by (scope, scopeId).
+model FeedPost {
+  id              Int       @id @default(autoincrement())
+  type            String    // COMMENT | SYSTEM_EVENT | ESCALATION_CARD | INFO_CARD
+  scope           String    // TASK | WP | DIVISION | ORG
+  scopeId         Int?      // taskId / wpId / divisionId; NULL for ORG
+  authorId        Int?      // NULL for SYSTEM_EVENT / auto-generated cards
+  author          User?     @relation(fields: [authorId], references: [id])
+  content         String
+  metadata        Json?
+
+  // Escalation linkage (populated from Phase 3 onward)
+  sourcePostId    Int?      // the flagged COMMENT this card references
+  sourcePost      FeedPost? @relation("PostSource", fields: [sourcePostId], references: [id])
+  derivedPosts    FeedPost[] @relation("PostSource")
+  sourceExcerpt   String?
+  sourceTaskId    Int?      // denormalised for deep-linking (no FK — polymorphic origin)
+  sourceWpId      Int?
+  flagId          Int?
+  flag            EscalationFlag? @relation(fields: [flagId], references: [id])
+  taggedDivisionIds Json?   // Org Feed only — int array of tagged divisions
+
+  createdAt       DateTime  @default(now())
+
+  @@index([scope, scopeId, createdAt])
+  @@index([flagId])
+}
+
+// One flag tracks an escalation through its entire lifecycle (no flag chains).
+// Immutable record — never soft-deleted.
+model EscalationFlag {
+  id               Int       @id @default(autoincrement())
+  sourcePostId     Int       // immutable ref to the original flagged comment
+  flaggedByUserId  Int
+  targetScope      String    // WP | DIVISION | ORG
+  status           String    @default("PENDING") // PENDING | ACTIONED | DISMISSED
+  reviewedByUserId Int?
+  action           String?   // ACKNOWLEDGE | DISMISS | RAISE_FINDING | CREATE_TASK | REASSIGN_TASK | DISSEMINATE
+  actionedAt       DateTime?
+  linkedEntityType String?   // Finding | Task
+  linkedEntityId   String?
+  cards            FeedPost[]
+  createdAt        DateTime  @default(now())
+
+  @@index([targetScope, status])
 }
 
 model TimeBooking {

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { createFeedPost } from '../services/feedService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -54,14 +55,13 @@ async function logActivityAndAudit(
   });
 
   try {
-    await prisma.taskActivity.create({
-      data: {
-        taskId,
-        type: 'SYSTEM_EVENT',
-        content,
-        metadata: metadata as any,
-        authorId: null
-      }
+    await createFeedPost(prisma, {
+      type: 'SYSTEM_EVENT',
+      scope: 'TASK',
+      scopeId: taskId,
+      content,
+      metadata,
+      authorId: null
     });
   } catch (err) {
     console.error(`[TimeBooking] logActivity failed for taskId=${taskId}:`, err);
