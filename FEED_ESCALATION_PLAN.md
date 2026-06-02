@@ -6,12 +6,12 @@
 
 ---
 
-## STATUS: Phase 1 COMPLETE (✅ 189 backend tests pass). Next session starts at Phase 2.
+## STATUS: Phase 2 COMPLETE (✅ 211 backend tests pass — 189 baseline + 22 new feed tests; frontend lint at baseline 70/23). Next session starts at Phase 3.
 
 | Phase | Title | State |
 |------|-------|-------|
 | 1 | Schema migration: `TaskActivity` → unified `FeedPost` (behavior-preserving) | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) |
-| 2 | Feed read/write API + WP / Division Board / Org Feed scopes | ☐ Not started |
+| 2 | Feed read/write API + WP / Division Board / Org Feed scopes | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) |
 | 3 | Escalation core: flag comment → cards + info cards + audit | ☐ Not started |
 | 4 | Flag lifecycle actions (acknowledge/dismiss/raise finding/create task/reassign/disseminate) | ☐ Not started |
 | 5 | Badges, polish, docs, full regression | ☐ Not started |
@@ -190,7 +190,19 @@ Goal: generic feed read + comment endpoints for all four scopes; surface WP/Divi
 
 **Tests:** new `feed.test.ts` — read all scopes per role; post RBAC (org restricted, division own-only, director bypass); WP system-event emission.
 
-**Done / Gotchas:** _…_
+**Done / Gotchas (Phase 2 — completed):**
+- **Backend feed API.** New `feed.controller.ts` + `feed.routes.ts`, registered at `/api/feeds` in `index.ts`. Two endpoints, both auth-gated:
+  - `GET /api/feeds/:scope/:scopeId?` — author-enriched posts (oldest-first), all authenticated users may read any feed (transparency). 400 on bad scope / missing non-ORG scopeId; 404 if the Task/WP/Division target doesn't exist (soft-delete aware).
+  - `POST /api/feeds/:scope/:scopeId?/posts` — creates a COMMENT. **Plain comments write NO AuditLog** (matches existing task-comment behavior); only SYSTEM_EVENTs dual-write.
+- **Express 5 routing gotcha.** `:param?` optional segments throw under Express 5 / path-to-regexp v8. Used **two explicit routes per verb** instead (`/:scope/:scopeId` + `/:scope`, and the `/posts` pair). ORG is the singleton feed: `GET /api/feeds/ORG`, `POST /api/feeds/ORG/posts` (no scopeId). Frontend `feedApi.feedPath()` matches this.
+- **RBAC helpers added to `feedService.ts`** (built on the existing `createFeedPost`, no re-implemented inserts): `buildFeedPostScope(scope,scopeId)` (ORG ⇒ `scopeId:null`), `canPostToFeed(user,scope,scopeId)` (TASK/WP → all; DIVISION → own div, Director/Admin any; ORG → Director/Admin/Manager), plus `isFeedScope`/`FEED_SCOPES`. **Admin is treated as Director-equivalent** for division bypass + ORG posting (matches the "Director/Admin" matrix column).
+- **WP SYSTEM_EVENTs** (decision: status + creation + assignment): added `logWpSystemEvent()` to `wp.controller.ts` — best-effort, never throws, `authorId:null` (actor captured in AuditLog). Emits on `createWorkPackage`, `updateWorkPackageStatus` (incl. reactivation wording), `assignUserToWp`, `removeUserFromWp`, alongside the existing AuditLog writes. Forward-only, no backfill.
+- **`CreateFeedPostInput.metadata`** widened to `... | undefined` — this also cleared two pre-existing Phase-1 `exactOptionalPropertyTypes` tsc errors in `task.controller.ts` + `findingService.ts`. (Backend `tsc --noEmit` is now clean except the unrelated legacy `clean.ts`, which still references the removed `taskActivity` model — out of scope.)
+- **Frontend (parallel, low-risk — decision):** `TaskActivityFeed.tsx` left behaviorally untouched. New generic, self-loading `components/feed/FeedPanel.tsx` + presentational `FeedPostItem.tsx` (bubble/system styles lifted from TaskActivityFeed; COMMENT + SYSTEM_EVENT now, cards fall through neutrally for Phase 3). `api/feedApi.ts` exposes `getFeed`/`postFeedComment` + a `canPostToFeed` RBAC **mirror** (UI-only; backend re-checks).
+  - ⚠️ **Lint gotcha:** the `react-hooks/set-state-in-effect` rule flags the common `useEffect(()=>{ loadX(); })` pattern (the WP detail page already trips it in the baseline). `FeedPanel` loads via `getFeed(...).then(setState)` with a `cancelled` flag (Sidebar pattern) to add **zero** new lint problems.
+  - Pages: WP detail page gained a `FeedPanel` (scope `WP`); new `app/dashboard/division-board/page.tsx` (defaults to own division, Director/Admin switch via `getDivisions`, remounts via `key`) + `app/dashboard/org-feed/page.tsx`. Sidebar gained *Division Board* + *Org Feed* (all roles).
+- **Tests:** `feed.test.ts` — 22 tests: read access per role + 401, oldest-first author enrichment, ORG singleton, scope isolation, 400/404 validation; post RBAC (TASK/WP open, DIVISION own-only + Director bypass, ORG Director/Admin/Manager only, GL/Staff 403), no-AuditLog-for-comments, 404 target; WP SYSTEM_EVENT emission on create/status/assign. **211/211 backend pass.**
+- ➡️ **For Phase 3:** `FeedPostItem` currently renders ESCALATION_CARD/INFO_CARD as a neutral note — replace with real card renderers there. `FeedPanel` appends new posts optimistically and has no polling; wire the Header bell + any live refresh in Phase 3/5.
 
 ---
 

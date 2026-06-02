@@ -11,7 +11,7 @@ export interface CreateFeedPostInput {
   scopeId?: number | null; // NULL for the singleton ORG feed
   content: string;
   authorId?: number | null; // NULL for SYSTEM_EVENT / auto-generated cards
-  metadata?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null | undefined;
   // Escalation linkage (used from Phase 3 onward)
   sourcePostId?: number | null;
   sourceExcerpt?: string | null;
@@ -45,4 +45,48 @@ export async function createFeedPost(client: PrismaLike, input: CreateFeedPostIn
       taggedDivisionIds: (input.taggedDivisionIds as any) ?? Prisma.DbNull,
     },
   });
+}
+
+export const FEED_SCOPES: FeedScope[] = ['TASK', 'WP', 'DIVISION', 'ORG'];
+
+export function isFeedScope(value: string): value is FeedScope {
+  return (FEED_SCOPES as string[]).includes(value);
+}
+
+/**
+ * Builds the Prisma WHERE clause that selects every post on a single feed.
+ * scopeId is polymorphic (taskId / wpId / divisionId) and ignored for the
+ * singleton ORG feed (always scopeId NULL). Reads are open to all authenticated
+ * users (transparency default) — this helper only locates the feed, not who may
+ * see it. Provided for any future filtered reads as well.
+ */
+export function buildFeedPostScope(scope: FeedScope, scopeId: number | null): Prisma.FeedPostWhereInput {
+  if (scope === 'ORG') return { scope: 'ORG', scopeId: null };
+  return { scope, scopeId };
+}
+
+/**
+ * RBAC gate for posting a COMMENT to a feed (mirrors the plan's RBAC matrix):
+ *   - TASK / WP    → any authenticated user (transparent commenting).
+ *   - DIVISION     → own division only; Director / Admin may post to any.
+ *   - ORG          → Director / Admin / Manager only.
+ * Director / Admin bypass division checks throughout.
+ */
+export function canPostToFeed(
+  user: { role: string; divisionId: number },
+  scope: FeedScope,
+  scopeId: number | null
+): boolean {
+  const isDirectorOrAdmin = user.role === 'Director' || user.role === 'Admin';
+  switch (scope) {
+    case 'TASK':
+    case 'WP':
+      return true;
+    case 'DIVISION':
+      return isDirectorOrAdmin || scopeId === user.divisionId;
+    case 'ORG':
+      return isDirectorOrAdmin || user.role === 'Manager';
+    default:
+      return false;
+  }
 }

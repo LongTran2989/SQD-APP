@@ -199,6 +199,32 @@ export interface TaskActivityEnriched extends TaskActivity {
   author: { id: number; name: string | null } | null;
 }
 
+// ── Unified feed (Phase 2) — generic across all four scopes ──────────────────
+export type FeedScope = 'TASK' | 'WP' | 'DIVISION' | 'ORG';
+export type FeedPostType = 'COMMENT' | 'SYSTEM_EVENT' | 'ESCALATION_CARD' | 'INFO_CARD';
+
+export interface FeedPost {
+  id: number;
+  scope: FeedScope;
+  scopeId: number | null;
+  authorId: number | null;
+  type: FeedPostType;
+  content: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  // Escalation linkage — populated from Phase 3 onward.
+  sourcePostId?: number | null;
+  sourceExcerpt?: string | null;
+  sourceTaskId?: number | null;
+  sourceWpId?: number | null;
+  flagId?: number | null;
+  taggedDivisionIds?: number[] | null;
+}
+
+export interface FeedPostEnriched extends FeedPost {
+  author: { id: number; name: string | null } | null;
+}
+
 export interface TimeBookingEntry {
   userId: number;
   hoursLogged: number;

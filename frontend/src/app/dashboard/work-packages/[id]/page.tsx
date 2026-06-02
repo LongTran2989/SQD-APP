@@ -9,6 +9,7 @@ import { getWorkPackageById, updateWpStatus } from '../../../../api/wpApi';
 import WorkPackageStatusBadge from '../../../../components/work-packages/WorkPackageStatusBadge';
 import WorkPackageAssignmentPanel from '../../../../components/work-packages/WorkPackageAssignmentPanel';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
+import FeedPanel from '../../../../components/feed/FeedPanel';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft,
@@ -381,6 +382,11 @@ export default function WorkPackageDetailPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Work Package feed */}
+      <div className="h-[28rem]">
+        <FeedPanel scope="WP" scopeId={wp.id} currentUser={user} title="Work Package Feed" />
       </div>
 
       {/* Status modal */}

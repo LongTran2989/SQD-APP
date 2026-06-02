@@ -3,6 +3,18 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { generateDailyCheckTasks } from '../services/wpCheckService';
+import { createFeedPost } from '../services/feedService';
+
+// Emits a WP-scope SYSTEM_EVENT alongside the existing AuditLog write. Mirrors
+// the task feed's logTaskActivity: best-effort, never throws, authorId stays
+// null (the actor is named in the content). Forward-only — no backfill.
+async function logWpSystemEvent(wpId: number, content: string, metadata?: Record<string, unknown>): Promise<void> {
+  try {
+    await createFeedPost(prisma, { type: 'SYSTEM_EVENT', scope: 'WP', scopeId: wpId, content, metadata });
+  } catch (err) {
+    console.error(`[logWpSystemEvent] Failed to log WP feed event for wpId=${wpId}. Content: "${content}". Error:`, err);
+  }
+}
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -248,6 +260,8 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
       }
     });
 
+    await logWpSystemEvent(wp.id, `Work Package "${wp.name}" created.`, { wpId: wp.wpId, type });
+
     res.status(201).json(wp);
   } catch (error: any) {
     if (error.message === 'Division not found') {
@@ -392,6 +406,13 @@ export const updateWorkPackageStatus = async (req: Request, res: Response): Prom
       }
     });
 
+    const statusLabel = status === 'Open' && wp.status === 'Inactive' ? 'reactivated' : status.toLowerCase();
+    await logWpSystemEvent(
+      wp.id,
+      `Work Package ${statusLabel}${reason ? `: ${reason}` : ''} (was ${wp.status}).`,
+      { fromStatus: wp.status, toStatus: status }
+    );
+
     res.json(updated);
   } catch (error) {
     console.error('Error updating work package status:', error);
@@ -460,6 +481,8 @@ export const assignUserToWp = async (req: Request, res: Response): Promise<void>
       include: { user: { select: { id: true, name: true, email: true } } }
     });
 
+    await logWpSystemEvent(wpId, `${targetUser.name} was assigned to this Work Package.`, { assignedUserId: userId });
+
     res.status(201).json({ message: 'User assigned successfully', assignment });
   } catch (error) {
     console.error('Error assigning user to WP:', error);
@@ -503,6 +526,13 @@ export const removeUserFromWp = async (req: Request, res: Response): Promise<voi
     await prisma.workPackageAssignment.delete({
       where: { id: assignment.id }
     });
+
+    const removedUser = await prisma.user.findUnique({ where: { id: targetUserId }, select: { name: true } });
+    await logWpSystemEvent(
+      wpId,
+      `${removedUser?.name ?? `User ${targetUserId}`} was removed from this Work Package.`,
+      { removedUserId: targetUserId }
+    );
 
     res.json({ message: 'User removed from Work Package successfully' });
   } catch (error) {
