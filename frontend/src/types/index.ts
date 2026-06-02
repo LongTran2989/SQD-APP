@@ -225,6 +225,25 @@ export interface FeedPostEnriched extends FeedPost {
   author: { id: number; name: string | null } | null;
 }
 
+// ── Escalation (Phase 3) ─────────────────────────────────────────────────────
+// A flag may target a scope strictly above the comment's own (TASK is the floor).
+export type EscalationTargetScope = 'WP' | 'DIVISION' | 'ORG';
+
+// One row of the viewer's actionable escalation queue (GET /api/escalations).
+export interface PendingEscalation {
+  id: number;
+  targetScope: EscalationTargetScope;
+  status: string;
+  createdAt: string;
+  sourcePostId: number;
+  sourceExcerpt: string | null;
+  sourceTaskId: number | null;
+  sourceWpId: number | null;
+  flaggedByUserId: number;
+  flaggedBy: { id: number; name: string | null } | null;
+  card: { scope: FeedScope; scopeId: number | null } | null;
+}
+
 export interface TimeBookingEntry {
   userId: number;
   hoursLogged: number;

@@ -1,13 +1,38 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../store/authStore';
 import { LogOut, Bell, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { getPendingEscalations } from '../../api/escalationApi';
 
 export default function Header() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const router = useRouter();
+
+  // Pending escalations the viewer can action (RBAC-scoped server-side). Polled
+  // like the Sidebar findings badge — setState lives in the promise callback so
+  // it never trips react-hooks/set-state-in-effect.
+  const [pendingEscalations, setPendingEscalations] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const load = () => {
+      getPendingEscalations()
+        .then((list) => {
+          if (!cancelled) setPendingEscalations(list.length);
+        })
+        .catch(() => {});
+    };
+    load();
+    const intervalId = setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [user]);
 
   const handleLogout = () => {
     logout();
@@ -26,9 +51,16 @@ export default function Header() {
       </div>
 
       <div className="flex items-center space-x-4">
-        <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-colors relative">
+        <button
+          className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-colors relative"
+          title={pendingEscalations > 0 ? `${pendingEscalations} pending escalation(s)` : 'No pending escalations'}
+        >
           <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+          {pendingEscalations > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-white">
+              {pendingEscalations > 9 ? '9+' : pendingEscalations}
+            </span>
+          )}
         </button>
         
         <div className="h-8 w-px bg-slate-200 mx-2"></div>

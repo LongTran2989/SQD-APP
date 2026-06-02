@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { TaskEnriched, TaskActivityEnriched, User } from '../../types';
+import { TaskEnriched, TaskActivityEnriched, EscalationTargetScope, User } from '../../types';
 import { postTaskComment } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
+import FlagButton from '../feed/FlagButton';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,12 @@ export default function TaskActivityFeed({
       currentUser.id === task.issuerId ||
       currentUser.role === 'Director' ||
       (currentUser.role === 'Manager' && currentUser.divisionId === task.targetDivisionId));
+
+  // A task comment can escalate to its WP (only if the task is in one), its
+  // Division, or the Org. Backend re-validates and places the cards.
+  const taskFlagTargets: EscalationTargetScope[] = task.wpId
+    ? ['WP', 'DIVISION', 'ORG']
+    : ['DIVISION', 'ORG'];
 
   const handlePostComment = async () => {
     if (!comment.trim()) return;
@@ -142,6 +149,7 @@ export default function TaskActivityFeed({
                   <div className={`flex items-center gap-2 mb-1 ${isSelf ? 'flex-row-reverse' : ''}`}>
                     <span className="text-xs font-semibold text-slate-700">{isSelf ? 'You' : authorName}</span>
                     <span className="text-[10px] text-slate-400">{formatTimestamp(entry.createdAt)}</span>
+                    <FlagButton postId={entry.id} targets={taskFlagTargets} />
                   </div>
                   <div className={`px-3.5 py-2.5 rounded-2xl text-sm text-slate-700 leading-relaxed max-w-full break-words ${
                     isSelf

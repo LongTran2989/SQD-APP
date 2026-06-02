@@ -6,13 +6,13 @@
 
 ---
 
-## STATUS: Phase 2 COMPLETE (✅ 211 backend tests pass — 189 baseline + 22 new feed tests; frontend lint at baseline 70/23). Next session starts at Phase 3.
+## STATUS: Phase 3 COMPLETE (✅ 236 backend tests pass — 211 baseline + 25 new escalation tests; frontend lint at baseline 70/23 — **zero new**; backend + frontend `tsc --noEmit` clean). Next session starts at Phase 4.
 
 | Phase | Title | State |
 |------|-------|-------|
 | 1 | Schema migration: `TaskActivity` → unified `FeedPost` (behavior-preserving) | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) |
 | 2 | Feed read/write API + WP / Division Board / Org Feed scopes | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) |
-| 3 | Escalation core: flag comment → cards + info cards + audit | ☐ Not started |
+| 3 | Escalation core: flag comment → cards + info cards + audit | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) |
 | 4 | Flag lifecycle actions (acknowledge/dismiss/raise finding/create task/reassign/disseminate) | ☐ Not started |
 | 5 | Badges, polish, docs, full regression | ☐ Not started |
 
@@ -114,15 +114,18 @@ model EscalationFlag {
 
 ## Escalation placement matrix (Phase 3)
 
+Encoded as ONE hierarchy rule (`TASK<WP<DIVISION<ORG`): **ESCALATION_CARD at the target; INFO_CARD at every level strictly between origin and target.** The 6 instances:
+
 | Flag origin → target | ESCALATION_CARD at | INFO_CARD at |
 |---|---|---|
 | Task → WP | WP feed | — |
+| WP → Division *(added P3, user decision 2026-06-02)* | Division Board | — |
 | Task → Division | Division Board | WP feed |
-| Task → Org | Org Feed | WP feed + Division Board |
 | WP → Org | Org Feed | Division Board |
+| Task → Org | Org Feed | WP feed + Division Board |
 | Division → Org | Org Feed | — |
 
-Cards reference the source via excerpt + link — **never copy full text** (spec non-negotiable #3). Disseminate **reuses the same flag** (spec #5) — posts an ESCALATION_CARD to Org with optional `taggedDivisionIds`; it must NOT create a second flag.
+Any origin→target NOT derivable from the rule (downward/same-level, ORG-comment escalation, non-COMMENT source) → **400**. Cards reference the source via excerpt + link — **never copy full text** (spec non-negotiable #3). Disseminate **reuses the same flag** (spec #5) — posts an ESCALATION_CARD to Org with optional `taggedDivisionIds`; it must NOT create a second flag.
 
 ## RBAC matrix (enforce in controllers; Director/Admin bypass division checks)
 
@@ -220,9 +223,19 @@ Goal: flag a COMMENT, create `EscalationFlag(PENDING)`, place ESCALATION_CARD at
 - `EscalationCard` (actionable, Phase 4 wires buttons) + `InfoCard` (display-only) renderers in `FeedPanel`.
 - `Header.tsx`: replace hardcoded red-dot with real pending-escalation count via polling (reuse Sidebar badge pattern); link to a filtered view.
 
-**Tests:** `escalation.test.ts` — full placement matrix (5 rows), card content is excerpt+link not full copy, audit dual-write, flag status PENDING, RBAC on who sees actionable cards.
+**Tests:** `escalation.test.ts` — full placement matrix (6 rows), card content is excerpt+link not full copy, audit dual-write, flag status PENDING, RBAC on who sees actionable cards.
 
-**Done / Gotchas:** _…_
+**Done / Gotchas (Phase 3 — completed):**
+- **Decisions locked with user (2026-06-02):** (1) `WP → Division` IS a valid escalation (6th matrix row) — WP-assignees escalate to their division's managers. (2) Header bell / `GET /api/escalations` = **actionable-by-the-viewer** (Director/Admin all; Manager own-div WP/Div + all Org; GL/Staff empty) — everyone still SEES cards via feed transparency. (3) Task with no WP: `Task→WP` → 400; `Task→Division/Org` place the rest and **skip just the WP info-card**. (4) FlagButton ships in P3, **including on the task feed**.
+- **One-helper matrix.** `services/escalationService.ts` → `placeEscalationCards(client, {flag, sourcePost, origin, flaggedByName})` encodes the whole matrix as the hierarchy rule (`SCOPE_LEVEL TASK<WP<DIVISION<ORG`; ESCALATION_CARD at target, INFO_CARD at each strictly-between level). Adding `WP→Division` was free — it has no intermediate level. `resolveEscalationOrigin()` resolves the polymorphic source feed (soft-delete aware) into `{taskId,wpId,divisionId}`. `buildExcerpt()` truncates to `EXCERPT_MAX=160` + `…` — cards store only the excerpt + denormalised `sourceTaskId/sourceWpId/flagId`, **never** the full text. Built on the existing `createFeedPost` (no re-implemented inserts).
+- **Controller `escalation.controller.ts`** (own Pool/PrismaClient, like the other controllers):
+  - `flagPost` → `POST /api/feeds/posts/:id/flag` `{targetScope}`. Any auth user. Validates COMMENT-only, ORG-can't-escalate, target>origin, target entity resolvable, `Task→WP` requires a WP. In a `$transaction`: create `EscalationFlag(PENDING)` → `placeEscalationCards` → dual-write (Rule 3) `AuditLog('ESCALATION_RAISED', entityType:'EscalationFlag')` + a SYSTEM_EVENT on the **source** feed (the system event carries `flagId`).
+  - `getEscalations` → `GET /api/escalations?status=PENDING`. GL/Staff short-circuit to `[]`. Manager scoping resolves each flag's division via its ESCALATION_CARD (`card.scopeId` is the divisionId for DIVISION targets; for WP targets it batch-loads `WorkPackage.divisionId`). Returns flags enriched with excerpt/deep-link/flagger/card.
+- **Express 5 routing.** `POST /posts/:id/flag` registered in `feed.routes.ts` **before** the generic `/:scope*` routes. Verified no collision: `/posts/5/flag` (3 segs, last `flag`) never matches `/:scope/:scopeId/posts` (last seg must be literal `posts`) nor `/:scope/posts` (2 segs). New `escalation.routes.ts` → `/api/escalations` in `index.ts`.
+- **Frontend.** Real renderers `components/feed/EscalationCard.tsx` (actionable **shell** — header/excerpt/deep-link/PENDING badge; action buttons are P4) + `InfoCard.tsx` (display-only). `FeedPostItem.tsx` now branches to them and shows a `FlagButton` on COMMENTs. `FlagButton.tsx` = icon + target-picker (no interactive-div overlay → no a11y lint). `FeedPanel` computes targets from its scope (WP→[Div,Org], Division→[Org], Org→[]) and reloads after a flag. `TaskActivityFeed` adds the FlagButton to task comments with targets `task.wpId ? [WP,Div,Org] : [Div,Org]`. `Header.tsx` bell shows a real polled count via `getPendingEscalations()` (`getX().then(setState)`+`cancelled`+60s `setInterval` — zero new react-hooks lint). New `api/escalationApi.ts` (`flagPost`, `getPendingEscalations`). Types: `EscalationTargetScope`, `PendingEscalation`.
+- **Tests: 25 added → 236/236 backend pass.** Matrix (6 rows + no-WP skip), excerpt≤161 & ≠ full & headline doesn't embed source, audit dual-write (AuditLog + source-feed SYSTEM_EVENT), PENDING status, anyone-can-flag, validation (401/404/400 incl. ORG-source, non-COMMENT, downward target, no-WP), and `GET /api/escalations` RBAC (Director all / Manager own-div+Org / GL+Staff empty).
+- ⚠️ **Test-DB gotchas for fresh sessions (cost me time — heed these):** (a) The generated Prisma client can be **stale** — `npx prisma generate` is mandatory even if `node_modules/.prisma` exists (else `prisma.feedPost` is `undefined`). (b) Suites seed with `create` (not upsert) and **assume an empty DB at process start** + each self-cleans in `afterAll`; there is **no global wipe**. Between local runs the DB must be reset. **Do NOT use `prisma db push --force-reset`** (Prisma's AI guardrail blocks it without consent, and on an empty DB the `prisma.config.ts` seed auto-runs and then collides with suite fixtures). Reset with a plain `TRUNCATE … RESTART IDENTITY CASCADE` of all tables except `_prisma_migrations`, then a single `npm run test`. (c) `escalation.test.ts` needed its own `afterAll` (mirroring `feed.test`) deleting its Template/Task/WP/users in FK-safe order — without it, `user.test`'s global `prisma.user.deleteMany()` hits the `Template_ownerId` RESTRICT FK and that suite fails depending on run order.
+- ➡️ **For Phase 4:** `EscalationCard` is a shell — add role-gated action buttons there (acknowledge/dismiss/raise-finding/create-task/reassign/disseminate) calling `POST /api/escalations/:id/action`. `getEscalations` already supports a `status` filter and returns `linked`-ready flag rows. Header bell currently shows the count only (no dedicated escalations page yet) — a filtered list view is a P4/P5 add. Disseminate must reuse the same flag (no second flag).
 
 ---
 
