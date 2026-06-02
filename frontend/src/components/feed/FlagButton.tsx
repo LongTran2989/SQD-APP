@@ -5,6 +5,7 @@ import { Flag } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { EscalationTargetScope } from '../../types';
 import { flagPost } from '../../api/escalationApi';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 const TARGET_LABEL: Record<EscalationTargetScope, string> = {
   WP: 'Work Package',
@@ -37,9 +38,7 @@ export default function FlagButton({ postId, targets, onFlagged }: FlagButtonPro
       setOpen(false);
       onFlagged?.();
     } catch (err) {
-      const message =
-        (err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to escalate';
-      toast.error(message);
+      toast.error(getApiErrorMessage(err, 'Failed to escalate'));
     } finally {
       setBusy(false);
     }

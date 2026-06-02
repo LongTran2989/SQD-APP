@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { MessageCircle, Send } from 'lucide-react';
 import { FeedPostEnriched, FeedScope, EscalationTargetScope, User } from '../../types';
 import { getFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
+import { getApiErrorMessage } from '../../utils/apiError';
 import FeedPostItem from './FeedPostItem';
 
 function getInitials(name: string): string {
@@ -80,9 +81,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
       setPosts((prev) => [...prev, created]);
       setComment('');
     } catch (err) {
-      const message =
-        (err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to post comment';
-      toast.error(message);
+      toast.error(getApiErrorMessage(err, 'Failed to post comment'));
     } finally {
       setPosting(false);
     }

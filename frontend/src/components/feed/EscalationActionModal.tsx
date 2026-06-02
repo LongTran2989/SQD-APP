@@ -7,23 +7,13 @@ import { Template } from '../../types';
 import { actionEscalation } from '../../api/escalationApi';
 import { getDivisions, getUsers, getDatasource } from '../../api/taskApi';
 import { apiClient } from '../../api/client';
+import { getApiErrorMessage } from '../../utils/apiError';
+import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
 
 type Option = { value: string; label: string };
 
 // Modal-driven actions (Acknowledge / Dismiss are one-click, handled on the card).
 export type ModalAction = 'RAISE_FINDING' | 'CREATE_TASK' | 'REASSIGN_TASK' | 'DISSEMINATE';
-
-// Mirrors RaiseFindingPanel's hardcoded list (replaced by an admin table in Phase 7).
-const EVENT_TYPES = [
-  'Audit Finding',
-  'Inspection Defect',
-  'Process Deviation',
-  'Documentation Error',
-  'Safety Concern',
-  'Regulatory Non-compliance',
-  'Maintenance Error',
-  'Other',
-];
 
 const TITLES: Record<ModalAction, string> = {
   RAISE_FINDING: 'Raise Finding from escalation',
@@ -128,8 +118,7 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
       toast.success('Escalation actioned');
       onDone();
     } catch (err) {
-      const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Action failed';
-      toast.error(message);
+      toast.error(getApiErrorMessage(err, 'Action failed'));
     } finally {
       setSubmitting(false);
     }
@@ -186,7 +175,7 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
               <label className="block text-xs font-medium text-slate-600 mb-1">Event type</label>
               <select className={inputCls} value={eventType} onChange={(e) => setEventType(e.target.value)}>
                 <option value="">Select an event type…</option>
-                {EVENT_TYPES.map((t) => (
+                {FINDING_EVENT_TYPES.map((t) => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>

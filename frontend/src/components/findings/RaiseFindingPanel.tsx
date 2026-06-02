@@ -5,25 +5,13 @@ import { raiseFinding } from '../../api/findingApi';
 import { getDatasource } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import { X, AlertTriangle } from 'lucide-react';
+import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
 
 interface Props {
   taskId: number;
   onClose: () => void;
   onRaised: () => void;
 }
-
-// Standard aviation event types — admin-configurable in Phase 7
-const EVENT_TYPES = [
-  'Procedural Breach',
-  'Equipment Fault',
-  'Documentation Error',
-  'Maintenance Error',
-  'Safety Observation',
-  'Regulatory Non-compliance',
-  'Training Gap',
-  'Communication Failure',
-  'Other',
-];
 
 export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) {
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
@@ -94,7 +82,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Select event type…</option>
-              {EVENT_TYPES.map((t) => (
+              {FINDING_EVENT_TYPES.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>

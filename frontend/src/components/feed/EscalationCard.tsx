@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { AlertTriangle, ArrowUpRight } from 'lucide-react';
 import { FeedPostEnriched, EscalationFlagStatus } from '../../types';
 import { actionEscalation } from '../../api/escalationApi';
+import { getApiErrorMessage } from '../../utils/apiError';
 import EscalationActionModal, { ModalAction } from './EscalationActionModal';
 
 function formatTimestamp(iso: string): string {
@@ -59,8 +60,7 @@ export default function EscalationCard({ post, onActioned }: EscalationCardProps
       toast.success(action === 'ACKNOWLEDGE' ? 'Escalation acknowledged' : 'Escalation dismissed');
       onActioned?.();
     } catch (err) {
-      const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Action failed';
-      toast.error(message);
+      toast.error(getApiErrorMessage(err, 'Action failed'));
     } finally {
       setBusy(false);
     }

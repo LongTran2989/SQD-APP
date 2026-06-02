@@ -43,7 +43,8 @@ export async function resolveFlagDivision(
   flag: { targetScope: string; cards: { scope: string; scopeId: number | null }[] }
 ): Promise<number | null> {
   if (flag.targetScope === 'ORG') return null;
-  const card = flag.cards.find((c) => c.scope === flag.targetScope) ?? flag.cards[0];
+  // Callers pass the flag's single ESCALATION_CARD (one per flag, at the target).
+  const card = flag.cards[0];
   if (!card || card.scopeId == null) return null;
   if (flag.targetScope === 'DIVISION') return card.scopeId;
   if (flag.targetScope === 'WP') {
