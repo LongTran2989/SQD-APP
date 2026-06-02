@@ -76,6 +76,24 @@ async function enrichAuthors<T extends { authorId: number | null }>(posts: T[]) 
   }));
 }
 
+/**
+ * Attaches the LIVE EscalationFlag status to ESCALATION_CARD / INFO_CARD posts
+ * (which carry a flagId). Without this a card keeps showing its original
+ * "Pending" badge after the flag is actioned (pending issue #20). Cards reference
+ * the flag by id, so we batch-load statuses and map them on.
+ */
+async function enrichFlagStatus<T extends { flagId: number | null }>(posts: T[]) {
+  const flagIds = [...new Set(posts.map((p) => p.flagId).filter((id): id is number => typeof id === 'number'))];
+  const flags = flagIds.length > 0
+    ? await prisma.escalationFlag.findMany({ where: { id: { in: flagIds } }, select: { id: true, status: true } })
+    : [];
+  const statusMap = new Map(flags.map((f) => [f.id, f.status]));
+  return posts.map((p) => ({
+    ...p,
+    flagStatus: p.flagId != null ? statusMap.get(p.flagId) ?? null : null,
+  }));
+}
+
 // ─── GET /api/feeds/:scope/:scopeId? ──────────────────────────────────────────
 // Returns every post on a feed, oldest-first. All authenticated users may read
 // any feed (transparency default).
@@ -93,7 +111,7 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       orderBy: { createdAt: 'asc' },
     });
 
-    res.json(await enrichAuthors(posts));
+    res.json(await enrichFlagStatus(await enrichAuthors(posts)));
   } catch (error) {
     console.error('Error fetching feed:', error);
     res.status(500).json({ message: 'Internal server error' });

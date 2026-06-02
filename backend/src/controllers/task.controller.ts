@@ -4,10 +4,13 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
 import { createFeedPost } from '../services/feedService';
+import { HttpError, isHttpError } from '../utils/httpError';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+
+type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -52,10 +55,11 @@ async function logTaskActivity(
   type: 'SYSTEM_EVENT' | 'COMMENT',
   content: string,
   metadata?: Record<string, unknown>,
-  authorId?: number
+  authorId?: number,
+  client: PrismaLike = prisma
 ): Promise<void> {
   try {
-    await createFeedPost(prisma, {
+    await createFeedPost(client, {
       type,
       scope: 'TASK',
       scopeId: taskId,
@@ -82,9 +86,10 @@ async function logAuditAndActivity(
   performedByUserId: number,
   activityContent: string,
   activityMetadata?: Record<string, unknown>,
-  auditComment?: string
+  auditComment?: string,
+  client: PrismaLike = prisma
 ): Promise<void> {
-  await prisma.auditLog.create({
+  await client.auditLog.create({
     data: {
       actionType,
       entityType: 'Task',
@@ -95,7 +100,7 @@ async function logAuditAndActivity(
     }
   });
 
-  await logTaskActivity(taskId, 'SYSTEM_EVENT', activityContent, activityMetadata);
+  await logTaskActivity(taskId, 'SYSTEM_EVENT', activityContent, activityMetadata, undefined, client);
 }
 
 /**
@@ -300,170 +305,169 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
 
 // ─── POST /api/tasks ──────────────────────────────────────────────────────────
 
+export interface CreateTaskParams {
+  templateId: number;
+  targetDivisionId: number;
+  wpId?: number | null;
+  assignedToUserId?: number | null;
+  deadline?: string | Date | null;
+  estimatedHours?: number | null;
+}
+
+/**
+ * Core "create a task" logic, callable from the HTTP handler OR another flow
+ * (e.g. the escalation CREATE_TASK action) that wants to reuse this validation
+ * verbatim. Every write runs on the supplied `client`; pass a transaction client
+ * (the taskId generation needs a `FOR UPDATE` row lock, so the caller MUST wrap
+ * this in a $transaction). Throws HttpError on validation failure.
+ */
+export async function createTaskService(
+  client: PrismaLike,
+  actor: { userId: number; role: string; divisionId: number },
+  params: CreateTaskParams
+) {
+  const { userId, role, divisionId } = actor;
+  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours } = params;
+
+  // RBAC: Manager, Director, Admin can create tasks.
+  // Regular users assigned to a WP can create tasks inside that WP for their own division.
+  let isAllowed = TASK_CREATOR_ROLES.includes(role);
+  if (!isAllowed && wpId) {
+    const wpAssignment = await client.workPackageAssignment.findFirst({ where: { wpId, userId } });
+    if (wpAssignment && targetDivisionId === divisionId) {
+      isAllowed = true;
+    }
+  }
+  if (!isAllowed) throw new HttpError(403, 'Insufficient permissions to create tasks');
+
+  if (!templateId || !targetDivisionId) {
+    throw new HttpError(400, 'templateId and targetDivisionId are required');
+  }
+
+  // Validate template — must exist, Published, not soft-deleted
+  const template = await client.template.findUnique({
+    where: { id: templateId },
+    select: {
+      id: true,
+      templateId: true,
+      status: true,
+      formSchema: true,
+      requiresApproval: true,
+      estimatedHours: true,
+      isOneOff: true,
+      division: { select: { id: true, code: true } }
+    }
+  });
+  if (!template) throw new HttpError(404, 'Template not found');
+  if (template.status !== 'Published') {
+    throw new HttpError(400, 'Tasks can only be created from Published templates');
+  }
+
+  // Validate assignedToUserId if provided
+  if (assignedToUserId) {
+    const assignee = await client.user.findUnique({
+      where: { id: assignedToUserId, deletedAt: null },
+      select: { id: true, divisionId: true }
+    });
+    if (!assignee) throw new HttpError(404, 'Assignee user not found');
+    // Director can assign anyone; Manager can only assign users in same division
+    if (role === 'Manager' && assignee.divisionId !== divisionId) {
+      throw new HttpError(403, 'Managers can only assign tasks to users in their own division');
+    }
+  }
+
+  // Validate wpId if provided
+  if (wpId) {
+    const wp = await client.workPackage.findUnique({
+      where: { id: wpId, deletedAt: null },
+      select: { id: true, status: true }
+    });
+    if (!wp) throw new HttpError(404, 'Work Package not found');
+    if (wp.status === 'Closed') throw new HttpError(400, 'Cannot link a task to a Closed Work Package');
+  }
+
+  // Get target division code for taskId generation
+  const targetDiv = await client.division.findUnique({
+    where: { id: targetDivisionId },
+    select: { id: true, code: true }
+  });
+  if (!targetDiv) throw new HttpError(400, 'Target division not found');
+
+  const initialStatus = assignedToUserId ? 'Assigned' : 'Unassigned';
+
+  // Lock division row to prevent concurrent taskId collisions (requires a tx).
+  await client.$queryRaw`SELECT id FROM "Division" WHERE id = ${targetDivisionId} FOR UPDATE`;
+  const newTaskId = await generateTaskId(targetDiv.code, client as Prisma.TransactionClient);
+
+  const task = await client.task.create({
+    data: {
+      taskId: newTaskId,
+      templateId,
+      issuerId: userId,
+      assignedToUserId: assignedToUserId ?? null,
+      wpId: wpId ?? null,
+      targetDivisionId,
+      status: initialStatus,
+      schemaSnapshot: template.formSchema as any,
+      deadline: deadline ? new Date(deadline) : null,
+      estimatedHours: estimatedHours ?? template.estimatedHours ?? null,
+      assignmentType: 'INDIVIDUAL'
+    },
+    include: taskInclude()
+  });
+
+  // Handle isOneOff — archive template if task is being assigned at creation time
+  if (template.isOneOff && assignedToUserId) {
+    await client.template.update({ where: { id: templateId }, data: { status: 'Archived' } });
+  }
+
+  // Dual-write (Rule 3) — runs on the same client/tx so it is atomic with the create.
+  const activityContent = assignedToUserId
+    ? `Task created and assigned to ${(task as any).assignedToUser?.name ?? 'user'}`
+    : 'Task created (unassigned)';
+
+  await logAuditAndActivity(
+    task.id,
+    String(task.id),
+    'TASK_CREATED',
+    userId,
+    activityContent,
+    { taskId: task.taskId, templateId, status: initialStatus },
+    undefined,
+    client
+  );
+
+  if (assignedToUserId) {
+    await logAuditAndActivity(
+      task.id,
+      String(task.id),
+      'TASK_ASSIGNED',
+      userId,
+      `Task assigned to ${(task as any).assignedToUser?.name ?? 'user'}`,
+      { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId },
+      undefined,
+      client
+    );
+  }
+
+  return task;
+}
+
 export const createTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId, role, divisionId } = req.user!;
     const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours } = req.body;
 
-    // RBAC: Manager, Director, Admin can create tasks.
-    // Regular users assigned to a WP can create tasks inside that WP for their own division.
-    let isAllowed = TASK_CREATOR_ROLES.includes(role);
-    if (!isAllowed && wpId) {
-      const wpAssignment = await prisma.workPackageAssignment.findFirst({
-        where: { wpId, userId }
-      });
-      if (wpAssignment && targetDivisionId === divisionId) {
-        isAllowed = true;
-      }
-    }
-
-    if (!isAllowed) {
-      res.status(403).json({ message: 'Insufficient permissions to create tasks' });
-      return;
-    }
-
-    if (!templateId || !targetDivisionId) {
-      res.status(400).json({ message: 'templateId and targetDivisionId are required' });
-      return;
-    }
-
-    // Validate template — must exist, Published, not soft-deleted
-    const template = await prisma.template.findUnique({
-      where: { id: templateId },
-      select: {
-        id: true,
-        templateId: true,
-        status: true,
-        formSchema: true,
-        requiresApproval: true,
-        estimatedHours: true,
-        isOneOff: true,
-        division: { select: { id: true, code: true } }
-      }
-    });
-
-    if (!template) {
-      res.status(404).json({ message: 'Template not found' });
-      return;
-    }
-
-    if (template.status !== 'Published') {
-      res.status(400).json({ message: 'Tasks can only be created from Published templates' });
-      return;
-    }
-
-    // Validate assignedToUserId if provided
-    if (assignedToUserId) {
-      const assignee = await prisma.user.findUnique({
-        where: { id: assignedToUserId, deletedAt: null },
-        select: { id: true, divisionId: true }
-      });
-
-      if (!assignee) {
-        res.status(404).json({ message: 'Assignee user not found' });
-        return;
-      }
-
-      // Director can assign anyone; Manager can only assign users in same division
-      if (role === 'Manager' && assignee.divisionId !== divisionId) {
-        res.status(403).json({ message: 'Managers can only assign tasks to users in their own division' });
-        return;
-      }
-    }
-
-    // Validate wpId if provided
-    if (wpId) {
-      const wp = await prisma.workPackage.findUnique({
-        where: { id: wpId, deletedAt: null },
-        select: { id: true, status: true }
-      });
-
-      if (!wp) {
-        res.status(404).json({ message: 'Work Package not found' });
-        return;
-      }
-
-      if (wp.status === 'Closed') {
-        res.status(400).json({ message: 'Cannot link a task to a Closed Work Package' });
-        return;
-      }
-    }
-
-    // Get target division code for taskId generation
-    const targetDiv = await prisma.division.findUnique({
-      where: { id: targetDivisionId },
-      select: { id: true, code: true }
-    });
-
-    if (!targetDiv) {
-      res.status(400).json({ message: 'Target division not found' });
-      return;
-    }
-
-    const initialStatus = assignedToUserId ? 'Assigned' : 'Unassigned';
-
-    // Create task in transaction (taskId generation requires lock)
-    const task = await prisma.$transaction(async (tx) => {
-      // Lock division row to prevent concurrent taskId collisions
-      await tx.$queryRaw`SELECT id FROM "Division" WHERE id = ${targetDivisionId} FOR UPDATE`;
-
-      const newTaskId = await generateTaskId(targetDiv.code, tx);
-
-      const created = await tx.task.create({
-        data: {
-          taskId: newTaskId,
-          templateId,
-          issuerId: userId,
-          assignedToUserId: assignedToUserId ?? null,
-          wpId: wpId ?? null,
-          targetDivisionId,
-          status: initialStatus,
-          schemaSnapshot: template.formSchema as any,
-          deadline: deadline ? new Date(deadline) : null,
-          estimatedHours: estimatedHours ?? template.estimatedHours ?? null,
-          assignmentType: 'INDIVIDUAL'
-        },
-        include: taskInclude()
-      });
-
-      // Handle isOneOff — archive template if task is being assigned at creation time
-      if (template.isOneOff && assignedToUserId) {
-        await tx.template.update({
-          where: { id: templateId },
-          data: { status: 'Archived' }
-        });
-      }
-
-      return created;
-    });
-
-    // Log audit + activity (outside transaction — non-fatal)
-    const activityContent = assignedToUserId
-      ? `Task created and assigned to ${(task as any).assignedToUser?.name ?? 'user'}`
-      : 'Task created (unassigned)';
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_CREATED',
-      userId,
-      activityContent,
-      { taskId: task.taskId, templateId, status: initialStatus }
+    const task = await prisma.$transaction((tx) =>
+      createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours })
     );
-
-    if (assignedToUserId) {
-      await logAuditAndActivity(
-        task.id,
-        String(task.id),
-        'TASK_ASSIGNED',
-        userId,
-        `Task assigned to ${(task as any).assignedToUser?.name ?? 'user'}`,
-        { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId }
-      );
-    }
 
     res.status(201).json({ ...task, isOverdue: computeIsOverdue(task) });
   } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
     console.error('Error creating task:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -960,90 +964,95 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
 
 // ─── PUT /api/tasks/:id/reassign ──────────────────────────────────────────────
 
+export interface ReassignTaskParams {
+  taskId: number;
+  newAssigneeId: number;
+  reason: string;
+}
+
+/**
+ * Core "reassign a task" logic, callable from the HTTP handler OR another flow
+ * (e.g. the escalation REASSIGN_TASK action). Reuses the same validation
+ * verbatim: required fields, final-state / Inactive block, reviewer RBAC,
+ * assignee existence. Every write runs on the supplied `client`. Throws HttpError.
+ */
+export async function reassignTaskService(
+  client: PrismaLike,
+  actor: { userId: number; role: string; divisionId: number },
+  params: ReassignTaskParams
+) {
+  const { userId, role, divisionId } = actor;
+  const { taskId: id, newAssigneeId, reason } = params;
+
+  if (!newAssigneeId) throw new HttpError(400, 'newAssigneeId is required');
+  if (!reason?.trim()) throw new HttpError(400, 'A reason is required when reassigning a task');
+
+  const task = await client.task.findUnique({
+    where: { id, deletedAt: null },
+    select: { id: true, issuerId: true, assignedToUserId: true, targetDivisionId: true, status: true }
+  });
+  if (!task) throw new HttpError(404, 'Task not found');
+
+  // Block reassignment on final states
+  if (FINAL_TASK_STATUSES.includes(task.status)) {
+    throw new HttpError(400, `Cannot reassign a task in a final state (${task.status}). Create a new task or raise a Finding instead.`);
+  }
+  if (task.status === 'Inactive') {
+    throw new HttpError(400, 'Cannot reassign an Inactive task. Reactivate it first.');
+  }
+
+  if (!isReviewer(userId, role, divisionId, task)) {
+    throw new HttpError(403, 'You do not have permission to reassign this task');
+  }
+
+  const newAssignee = await client.user.findUnique({
+    where: { id: newAssigneeId, deletedAt: null },
+    select: { id: true, name: true }
+  });
+  if (!newAssignee) throw new HttpError(404, 'New assignee not found');
+
+  const previousAssigneeId = task.assignedToUserId;
+
+  const updated = await client.task.update({
+    where: { id },
+    data: {
+      assignedToUserId: newAssigneeId,
+      status: 'Assigned'
+      // TaskData is preserved — not cleared
+    },
+    include: taskInclude()
+  });
+
+  await logAuditAndActivity(
+    task.id,
+    String(task.id),
+    'TASK_REASSIGNED',
+    userId,
+    `Task reassigned to ${newAssignee.name}. Reason: ${reason}. Status: ${task.status} → Assigned`,
+    { fromStatus: task.status, toStatus: 'Assigned', previousAssigneeId, newAssigneeId },
+    reason,
+    client
+  );
+
+  return updated;
+}
+
 export const reassignTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id as string);
     const { userId, role, divisionId } = req.user!;
     const { newAssigneeId, reason } = req.body;
 
-    if (!newAssigneeId) {
-      res.status(400).json({ message: 'newAssigneeId is required' });
-      return;
-    }
-
-    if (!reason?.trim()) {
-      res.status(400).json({ message: 'A reason is required when reassigning a task' });
-      return;
-    }
-
-    const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      select: {
-        id: true,
-        issuerId: true,
-        assignedToUserId: true,
-        targetDivisionId: true,
-        status: true
-      }
-    });
-
-    if (!task) {
-      res.status(404).json({ message: 'Task not found' });
-      return;
-    }
-
-    // Block reassignment on final states
-    if (FINAL_TASK_STATUSES.includes(task.status)) {
-      res.status(400).json({
-        message: `Cannot reassign a task in a final state (${task.status}). Create a new task or raise a Finding instead.`
-      });
-      return;
-    }
-
-    if (task.status === 'Inactive') {
-      res.status(400).json({ message: 'Cannot reassign an Inactive task. Reactivate it first.' });
-      return;
-    }
-
-    if (!isReviewer(userId, role, divisionId, task)) {
-      res.status(403).json({ message: 'You do not have permission to reassign this task' });
-      return;
-    }
-
-    const newAssignee = await prisma.user.findUnique({
-      where: { id: newAssigneeId, deletedAt: null },
-      select: { id: true, name: true }
-    });
-
-    if (!newAssignee) {
-      res.status(404).json({ message: 'New assignee not found' });
-      return;
-    }
-
-    const previousAssigneeId = task.assignedToUserId;
-
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        assignedToUserId: newAssigneeId,
-        status: 'Assigned'
-        // TaskData is preserved — not cleared
-      },
-      include: taskInclude()
-    });
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_REASSIGNED',
-      userId,
-      `Task reassigned to ${newAssignee.name}. Reason: ${reason}. Status: ${task.status} → Assigned`,
-      { fromStatus: task.status, toStatus: 'Assigned', previousAssigneeId, newAssigneeId },
-      reason
+    const updated = await prisma.$transaction((tx) =>
+      reassignTaskService(tx, { userId, role, divisionId }, { taskId: id, newAssigneeId, reason })
     );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
   } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
     console.error('Error reassigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
   }

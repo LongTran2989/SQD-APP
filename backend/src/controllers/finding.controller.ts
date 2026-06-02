@@ -3,10 +3,13 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
+import { HttpError, isHttpError } from '../utils/httpError';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+
+type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -123,75 +126,95 @@ async function getUserName(userId: number): Promise<string> {
 
 // ─── POST /api/findings ─────────────────────────────────────────────────────
 
+export interface CreateFindingParams {
+  taskId: number;
+  eventType: string;
+  departmentId: number;
+  description: string;
+  fieldId?: string | null;
+  aircraftRegistration?: string | null;
+  regulatoryReference?: string | null;
+}
+
+/**
+ * Core "raise a finding" logic, callable from the HTTP handler OR another flow
+ * (e.g. the escalation RAISE_FINDING action) that wants to reuse this validation
+ * verbatim. Runs every write on the supplied `client` — pass a transaction
+ * client to keep it atomic with the caller's own writes. Throws HttpError on
+ * validation failure; the caller maps it to a response.
+ */
+export async function createFindingService(
+  client: PrismaLike,
+  actor: { userId: number },
+  params: CreateFindingParams
+) {
+  const { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description } = params;
+
+  if (!taskId || !eventType || !departmentId || !description) {
+    throw new HttpError(400, 'taskId, eventType, departmentId, and description are required');
+  }
+
+  // Source Task must exist and not be soft-deleted.
+  const task = await client.task.findUnique({
+    where: { id: taskId, deletedAt: null },
+    select: { id: true, targetDivisionId: true, template: { select: { allowsFindings: true } } }
+  });
+  if (!task) throw new HttpError(404, 'Source task not found');
+  if (!task.template?.allowsFindings) {
+    throw new HttpError(400, 'This task\'s template does not allow findings to be raised');
+  }
+
+  // Department must exist.
+  const department = await client.department.findUnique({ where: { id: departmentId }, select: { id: true } });
+  if (!department) throw new HttpError(400, 'Department not found');
+
+  const reporter = await client.user.findUnique({ where: { id: actor.userId }, select: { name: true } });
+  const reporterName = reporter?.name ?? `User ${actor.userId}`;
+
+  const created = await client.finding.create({
+    data: {
+      eventType,
+      description,
+      departmentId,
+      fieldId: fieldId ?? null,
+      aircraftRegistration: aircraftRegistration ?? null,
+      regulatoryReference: regulatoryReference ?? null,
+      status: 'Open',
+      sourceTaskId: task.id,
+      reportedByUserId: actor.userId,
+      // Inherit the source task's division for RBAC division-scoping.
+      targetDivisionId: task.targetDivisionId ?? null
+    }
+  });
+
+  await logFindingAuditAndActivity(
+    client,
+    created.id,
+    task.id,
+    'CREATED',
+    actor.userId,
+    `Finding #${created.id} raised by ${reporterName}`,
+    { findingId: created.id, eventType, sourceTaskId: task.id }
+  );
+
+  return created;
+}
+
 export const createFinding = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req.user!;
     const { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description } = req.body;
 
-    if (!taskId || !eventType || !departmentId || !description) {
-      res.status(400).json({ message: 'taskId, eventType, departmentId, and description are required' });
-      return;
-    }
-
-    // Source Task must exist and not be soft-deleted.
-    const task = await prisma.task.findUnique({
-      where: { id: taskId, deletedAt: null },
-      select: {
-        id: true,
-        targetDivisionId: true,
-        template: { select: { allowsFindings: true } }
-      }
-    });
-    if (!task) {
-      res.status(404).json({ message: 'Source task not found' });
-      return;
-    }
-    if (!task.template?.allowsFindings) {
-      res.status(400).json({ message: 'This task\'s template does not allow findings to be raised' });
-      return;
-    }
-
-    // Department must exist.
-    const department = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true } });
-    if (!department) {
-      res.status(400).json({ message: 'Department not found' });
-      return;
-    }
-
-    const reporterName = await getUserName(userId);
-
-    const finding = await prisma.$transaction(async (tx) => {
-      const created = await tx.finding.create({
-        data: {
-          eventType,
-          description,
-          departmentId,
-          fieldId: fieldId ?? null,
-          aircraftRegistration: aircraftRegistration ?? null,
-          regulatoryReference: regulatoryReference ?? null,
-          status: 'Open',
-          sourceTaskId: task.id,
-          reportedByUserId: userId,
-          // Inherit the source task's division for RBAC division-scoping.
-          targetDivisionId: task.targetDivisionId ?? null
-        }
-      });
-
-      await logFindingAuditAndActivity(
-        tx,
-        created.id,
-        task.id,
-        'CREATED',
-        userId,
-        `Finding #${created.id} raised by ${reporterName}`,
-        { findingId: created.id, eventType, sourceTaskId: task.id }
-      );
-
-      return created;
-    });
+    const finding = await prisma.$transaction((tx) =>
+      createFindingService(tx, { userId }, { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description })
+    );
 
     res.status(201).json(finding);
   } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
     console.error('Error creating finding:', error);
     res.status(500).json({ message: 'Internal server error' });
   }

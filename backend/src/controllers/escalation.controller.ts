@@ -8,8 +8,13 @@ import {
   isEscalationTargetScope,
   resolveEscalationOrigin,
   placeEscalationCards,
+  canActionFlag,
+  resolveFlagDivision,
   EscalationTargetScope,
 } from '../services/escalationService';
+import { createTaskService, reassignTaskService } from './task.controller';
+import { createFindingService } from './finding.controller';
+import { HttpError, isHttpError } from '../utils/httpError';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -165,7 +170,8 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
 
     let actionable = flags;
     if (!isDirectorOrAdmin) {
-      // Manager: resolve the target division of each WP-target flag to scope by division.
+      // Manager: batch-resolve the division of each WP-target flag, then gate via
+      // the shared canActionFlag predicate (one source of truth with the action endpoint).
       const wpTargetIds = flags
         .filter((f) => f.targetScope === 'WP')
         .map((f) => f.cards[0]?.scopeId)
@@ -176,12 +182,11 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
       const wpDiv = new Map(wps.map((w) => [w.id, w.divisionId]));
 
       actionable = flags.filter((f) => {
-        if (f.targetScope === 'ORG') return true; // any Manager may action Org flags
         const card = f.cards[0];
-        if (!card) return false;
-        if (f.targetScope === 'DIVISION') return card.scopeId === divisionId;
-        if (f.targetScope === 'WP') return wpDiv.get(card.scopeId as number) === divisionId;
-        return false;
+        let flagDiv: number | null = null;
+        if (f.targetScope === 'DIVISION') flagDiv = card?.scopeId ?? null;
+        else if (f.targetScope === 'WP') flagDiv = card ? wpDiv.get(card.scopeId as number) ?? null : null;
+        return canActionFlag({ role, divisionId }, { targetScope: f.targetScope, divisionId: flagDiv });
       });
     }
 
@@ -211,6 +216,204 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
     );
   } catch (error) {
     console.error('Error listing escalations:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── POST /api/escalations/:id/action ─────────────────────────────────────────
+// Action a PENDING flag (RBAC: Director/Admin any; Manager own-div WP/Division +
+// all Org). One flag tracks the whole lifecycle. Each action reuses the existing
+// workflow (createFinding / createTask / reassignTask) verbatim, runs in ONE
+// atomic transaction, dual-writes AuditLog + a SYSTEM_EVENT on the target feed,
+// and flips the flag out of PENDING (final-state flags are not re-actionable).
+
+const ESCALATION_ACTIONS = ['ACKNOWLEDGE', 'DISMISS', 'RAISE_FINDING', 'CREATE_TASK', 'REASSIGN_TASK', 'DISSEMINATE'] as const;
+
+function isEscalationAction(value: string): value is (typeof ESCALATION_ACTIONS)[number] {
+  return (ESCALATION_ACTIONS as readonly string[]).includes(value);
+}
+
+export const actionEscalation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role, divisionId } = req.user!;
+
+    const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const flagId = parseInt(idParam ?? '', 10);
+    if (Number.isNaN(flagId)) {
+      res.status(400).json({ message: 'A numeric escalation id is required.' });
+      return;
+    }
+
+    const action = (req.body?.action ?? '').toString().toUpperCase();
+    if (!isEscalationAction(action)) {
+      res.status(400).json({ message: `action must be one of: ${ESCALATION_ACTIONS.join(', ')}.` });
+      return;
+    }
+    const payload = req.body?.payload ?? {};
+
+    const flag = await prisma.escalationFlag.findUnique({
+      where: { id: flagId },
+      include: {
+        cards: {
+          where: { type: 'ESCALATION_CARD' },
+          select: { id: true, scope: true, scopeId: true, sourceExcerpt: true, sourceTaskId: true, sourceWpId: true },
+        },
+      },
+    });
+    if (!flag) {
+      res.status(404).json({ message: 'Escalation not found.' });
+      return;
+    }
+    // Final-state flags are not re-actionable.
+    if (flag.status !== 'PENDING') {
+      res.status(400).json({ message: `This escalation has already been ${flag.status.toLowerCase()}.` });
+      return;
+    }
+
+    // RBAC — shared predicate (one source of truth with getEscalations).
+    const flagDiv = await resolveFlagDivision(prisma, flag);
+    if (!canActionFlag({ role, divisionId }, { targetScope: flag.targetScope, divisionId: flagDiv })) {
+      res.status(403).json({ message: 'You do not have permission to action this escalation.' });
+      return;
+    }
+
+    const sourcePost = await prisma.feedPost.findUnique({ where: { id: flag.sourcePostId }, select: { scope: true, scopeId: true } });
+    const card = flag.cards[0] ?? null;
+    const targetScope = flag.targetScope as FeedScope; // the feed where the escalation card lives
+    const targetScopeId = card?.scopeId ?? null;
+    const actor = { userId, role, divisionId };
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const actorUser = await tx.user.findFirst({ where: { id: userId, deletedAt: null }, select: { name: true } });
+      const actorName = actorUser?.name ?? `User ${userId}`;
+
+      let linkedEntityType: string | null = null;
+      let linkedEntityId: string | null = null;
+      let newStatus: 'ACTIONED' | 'DISMISSED' = 'ACTIONED';
+      let systemEventText: string;
+
+      switch (action) {
+        case 'ACKNOWLEDGE':
+          systemEventText = `${actorName} acknowledged this escalation.`;
+          break;
+
+        case 'DISMISS':
+          newStatus = 'DISMISSED';
+          systemEventText = `${actorName} dismissed this escalation.`;
+          break;
+
+        case 'RAISE_FINDING': {
+          // Only when the source is a Task comment (the reused createFinding then
+          // enforces the template's allowsFindings rule).
+          if (!sourcePost || sourcePost.scope !== 'TASK' || card?.sourceTaskId == null) {
+            throw new HttpError(400, 'Raise Finding is only available for escalations whose source is a task comment.');
+          }
+          const finding = await createFindingService(tx, { userId }, {
+            taskId: card.sourceTaskId,
+            eventType: payload.eventType,
+            departmentId: payload.departmentId,
+            description: payload.description,
+            fieldId: payload.fieldId,
+            aircraftRegistration: payload.aircraftRegistration,
+            regulatoryReference: payload.regulatoryReference,
+          });
+          linkedEntityType = 'Finding';
+          linkedEntityId = String(finding.id);
+          systemEventText = `${actorName} raised Finding #${finding.id} from this escalation.`;
+          break;
+        }
+
+        case 'CREATE_TASK': {
+          const task = await createTaskService(tx, actor, {
+            templateId: payload.templateId,
+            targetDivisionId: payload.targetDivisionId,
+            wpId: payload.wpId,
+            assignedToUserId: payload.assignedToUserId,
+            deadline: payload.deadline,
+            estimatedHours: payload.estimatedHours,
+          });
+          linkedEntityType = 'Task';
+          linkedEntityId = String(task.id);
+          systemEventText = `${actorName} created Task ${task.taskId} from this escalation.`;
+          break;
+        }
+
+        case 'REASSIGN_TASK': {
+          if (card?.sourceTaskId == null) {
+            throw new HttpError(400, 'This escalation has no source task to reassign.');
+          }
+          await reassignTaskService(tx, actor, {
+            taskId: card.sourceTaskId,
+            newAssigneeId: payload.newAssigneeId,
+            reason: payload.reason,
+          });
+          linkedEntityType = 'Task';
+          linkedEntityId = String(card.sourceTaskId);
+          systemEventText = `${actorName} reassigned the source task from this escalation.`;
+          break;
+        }
+
+        case 'DISSEMINATE': {
+          // Reuse the SAME flag — post an ESCALATION_CARD to ORG; do NOT create a second flag.
+          const taggedDivisionIds = Array.isArray(payload.taggedDivisionIds)
+            ? (payload.taggedDivisionIds as unknown[]).filter((n): n is number => typeof n === 'number')
+            : null;
+          await createFeedPost(tx, {
+            type: 'ESCALATION_CARD',
+            scope: 'ORG',
+            scopeId: null,
+            content: `Disseminated org-wide by ${actorName}.`,
+            authorId: null,
+            sourcePostId: flag.sourcePostId,
+            sourceExcerpt: card?.sourceExcerpt ?? null,
+            sourceTaskId: card?.sourceTaskId ?? null,
+            sourceWpId: card?.sourceWpId ?? null,
+            flagId: flag.id,
+            taggedDivisionIds,
+          });
+          systemEventText = `${actorName} disseminated this escalation to the Org Feed.`;
+          break;
+        }
+
+        default:
+          throw new HttpError(400, 'Unknown action.');
+      }
+
+      const flagRow = await tx.escalationFlag.update({
+        where: { id: flag.id },
+        data: { status: newStatus, action, reviewedByUserId: userId, actionedAt: new Date(), linkedEntityType, linkedEntityId },
+      });
+
+      // Dual-write (Rule 3): AuditLog (compliance) + SYSTEM_EVENT on the target feed.
+      await tx.auditLog.create({
+        data: {
+          actionType: 'ESCALATION_ACTIONED',
+          entityType: 'EscalationFlag',
+          entityId: String(flag.id),
+          performedByUserId: userId,
+          details: { action, status: newStatus, linkedEntityType, linkedEntityId } as any,
+        },
+      });
+
+      await createFeedPost(tx, {
+        type: 'SYSTEM_EVENT',
+        scope: targetScope,
+        scopeId: targetScopeId,
+        content: systemEventText,
+        authorId: null,
+        flagId: flag.id,
+      });
+
+      return flagRow;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
+    console.error('Error actioning escalation:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

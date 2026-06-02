@@ -223,11 +223,60 @@ export interface FeedPost {
 
 export interface FeedPostEnriched extends FeedPost {
   author: { id: number; name: string | null } | null;
+  // Live status of the linked EscalationFlag (cards only) — keeps the card badge
+  // honest after the flag is actioned (Phase 4). Null for non-card posts.
+  flagStatus?: EscalationFlagStatus | null;
 }
 
 // ── Escalation (Phase 3) ─────────────────────────────────────────────────────
 // A flag may target a scope strictly above the comment's own (TASK is the floor).
 export type EscalationTargetScope = 'WP' | 'DIVISION' | 'ORG';
+
+// ── Escalation flag lifecycle (Phase 4) ──────────────────────────────────────
+export type EscalationFlagStatus = 'PENDING' | 'ACTIONED' | 'DISMISSED';
+
+export type EscalationAction =
+  | 'ACKNOWLEDGE'
+  | 'DISMISS'
+  | 'RAISE_FINDING'
+  | 'CREATE_TASK'
+  | 'REASSIGN_TASK'
+  | 'DISSEMINATE';
+
+// Per-action payloads sent to POST /api/escalations/:id/action.
+export interface CreateTaskActionPayload {
+  templateId: number;
+  targetDivisionId: number;
+  wpId?: number | null;
+  assignedToUserId?: number | null;
+  deadline?: string | null;
+  estimatedHours?: number | null;
+}
+
+export interface RaiseFindingActionPayload {
+  eventType: string;
+  departmentId: number;
+  description: string;
+  fieldId?: string | null;
+  aircraftRegistration?: string | null;
+  regulatoryReference?: string | null;
+}
+
+export interface ReassignTaskActionPayload {
+  newAssigneeId: number;
+  reason: string;
+}
+
+export interface DisseminateActionPayload {
+  taggedDivisionIds?: number[];
+}
+
+export type EscalationActionPayload =
+  | CreateTaskActionPayload
+  | RaiseFindingActionPayload
+  | ReassignTaskActionPayload
+  | DisseminateActionPayload
+  | Record<string, never>;
 
 // One row of the viewer's actionable escalation queue (GET /api/escalations).
 export interface PendingEscalation {

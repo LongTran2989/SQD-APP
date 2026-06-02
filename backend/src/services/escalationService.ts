@@ -30,6 +30,43 @@ export function buildExcerpt(content: string): string {
   return trimmed.slice(0, EXCERPT_MAX).trimEnd() + '…';
 }
 
+// ─── Actionable-flag RBAC (one source of truth) ──────────────────────────────
+// Shared by GET /api/escalations (the bell queue) and POST /escalations/:id/action.
+// Director/Admin → any flag; Manager → all ORG flags + own-division WP/DIVISION
+// flags; Group Leader / Staff → none (they still SEE cards via feed transparency).
+
+// A flag's actionability depends on its division, which is denormalised on its
+// ESCALATION_CARD: for a DIVISION target the card's scopeId IS the division; for
+// a WP target the division is the WorkPackage's. Resolves to null for ORG.
+export async function resolveFlagDivision(
+  client: PrismaLike,
+  flag: { targetScope: string; cards: { scope: string; scopeId: number | null }[] }
+): Promise<number | null> {
+  if (flag.targetScope === 'ORG') return null;
+  const card = flag.cards.find((c) => c.scope === flag.targetScope) ?? flag.cards[0];
+  if (!card || card.scopeId == null) return null;
+  if (flag.targetScope === 'DIVISION') return card.scopeId;
+  if (flag.targetScope === 'WP') {
+    const wp = await client.workPackage.findUnique({
+      where: { id: card.scopeId, deletedAt: null },
+      select: { divisionId: true },
+    });
+    return wp?.divisionId ?? null;
+  }
+  return null;
+}
+
+// Pure predicate: can this user action a flag, given the flag's resolved division?
+export function canActionFlag(
+  user: { role: string; divisionId: number },
+  flag: { targetScope: string; divisionId: number | null }
+): boolean {
+  if (user.role === 'Director' || user.role === 'Admin') return true; // Admin = Director-equivalent
+  if (user.role !== 'Manager') return false;
+  if (flag.targetScope === 'ORG') return true; // any Manager may action Org flags
+  return flag.divisionId != null && flag.divisionId === user.divisionId;
+}
+
 // Resolved placement context for a flagged comment's origin feed.
 export interface EscalationOrigin {
   originScope: FeedScope;    // TASK | WP | DIVISION (ORG can't escalate)

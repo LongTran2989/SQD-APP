@@ -22,6 +22,15 @@ describe('Escalation core (Phase 3)', () => {
   let divAId: number;
   let divBId: number;
 
+  // Phase 4 action fixtures.
+  let directorUserId: number;
+  let managerAUserId: number;
+  let escDeptId: number;
+  let templateAId: number; // Published template in divA (for CREATE_TASK)
+  let findingTemplateId: number; // Published template with allowsFindings:true
+  let taskFindingWpId: number; // task on the finding-eligible template, in divA/wpA
+  let taskNoFindingWpId: number; // task whose template disallows findings (in divA/wpA)
+
   let taskWithWpId: number; // task in divA, inside wpA
   let taskNoWpId: number; // task in divA, NOT in any WP
   let wpAId: number; // WP in divA
@@ -57,6 +66,9 @@ describe('Escalation core (Phase 3)', () => {
     const gl = await mk('Esc GL', 'esc_gl@sqd.com', glRole.id, divAId);
     const staff = await mk('Esc Staff', 'esc_staff@sqd.com', staffRole.id, divAId);
     staffUserId = staff.id;
+    directorUserId = director.id;
+    managerAUserId = managerA.id;
+    escDeptId = dept.id;
 
     directorToken = jwt.sign({ userId: director.id, role: 'Director', divisionId: divAId }, secret);
     managerAToken = jwt.sign({ userId: managerA.id, role: 'Manager', divisionId: divAId }, secret);
@@ -66,6 +78,18 @@ describe('Escalation core (Phase 3)', () => {
 
     const template = await prisma.template.create({
       data: { templateId: 'ESC-001', title: 'Esc Template', status: 'Published', formSchema: { fields: [] }, divisionId: divAId, ownerId: director.id },
+    });
+    templateAId = template.id;
+
+    // Finding-eligible template (allowsFindings) for the RAISE_FINDING action.
+    const findingTemplate = await prisma.template.create({
+      data: { templateId: 'ESC-002', title: 'Esc Finding Template', status: 'Published', formSchema: { fields: [] }, divisionId: divAId, ownerId: director.id, allowsFindings: true },
+    });
+    findingTemplateId = findingTemplate.id;
+
+    // Template that explicitly disallows findings (allowsFindings defaults to true).
+    const noFindingTemplate = await prisma.template.create({
+      data: { templateId: 'ESC-003', title: 'Esc No-Finding Template', status: 'Published', formSchema: { fields: [] }, divisionId: divAId, ownerId: director.id, allowsFindings: false },
     });
 
     const wpA = await prisma.workPackage.create({
@@ -87,6 +111,18 @@ describe('Escalation core (Phase 3)', () => {
       data: { taskId: 'ESCA-000002', templateId: template.id, issuerId: director.id, status: 'Assigned', targetDivisionId: divAId, assignedToUserId: staff.id, schemaSnapshot: { fields: [] } },
     });
     taskNoWpId = taskNoWp.id;
+
+    // Task on the finding-eligible template (divA, inside wpA) — used as the
+    // RAISE_FINDING / REASSIGN_TASK source.
+    const taskFinding = await prisma.task.create({
+      data: { taskId: 'ESCA-000003', templateId: findingTemplate.id, issuerId: director.id, status: 'Assigned', targetDivisionId: divAId, assignedToUserId: staff.id, wpId: wpAId, schemaSnapshot: { fields: [] } },
+    });
+    taskFindingWpId = taskFinding.id;
+
+    const taskNoFinding = await prisma.task.create({
+      data: { taskId: 'ESCA-000004', templateId: noFindingTemplate.id, issuerId: director.id, status: 'Assigned', targetDivisionId: divAId, assignedToUserId: staff.id, wpId: wpAId, schemaSnapshot: { fields: [] } },
+    });
+    taskNoFindingWpId = taskNoFinding.id;
   });
 
   // Tear down this suite's own fixtures in FK-safe order so a global cleanup in
@@ -96,9 +132,11 @@ describe('Escalation core (Phase 3)', () => {
     await prisma.feedPost.deleteMany({});
     await prisma.escalationFlag.deleteMany({});
     await prisma.auditLog.deleteMany({});
+    // Findings raised by the Phase 4 RAISE_FINDING tests reference our tasks/dept.
+    await prisma.finding.deleteMany({ where: { departmentId: escDeptId } });
     await prisma.task.deleteMany({ where: { taskId: { startsWith: 'ESCA-' } } });
     await prisma.workPackage.deleteMany({ where: { wpId: { startsWith: 'ESC' } } });
-    await prisma.template.deleteMany({ where: { templateId: 'ESC-001' } });
+    await prisma.template.deleteMany({ where: { templateId: { startsWith: 'ESC-' } } });
     await prisma.user.deleteMany({ where: { email: { startsWith: 'esc_' } } });
     await prisma.$disconnect();
   });
@@ -359,6 +397,155 @@ describe('Escalation core (Phase 3)', () => {
       expect(wpFlag.sourceTaskId).toBe(taskWithWpId);
       expect(wpFlag.flaggedBy).toMatchObject({ name: expect.any(String) });
       expect(wpFlag.card).toMatchObject({ scope: 'WP', scopeId: wpAId });
+    });
+  });
+
+  // ─── POST /api/escalations/:id/action — flag lifecycle (Phase 4) ─────────────
+
+  describe('POST /api/escalations/:id/action (Phase 4)', () => {
+    const action = (flagId: number, body: Record<string, unknown>, token = directorToken) =>
+      request(app).post(`/api/escalations/${flagId}/action`).set('Authorization', `Bearer ${token}`).send(body);
+
+    // A fresh COMMENT on the finding-eligible task (template allowsFindings:true).
+    const findingComment = () =>
+      prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'TASK', scopeId: taskFindingWpId, content: 'Defect spotted', authorId: staffUserId } }).then((p) => p.id);
+
+    it('ACKNOWLEDGE → flag ACTIONED + reviewedByUserId + actionedAt', async () => {
+      const f = (await flag(taskComment, 'WP', staffToken)).body.flag.id;
+      const res = await action(f, { action: 'ACKNOWLEDGE' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ACTIONED');
+      expect(res.body.action).toBe('ACKNOWLEDGE');
+      expect(res.body.reviewedByUserId).toBe(directorUserId);
+      expect(res.body.actionedAt).toBeTruthy();
+      expect(res.body.linkedEntityType).toBeNull();
+    });
+
+    it('DISMISS → flag DISMISSED', async () => {
+      const f = (await flag(taskComment, 'WP', staffToken)).body.flag.id;
+      const res = await action(f, { action: 'DISMISS' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('DISMISSED');
+      expect(res.body.action).toBe('DISMISS');
+    });
+
+    it('RAISE_FINDING → creates a Finding, links it, flag ACTIONED', async () => {
+      const c = await findingComment();
+      const f = (await flag(c, 'DIVISION', staffToken)).body.flag.id;
+      const res = await action(f, { action: 'RAISE_FINDING', payload: { eventType: 'Inspection', departmentId: escDeptId, description: 'A defect requiring a finding' } });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ACTIONED');
+      expect(res.body.linkedEntityType).toBe('Finding');
+      const finding = await prisma.finding.findUnique({ where: { id: Number(res.body.linkedEntityId) } });
+      expect(finding).not.toBeNull();
+      expect(finding?.sourceTaskId).toBe(taskFindingWpId);
+    });
+
+    it('RAISE_FINDING → 400 when the source task template does not allow findings (flag stays PENDING)', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'TASK', scopeId: taskNoFindingWpId, content: 'No-findings concern', authorId: staffUserId } });
+      const f = (await flag(c.id, 'WP', staffToken)).body.flag.id; // task on ESC-003 (allowsFindings:false)
+      const res = await action(f, { action: 'RAISE_FINDING', payload: { eventType: 'X', departmentId: escDeptId, description: 'y' } });
+      expect(res.status).toBe(400);
+      const dbFlag = await prisma.escalationFlag.findUnique({ where: { id: f } });
+      expect(dbFlag?.status).toBe('PENDING'); // transaction rolled back
+    });
+
+    it('RAISE_FINDING → 400 when the source is not a task comment', async () => {
+      const f = (await flag(wpAComment, 'DIVISION', staffToken)).body.flag.id; // WP-origin escalation
+      const res = await action(f, { action: 'RAISE_FINDING', payload: { eventType: 'X', departmentId: escDeptId, description: 'y' } });
+      expect(res.status).toBe(400);
+    });
+
+    it('CREATE_TASK → creates a Task, links it, flag ACTIONED', async () => {
+      const f = (await flag(taskComment, 'DIVISION', staffToken)).body.flag.id;
+      const res = await action(f, { action: 'CREATE_TASK', payload: { templateId: templateAId, targetDivisionId: divAId } });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ACTIONED');
+      expect(res.body.linkedEntityType).toBe('Task');
+      const task = await prisma.task.findUnique({ where: { id: Number(res.body.linkedEntityId) } });
+      expect(task).not.toBeNull();
+      expect(task?.targetDivisionId).toBe(divAId);
+    });
+
+    it('REASSIGN_TASK → reassigns the source task, links the source task id, flag ACTIONED', async () => {
+      const c = await findingComment();
+      const f = (await flag(c, 'DIVISION', staffToken)).body.flag.id;
+      const res = await action(f, { action: 'REASSIGN_TASK', payload: { newAssigneeId: managerAUserId, reason: 'load balancing' } });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ACTIONED');
+      expect(res.body.linkedEntityType).toBe('Task');
+      expect(res.body.linkedEntityId).toBe(String(taskFindingWpId));
+      const task = await prisma.task.findUnique({ where: { id: taskFindingWpId } });
+      expect(task?.assignedToUserId).toBe(managerAUserId);
+    });
+
+    it('DISSEMINATE → posts an ORG escalation card reusing the SAME flag (no second flag), ACTIONED', async () => {
+      const f = (await flag(wpAComment, 'DIVISION', staffToken)).body.flag.id;
+      const before = await prisma.escalationFlag.count();
+      const res = await action(f, { action: 'DISSEMINATE', payload: { taggedDivisionIds: [divBId] } });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ACTIONED');
+      const after = await prisma.escalationFlag.count();
+      expect(after).toBe(before); // no second flag created
+      const orgCard = await prisma.feedPost.findFirst({ where: { type: 'ESCALATION_CARD', scope: 'ORG', flagId: f } });
+      expect(orgCard).not.toBeNull();
+      expect(orgCard?.taggedDivisionIds).toEqual([divBId]);
+    });
+
+    it('final-state flags are not re-actionable (400)', async () => {
+      const f = (await flag(taskComment, 'WP', staffToken)).body.flag.id;
+      expect((await action(f, { action: 'ACKNOWLEDGE' })).status).toBe(200);
+      const res = await action(f, { action: 'DISMISS' });
+      expect(res.status).toBe(400);
+    });
+
+    it('dual-writes AuditLog (ESCALATION_ACTIONED) AND a SYSTEM_EVENT on the target feed', async () => {
+      const f = (await flag(taskComment, 'WP', staffToken)).body.flag.id; // target = wpA
+      await action(f, { action: 'ACKNOWLEDGE' });
+      const audit = await prisma.auditLog.findFirst({ where: { actionType: 'ESCALATION_ACTIONED', entityType: 'EscalationFlag', entityId: String(f) } });
+      expect(audit).not.toBeNull();
+      const sys = await prisma.feedPost.findFirst({ where: { type: 'SYSTEM_EVENT', scope: 'WP', scopeId: wpAId, flagId: f } });
+      expect(sys).not.toBeNull();
+    });
+
+    describe('RBAC', () => {
+      it('Group Leader and Staff cannot action (403)', async () => {
+        const f = (await flag(taskComment, 'WP', staffToken)).body.flag.id;
+        expect((await action(f, { action: 'ACKNOWLEDGE' }, groupLeaderToken)).status).toBe(403);
+        expect((await action(f, { action: 'ACKNOWLEDGE' }, staffToken)).status).toBe(403);
+      });
+
+      it('a Manager of another division cannot action a divA flag (403)', async () => {
+        const f = (await flag(taskComment, 'DIVISION', staffToken)).body.flag.id; // divA target
+        expect((await action(f, { action: 'ACKNOWLEDGE' }, managerBToken)).status).toBe(403);
+      });
+
+      it("a Manager of the flag's division can action it (200)", async () => {
+        const f = (await flag(taskComment, 'DIVISION', staffToken)).body.flag.id; // divA target
+        expect((await action(f, { action: 'ACKNOWLEDGE' }, managerAToken)).status).toBe(200);
+      });
+
+      it('any Manager can action an Org flag (200)', async () => {
+        const f = (await flag(wpAComment, 'ORG', staffToken)).body.flag.id;
+        expect((await action(f, { action: 'ACKNOWLEDGE' }, managerBToken)).status).toBe(200);
+      });
+    });
+
+    describe('validation', () => {
+      it('returns 404 for an unknown flag', async () => {
+        expect((await action(99999999, { action: 'ACKNOWLEDGE' })).status).toBe(404);
+      });
+
+      it('rejects an unknown action (400)', async () => {
+        const f = (await flag(taskComment, 'WP', staffToken)).body.flag.id;
+        expect((await action(f, { action: 'FROBNICATE' })).status).toBe(400);
+      });
+
+      it('requires authentication (401)', async () => {
+        const f = (await flag(taskComment, 'WP', staffToken)).body.flag.id;
+        const res = await request(app).post(`/api/escalations/${f}/action`).send({ action: 'ACKNOWLEDGE' });
+        expect(res.status).toBe(401);
+      });
     });
   });
 });
