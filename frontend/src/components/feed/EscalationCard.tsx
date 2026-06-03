@@ -67,7 +67,6 @@ export default function EscalationCard({ post, onActioned }: EscalationCardProps
             flagId={post.flagId}
             sourceTaskId={post.sourceTaskId ?? null}
             sourceWpId={post.sourceWpId ?? null}
-            canRaiseFinding={post.sourceTaskId != null}
             onActioned={onActioned}
           />
         </div>

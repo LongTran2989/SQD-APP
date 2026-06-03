@@ -6,12 +6,7 @@ import toast from 'react-hot-toast';
 import { EscalationTargetScope } from '../../types';
 import { flagPost } from '../../api/escalationApi';
 import { getApiErrorMessage } from '../../utils/apiError';
-
-const TARGET_LABEL: Record<EscalationTargetScope, string> = {
-  WP: 'Work Package',
-  DIVISION: 'Division Board',
-  ORG: 'Org Feed',
-};
+import { TARGET_SCOPE_LABEL as TARGET_LABEL } from '../../utils/feedHelpers';
 
 interface FlagButtonProps {
   postId: number;

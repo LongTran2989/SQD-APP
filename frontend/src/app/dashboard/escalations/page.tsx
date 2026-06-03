@@ -5,25 +5,16 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Flag, ArrowUpRight } from 'lucide-react';
 import { useAuthStore } from '../../../store/authStore';
-import { PendingEscalation, EscalationTargetScope } from '../../../types';
+import { PendingEscalation } from '../../../types';
 import { getPendingEscalations } from '../../../api/escalationApi';
-import { formatTimestamp, sourceHref } from '../../../utils/feedHelpers';
+import { formatTimestamp, sourceHref, TARGET_SCOPE_LABEL } from '../../../utils/feedHelpers';
+import { ESCALATION_ACTION_ROLES } from '../../../constants/escalationRoles';
 import EscalationActions from '../../../components/feed/EscalationActions';
-
-// Only roles with an actionable queue may open this page (the list endpoint also
-// RBAC-filters server-side; this avoids showing GL/Staff an empty shell).
-const ESCALATION_ROLES = ['Director', 'Admin', 'Manager'];
-
-const TARGET_LABEL: Record<EscalationTargetScope, string> = {
-  WP: 'Work Package',
-  DIVISION: 'Division Board',
-  ORG: 'Org Feed',
-};
 
 export default function EscalationsPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const allowed = !!user && ESCALATION_ROLES.includes(user.role);
+  const allowed = !!user && ESCALATION_ACTION_ROLES.includes(user.role);
 
   const [escalations, setEscalations] = useState<PendingEscalation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,7 +73,7 @@ export default function EscalationsPage() {
                 <div className="flex items-center gap-2 mb-1.5">
                   <Flag className="w-4 h-4 text-amber-600 flex-shrink-0" />
                   <span className="text-xs font-bold uppercase tracking-wide text-amber-700">
-                    To {TARGET_LABEL[esc.targetScope]}
+                    To {TARGET_SCOPE_LABEL[esc.targetScope]}
                   </span>
                   <span className="ml-auto text-[10px] text-slate-400">{formatTimestamp(esc.createdAt)}</span>
                 </div>
@@ -108,7 +99,6 @@ export default function EscalationsPage() {
                     flagId={esc.id}
                     sourceTaskId={esc.sourceTaskId}
                     sourceWpId={esc.sourceWpId}
-                    canRaiseFinding={esc.sourceTaskId != null}
                     onActioned={reload}
                   />
                 </div>

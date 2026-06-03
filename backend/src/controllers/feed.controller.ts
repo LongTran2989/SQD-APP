@@ -94,7 +94,7 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
 
     const [authors, flags, wp] = await Promise.all([
       authorIds.length > 0
-        ? prisma.user.findMany({ where: { id: { in: authorIds } }, select: { id: true, name: true } })
+        ? prisma.user.findMany({ where: { id: { in: authorIds }, deletedAt: null }, select: { id: true, name: true } })
         : Promise.resolve([] as { id: number; name: string }[]),
       flagIds.length > 0
         ? prisma.escalationFlag.findMany({ where: { id: { in: flagIds } }, select: { id: true, status: true } })

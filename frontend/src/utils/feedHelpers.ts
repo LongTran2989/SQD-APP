@@ -1,8 +1,15 @@
-import { FeedPostEnriched } from '../types';
+import { FeedPostEnriched, EscalationTargetScope } from '../types';
 
 // Shared escalation/info-card presentation helpers. Centralised so the timestamp
-// format and the deep-link rule live in one place (were duplicated byte-for-byte
-// in EscalationCard + InfoCard, and now reused by the escalations list page too).
+// format, deep-link rule, and target-scope labels live in one place (were
+// duplicated across EscalationCard / InfoCard / FlagButton / the list page).
+
+/** Human-readable label for an escalation target scope. */
+export const TARGET_SCOPE_LABEL: Record<EscalationTargetScope, string> = {
+  WP: 'Work Package',
+  DIVISION: 'Division Board',
+  ORG: 'Org Feed',
+};
 
 /** Compact `dd Mon HH:MM` (en-GB) timestamp for feed cards. */
 export function formatTimestamp(iso: string): string {

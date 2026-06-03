@@ -10,17 +10,18 @@ interface EscalationActionsProps {
   flagId: number;
   sourceTaskId: number | null;
   sourceWpId: number | null;
-  // Raise Finding / Reassign only make sense when the escalation came from a task.
-  canRaiseFinding: boolean;
   onActioned?: () => void;
 }
 
 // The full lifecycle-action cluster for a PENDING flag (Acknowledge / Dismiss are
 // one-click; the rest open the card-local payload modal). Shared by EscalationCard
 // (on a feed) and the dedicated escalations page so the action logic lives once.
-export default function EscalationActions({ flagId, sourceTaskId, sourceWpId, canRaiseFinding, onActioned }: EscalationActionsProps) {
+export default function EscalationActions({ flagId, sourceTaskId, sourceWpId, onActioned }: EscalationActionsProps) {
   const [busy, setBusy] = useState(false);
   const [modalAction, setModalAction] = useState<ModalAction | null>(null);
+
+  // Raise Finding / Reassign only make sense when the escalation came from a task.
+  const canRaiseFinding = sourceTaskId != null;
 
   const runSimple = async (action: 'ACKNOWLEDGE' | 'DISMISS') => {
     setBusy(true);

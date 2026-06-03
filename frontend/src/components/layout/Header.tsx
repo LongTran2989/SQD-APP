@@ -5,26 +5,25 @@ import { useAuthStore } from '../../store/authStore';
 import { LogOut, Bell, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { getPendingEscalations, ESCALATIONS_CHANGED_EVENT } from '../../api/escalationApi';
-
-// Only these roles have an actionable escalation queue (#22) — others never poll
-// and see no bell badge. Mirrors the backend canActionFlag role gate.
-const ESCALATION_ROLES = ['Director', 'Admin', 'Manager'];
+import { ESCALATION_ACTION_ROLES } from '../../constants/escalationRoles';
 
 export default function Header() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const router = useRouter();
 
-  const canSeeEscalations = !!user && ESCALATION_ROLES.includes(user.role);
+  // Only actioner roles have a queue (#22) — others never poll and see no badge.
+  const canSeeEscalations = !!user && ESCALATION_ACTION_ROLES.includes(user.role);
 
   // Pending escalations the viewer can action (RBAC-scoped server-side). Polled
   // like the Sidebar findings badge — setState lives in the promise callback so
   // it never trips react-hooks/set-state-in-effect. Also refreshes instantly when
   // any flag/action fires (escalations:changed), not just on the 60s tick.
+  // Keyed on `user` (not the derived boolean) so a same-role user switch refetches.
   const [pendingEscalations, setPendingEscalations] = useState(0);
 
   useEffect(() => {
-    if (!canSeeEscalations) return;
+    if (!user || !ESCALATION_ACTION_ROLES.includes(user.role)) return;
     let cancelled = false;
     const load = () => {
       getPendingEscalations()
@@ -41,7 +40,7 @@ export default function Header() {
       clearInterval(intervalId);
       window.removeEventListener(ESCALATIONS_CHANGED_EVENT, load);
     };
-  }, [canSeeEscalations]);
+  }, [user]);
 
   const handleLogout = () => {
     logout();
@@ -72,7 +71,7 @@ export default function Header() {
           }
         >
           <Bell className="w-5 h-5" />
-          {pendingEscalations > 0 && (
+          {canSeeEscalations && pendingEscalations > 0 && (
             <span className="absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-white">
               {pendingEscalations > 9 ? '9+' : pendingEscalations}
             </span>

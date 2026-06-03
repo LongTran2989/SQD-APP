@@ -149,6 +149,14 @@ export const flagPost = async (req: Request, res: Response): Promise<void> => {
       res.status(error.status).json({ message: error.message });
       return;
     }
+    // Two flags racing the same (sourcePostId, targetScope): the in-tx findFirst
+    // catches the sequential case, but two genuinely-concurrent Serializable
+    // transactions abort the loser with P2034 — surface that as the same 409,
+    // not a 500.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      res.status(409).json({ message: 'An escalation is already pending for this comment.' });
+      return;
+    }
     console.error('Error flagging post:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
