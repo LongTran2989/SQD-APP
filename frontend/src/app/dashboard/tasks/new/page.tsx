@@ -6,7 +6,7 @@ import { useAuthStore } from '../../../../store/authStore';
 import { Template, WorkPackageEnriched } from '../../../../types';
 import { createTask, getDivisions, getUsers } from '../../../../api/taskApi';
 import { getWorkPackages } from '../../../../api/wpApi';
-import { apiClient } from '../../../../api/client';
+import { getPublishedTemplates } from '../../../../api/templateApi';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft,
@@ -71,19 +71,15 @@ export default function NewTaskPage() {
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const [tplRes, divRes, usersRes, wpsRes] = await Promise.all([
-          apiClient.get('/templates'),
+        const [tpl, divRes, usersRes, wpsRes] = await Promise.all([
+          getPublishedTemplates(),
           getDivisions(),
           getUsers(),
           getWorkPackages(),
         ]);
 
-        // Only Published templates
-        let published: Template[] = (tplRes.data as Template[]).filter(
-          (t) => t.status === 'Published'
-        );
-
         // Non-Director/Admin: filter to own division
+        let published = tpl;
         if (user && user.role !== 'Director' && user.role !== 'Admin') {
           published = published.filter((t) => t.divisionId === user.divisionId);
         }

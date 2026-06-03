@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 import { Template } from '../../types';
 import { actionEscalation } from '../../api/escalationApi';
 import { getDivisions, getUsers, getDatasource } from '../../api/taskApi';
-import { apiClient } from '../../api/client';
+import { getPublishedTemplates } from '../../api/templateApi';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
 
@@ -64,10 +64,7 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
   useEffect(() => {
     let cancelled = false;
     if (action === 'CREATE_TASK') {
-      apiClient
-        .get('/templates')
-        .then((r) => { if (!cancelled) setTemplates((r.data as Template[]).filter((t) => t.status === 'Published')); })
-        .catch(() => {});
+      getPublishedTemplates().then((t) => { if (!cancelled) setTemplates(t); }).catch(() => {});
       getDivisions().then((d) => { if (!cancelled) setDivisions(d); }).catch(() => {});
       getUsers().then((u) => { if (!cancelled) setUsers(u); }).catch(() => {});
     } else if (action === 'RAISE_FINDING') {

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createFeedPost, FeedScope } from '../services/feedService';
@@ -97,6 +97,18 @@ export const flagPost = async (req: Request, res: Response): Promise<void> => {
     const flaggedByName = flagger?.name ?? `User ${userId}`;
 
     const result = await prisma.$transaction(async (tx) => {
+      // Dedup guard (#21): at most ONE PENDING flag per (sourcePostId, targetScope).
+      // Re-flagging is allowed once the prior flag leaves PENDING (DISMISSED/ACTIONED),
+      // so a full @@unique constraint would be wrong; the check lives in a Serializable
+      // transaction (below) so two concurrent flags can't both slip past it.
+      const existingPending = await tx.escalationFlag.findFirst({
+        where: { sourcePostId: postId, targetScope, status: 'PENDING' },
+        select: { id: true },
+      });
+      if (existingPending) {
+        throw new HttpError(409, `An escalation to ${TARGET_FEED_LABEL[targetScope]} is already pending for this comment.`);
+      }
+
       const flag = await tx.escalationFlag.create({
         data: {
           sourcePostId: postId,
@@ -129,10 +141,14 @@ export const flagPost = async (req: Request, res: Response): Promise<void> => {
       });
 
       return { flag, cards };
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     res.status(201).json({ flag: result.flag, cards: result.cards });
   } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
     console.error('Error flagging post:', error);
     res.status(500).json({ message: 'Internal server error' });
   }

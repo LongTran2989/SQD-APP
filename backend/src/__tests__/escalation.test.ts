@@ -339,6 +339,48 @@ describe('Escalation core (Phase 3)', () => {
     });
   });
 
+  // ─── Dedup guard (#21): one PENDING flag per (sourcePostId, targetScope) ──────
+
+  describe('flag dedup guard', () => {
+    const dismiss = (flagId: number) =>
+      request(app).post(`/api/escalations/${flagId}/action`).set('Authorization', `Bearer ${directorToken}`).send({ action: 'DISMISS' });
+    const acknowledge = (flagId: number) =>
+      request(app).post(`/api/escalations/${flagId}/action`).set('Authorization', `Bearer ${directorToken}`).send({ action: 'ACKNOWLEDGE' });
+
+    it('rejects a second PENDING flag on the same source + target (409)', async () => {
+      const first = await flag(taskComment, 'DIVISION', staffToken);
+      expect(first.status).toBe(201);
+      const second = await flag(taskComment, 'DIVISION', staffToken);
+      expect(second.status).toBe(409);
+      // Only one flag exists for that source + target.
+      const count = await prisma.escalationFlag.count({ where: { sourcePostId: taskComment, targetScope: 'DIVISION' } });
+      expect(count).toBe(1);
+    });
+
+    it('allows a new PENDING flag once the prior one is DISMISSED', async () => {
+      const first = await flag(taskComment, 'DIVISION', staffToken);
+      await dismiss(first.body.flag.id);
+      const second = await flag(taskComment, 'DIVISION', staffToken);
+      expect(second.status).toBe(201);
+    });
+
+    it('allows a new PENDING flag once the prior one is ACTIONED (acknowledged)', async () => {
+      const first = await flag(taskComment, 'DIVISION', staffToken);
+      await acknowledge(first.body.flag.id);
+      const second = await flag(taskComment, 'DIVISION', staffToken);
+      expect(second.status).toBe(201);
+    });
+
+    it('allows the same source to be flagged to DIFFERENT targets concurrently', async () => {
+      const wp = await flag(taskComment, 'WP', staffToken);
+      const div = await flag(taskComment, 'DIVISION', staffToken);
+      const org = await flag(taskComment, 'ORG', staffToken);
+      expect([wp.status, div.status, org.status]).toEqual([201, 201, 201]);
+      const ids = new Set([wp.body.flag.id, div.body.flag.id, org.body.flag.id]);
+      expect(ids.size).toBe(3);
+    });
+  });
+
   // ─── GET /api/escalations — actionable-by-viewer RBAC ────────────────────────
 
   describe('GET /api/escalations (actionable queue)', () => {

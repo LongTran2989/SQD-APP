@@ -64,37 +64,6 @@ async function resolveFeedTarget(
   return { ok: true, scope, scopeId };
 }
 
-/** Enriches posts with the author's name (mirrors task.controller.getTaskActivity). */
-async function enrichAuthors<T extends { authorId: number | null }>(posts: T[]) {
-  const authorIds = [...new Set(posts.map((p) => p.authorId).filter(Boolean))] as number[];
-  const authors = authorIds.length > 0
-    ? await prisma.user.findMany({ where: { id: { in: authorIds } }, select: { id: true, name: true } })
-    : [];
-  const authorMap = new Map(authors.map((a) => [a.id, a.name]));
-  return posts.map((p) => ({
-    ...p,
-    author: p.authorId ? { id: p.authorId, name: authorMap.get(p.authorId) ?? null } : null,
-  }));
-}
-
-/**
- * Attaches the LIVE EscalationFlag status to ESCALATION_CARD / INFO_CARD posts
- * (which carry a flagId). Without this a card keeps showing its original
- * "Pending" badge after the flag is actioned (pending issue #20). Cards reference
- * the flag by id, so we batch-load statuses and map them on.
- */
-async function enrichFlagStatus<T extends { flagId: number | null }>(posts: T[]) {
-  const flagIds = [...new Set(posts.map((p) => p.flagId).filter((id): id is number => typeof id === 'number'))];
-  const flags = flagIds.length > 0
-    ? await prisma.escalationFlag.findMany({ where: { id: { in: flagIds } }, select: { id: true, status: true } })
-    : [];
-  const statusMap = new Map(flags.map((f) => [f.id, f.status]));
-  return posts.map((p) => ({
-    ...p,
-    flagStatus: p.flagId != null ? statusMap.get(p.flagId) ?? null : null,
-  }));
-}
-
 // ─── GET /api/feeds/:scope/:scopeId? ──────────────────────────────────────────
 // Returns every post on a feed, oldest-first. All authenticated users may read
 // any feed (transparency default).
@@ -112,29 +81,50 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       orderBy: { createdAt: 'asc' },
     });
 
-    const enriched = await enrichFlagStatus(await enrichAuthors(posts));
+    // Author names, live flag statuses, and the (WP-only) feed division are all
+    // independent of one another — batch them in a single round-trip rather than
+    // chaining awaits. canAction is computed server-side with the same
+    // canActionFlag the action endpoint uses (single source of truth); every
+    // ESCALATION_CARD on a feed shares the feed's scope + division, so it's
+    // resolved once and only when a card is actually present.
+    const authorIds = [...new Set(posts.map((p) => p.authorId).filter((id): id is number => typeof id === 'number'))];
+    const flagIds = [...new Set(posts.map((p) => p.flagId).filter((id): id is number => typeof id === 'number'))];
+    const hasEscalationCard = posts.some((p) => p.type === 'ESCALATION_CARD');
+    const needsWpDivision = !!req.user && hasEscalationCard && target.scope === 'WP' && target.scopeId != null;
 
-    // Whether THIS viewer may action the escalation cards on this feed. Computed
-    // server-side with the same canActionFlag the action endpoint uses (single
-    // source of truth) — the client can't resolve a WP's division on its own.
-    // Every ESCALATION_CARD on a feed shares the feed's scope + division, so we
-    // resolve it once (and only when a card is actually present).
+    const [authors, flags, wp] = await Promise.all([
+      authorIds.length > 0
+        ? prisma.user.findMany({ where: { id: { in: authorIds } }, select: { id: true, name: true } })
+        : Promise.resolve([] as { id: number; name: string }[]),
+      flagIds.length > 0
+        ? prisma.escalationFlag.findMany({ where: { id: { in: flagIds } }, select: { id: true, status: true } })
+        : Promise.resolve([] as { id: number; status: string }[]),
+      needsWpDivision
+        ? prisma.workPackage.findUnique({ where: { id: target.scopeId!, deletedAt: null }, select: { divisionId: true } })
+        : Promise.resolve(null),
+    ]);
+
+    const authorMap = new Map(authors.map((a) => [a.id, a.name]));
+    const statusMap = new Map(flags.map((f) => [f.id, f.status]));
+
     let viewerCanAction = false;
-    if (req.user && enriched.some((p) => p.type === 'ESCALATION_CARD')) {
-      let feedDivisionId: number | null = null;
-      if (target.scope === 'DIVISION') {
-        feedDivisionId = target.scopeId;
-      } else if (target.scope === 'WP' && target.scopeId != null) {
-        const wp = await prisma.workPackage.findUnique({ where: { id: target.scopeId, deletedAt: null }, select: { divisionId: true } });
-        feedDivisionId = wp?.divisionId ?? null;
-      }
+    if (req.user && hasEscalationCard) {
+      const feedDivisionId =
+        target.scope === 'DIVISION' ? target.scopeId :
+        target.scope === 'WP' ? (wp?.divisionId ?? null) :
+        null;
       viewerCanAction = canActionFlag(
         { role: req.user.role, divisionId: req.user.divisionId },
         { targetScope: target.scope, divisionId: feedDivisionId }
       );
     }
 
-    res.json(enriched.map((p) => ({ ...p, canAction: p.type === 'ESCALATION_CARD' ? viewerCanAction : false })));
+    res.json(posts.map((p) => ({
+      ...p,
+      author: p.authorId ? { id: p.authorId, name: authorMap.get(p.authorId) ?? null } : null,
+      flagStatus: p.flagId != null ? statusMap.get(p.flagId) ?? null : null,
+      canAction: p.type === 'ESCALATION_CARD' ? viewerCanAction : false,
+    })));
   } catch (error) {
     console.error('Error fetching feed:', error);
     res.status(500).json({ message: 'Internal server error' });

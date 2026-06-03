@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   LayoutPanelTop,
   Globe,
+  Flag,
   Users,
   Settings
 } from 'lucide-react';
@@ -49,6 +50,7 @@ export default function Sidebar() {
     { name: 'Findings', href: '/dashboard/findings', icon: AlertTriangle, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'], badge: openFindings },
     { name: 'Division Board', href: '/dashboard/division-board', icon: LayoutPanelTop, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
     { name: 'Org Feed', href: '/dashboard/org-feed', icon: Globe, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
+    { name: 'Escalations', href: '/dashboard/escalations', icon: Flag, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Template Builder', href: '/dashboard/templates', icon: FileCheck2, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'User Management', href: '/dashboard/users', icon: Users, roles: ['Admin', 'Director'] },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },

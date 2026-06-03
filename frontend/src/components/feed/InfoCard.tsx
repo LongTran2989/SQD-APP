@@ -3,21 +3,7 @@
 import Link from 'next/link';
 import { Info, ArrowUpRight } from 'lucide-react';
 import { FeedPostEnriched } from '../../types';
-
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  return (
-    d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) +
-    ' ' +
-    d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-  );
-}
-
-function sourceHref(post: FeedPostEnriched): string | null {
-  if (post.sourceTaskId) return `/dashboard/tasks/${post.sourceTaskId}`;
-  if (post.sourceWpId) return `/dashboard/work-packages/${post.sourceWpId}`;
-  return null;
-}
+import { formatTimestamp, sourceHref } from '../../utils/feedHelpers';
 
 // Display-only awareness card placed at levels an escalation skipped, so no
 // level is blind to a concern that passed it by. Never actionable.

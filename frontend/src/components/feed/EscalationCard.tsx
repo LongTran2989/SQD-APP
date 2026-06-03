@@ -1,29 +1,10 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
-import toast from 'react-hot-toast';
 import { AlertTriangle, ArrowUpRight } from 'lucide-react';
 import { FeedPostEnriched, EscalationFlagStatus } from '../../types';
-import { actionEscalation } from '../../api/escalationApi';
-import { getApiErrorMessage } from '../../utils/apiError';
-import EscalationActionModal, { ModalAction } from './EscalationActionModal';
-
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  return (
-    d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) +
-    ' ' +
-    d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-  );
-}
-
-// Deep-link to the flagged source, using the denormalised id on the card.
-function sourceHref(post: FeedPostEnriched): string | null {
-  if (post.sourceTaskId) return `/dashboard/tasks/${post.sourceTaskId}`;
-  if (post.sourceWpId) return `/dashboard/work-packages/${post.sourceWpId}`;
-  return null;
-}
+import { formatTimestamp, sourceHref } from '../../utils/feedHelpers';
+import EscalationActions from './EscalationActions';
 
 // Badge styling per live flag status (Phase 4 — was hardcoded "Pending", issue #20).
 const STATUS_STYLE: Record<EscalationFlagStatus, string> = {
@@ -43,30 +24,11 @@ interface EscalationCardProps {
 }
 
 export default function EscalationCard({ post, onActioned }: EscalationCardProps) {
-  const [busy, setBusy] = useState(false);
-  const [modalAction, setModalAction] = useState<ModalAction | null>(null);
-
   const href = sourceHref(post);
   const status: EscalationFlagStatus = post.flagStatus ?? 'PENDING';
   // post.canAction is computed server-side (canActionFlag) — it already encodes
   // the Manager own-division rule, so a cross-division Manager sees no buttons.
   const showActions = status === 'PENDING' && post.canAction === true && post.flagId != null;
-
-  const runSimple = async (action: 'ACKNOWLEDGE' | 'DISMISS') => {
-    if (post.flagId == null) return;
-    setBusy(true);
-    try {
-      await actionEscalation(post.flagId, action);
-      toast.success(action === 'ACKNOWLEDGE' ? 'Escalation acknowledged' : 'Escalation dismissed');
-      onActioned?.();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Action failed'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const btn = 'px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors disabled:opacity-50';
 
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -99,42 +61,16 @@ export default function EscalationCard({ post, onActioned }: EscalationCardProps
         <span className="ml-auto text-[10px] text-slate-400">{formatTimestamp(post.createdAt)}</span>
       </div>
 
-      {showActions && (
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-amber-200 pt-3">
-          <button onClick={() => runSimple('ACKNOWLEDGE')} disabled={busy} className={`${btn} border-green-300 text-green-700 hover:bg-green-100`}>
-            Acknowledge
-          </button>
-          <button onClick={() => runSimple('DISMISS')} disabled={busy} className={`${btn} border-slate-300 text-slate-600 hover:bg-slate-100`}>
-            Dismiss
-          </button>
-          {post.sourceTaskId != null && (
-            <button onClick={() => setModalAction('RAISE_FINDING')} disabled={busy} className={`${btn} border-rose-300 text-rose-700 hover:bg-rose-100`}>
-              Raise Finding
-            </button>
-          )}
-          <button onClick={() => setModalAction('CREATE_TASK')} disabled={busy} className={`${btn} border-blue-300 text-blue-700 hover:bg-blue-100`}>
-            Create Task
-          </button>
-          {post.sourceTaskId != null && (
-            <button onClick={() => setModalAction('REASSIGN_TASK')} disabled={busy} className={`${btn} border-indigo-300 text-indigo-700 hover:bg-indigo-100`}>
-              Reassign
-            </button>
-          )}
-          <button onClick={() => setModalAction('DISSEMINATE')} disabled={busy} className={`${btn} border-purple-300 text-purple-700 hover:bg-purple-100`}>
-            Disseminate
-          </button>
+      {showActions && post.flagId != null && (
+        <div className="mt-3 border-t border-amber-200 pt-3">
+          <EscalationActions
+            flagId={post.flagId}
+            sourceTaskId={post.sourceTaskId ?? null}
+            sourceWpId={post.sourceWpId ?? null}
+            canRaiseFinding={post.sourceTaskId != null}
+            onActioned={onActioned}
+          />
         </div>
-      )}
-
-      {modalAction && post.flagId != null && (
-        <EscalationActionModal
-          flagId={post.flagId}
-          action={modalAction}
-          sourceTaskId={post.sourceTaskId ?? null}
-          sourceWpId={post.sourceWpId ?? null}
-          onClose={() => setModalAction(null)}
-          onDone={() => { setModalAction(null); onActioned?.(); }}
-        />
       )}
     </div>
   );

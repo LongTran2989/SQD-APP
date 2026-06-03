@@ -4,20 +4,27 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../store/authStore';
 import { LogOut, Bell, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { getPendingEscalations } from '../../api/escalationApi';
+import { getPendingEscalations, ESCALATIONS_CHANGED_EVENT } from '../../api/escalationApi';
+
+// Only these roles have an actionable escalation queue (#22) — others never poll
+// and see no bell badge. Mirrors the backend canActionFlag role gate.
+const ESCALATION_ROLES = ['Director', 'Admin', 'Manager'];
 
 export default function Header() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const router = useRouter();
 
+  const canSeeEscalations = !!user && ESCALATION_ROLES.includes(user.role);
+
   // Pending escalations the viewer can action (RBAC-scoped server-side). Polled
   // like the Sidebar findings badge — setState lives in the promise callback so
-  // it never trips react-hooks/set-state-in-effect.
+  // it never trips react-hooks/set-state-in-effect. Also refreshes instantly when
+  // any flag/action fires (escalations:changed), not just on the 60s tick.
   const [pendingEscalations, setPendingEscalations] = useState(0);
 
   useEffect(() => {
-    if (!user) return;
+    if (!canSeeEscalations) return;
     let cancelled = false;
     const load = () => {
       getPendingEscalations()
@@ -28,11 +35,13 @@ export default function Header() {
     };
     load();
     const intervalId = setInterval(load, 60000);
+    window.addEventListener(ESCALATIONS_CHANGED_EVENT, load);
     return () => {
       cancelled = true;
       clearInterval(intervalId);
+      window.removeEventListener(ESCALATIONS_CHANGED_EVENT, load);
     };
-  }, [user]);
+  }, [canSeeEscalations]);
 
   const handleLogout = () => {
     logout();
@@ -52,8 +61,15 @@ export default function Header() {
 
       <div className="flex items-center space-x-4">
         <button
+          onClick={() => { if (canSeeEscalations) router.push('/dashboard/escalations'); }}
           className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-colors relative"
-          title={pendingEscalations > 0 ? `${pendingEscalations} pending escalation(s)` : 'No pending escalations'}
+          title={
+            !canSeeEscalations
+              ? 'Escalations'
+              : pendingEscalations > 0
+                ? `${pendingEscalations} pending escalation(s)`
+                : 'No pending escalations'
+          }
         >
           <Bell className="w-5 h-5" />
           {pendingEscalations > 0 && (
