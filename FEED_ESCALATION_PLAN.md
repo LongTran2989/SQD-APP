@@ -6,7 +6,7 @@
 
 ---
 
-## STATUS: Phase 4 COMPLETE (✅ 256 backend tests pass, 11 suites — 236 baseline + 17 escalation-action tests + 3 canAction-gate tests; frontend lint at baseline 70/23 — **zero new**; backend + frontend `tsc --noEmit` clean except the pre-existing legacy `clean.ts`). Next session starts at Phase 5.
+## STATUS: Phase 5 COMPLETE — pending user confirmation for the `CLAUDE_HANDOVER.md` + `BUSINESS_WORKFLOW.md` doc update (Rule 12). (✅ 260 backend tests pass, 11 suites — 256 + 4 dedup-guard tests; frontend lint at baseline 70/23 — **zero new**; `tsc --noEmit` clean except legacy `clean.ts`; `next build` exit 0. High-effort code review + security review run, findings fixed/triaged.) **This is the final phase — the feature is functionally done.**
 
 | Phase | Title | State |
 |------|-------|-------|
@@ -14,7 +14,7 @@
 | 2 | Feed read/write API + WP / Division Board / Org Feed scopes | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) |
 | 3 | Escalation core: flag comment → cards + info cards + audit | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) |
 | 4 | Flag lifecycle actions (acknowledge/dismiss/raise finding/create task/reassign/disseminate) | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) |
-| 5 | Badges, polish, docs, full regression | ☐ Not started |
+| 5 | Badges, polish, docs, full regression | ✅ Done (commit on `claude/sqd-feed-escalation-plan-4dYZa`) — handover docs pending user confirm |
 
 ### Environment setup notes (for fresh sessions — the container starts with no DB/deps)
 - Postgres is **not running** on container start: `service postgresql start`, then `sudo -u postgres psql -c "ALTER USER postgres PASSWORD '321321';"` and `createdb sqd_qa_test_db` + `sqd_qa_db` (matches `.env.test` `postgres:321321@localhost:5432`).
@@ -283,7 +283,16 @@ Goal: managers/directors action a PENDING flag; reuse existing workflows; single
   - **Priority 3 (cosmetic):** `react/no-unescaped-entities` (5), `no-unused-vars` (18), `@next/next/no-img-element` (3).
 - Update `CLAUDE_HANDOVER.md` (phase status, object reference for FeedPost/EscalationFlag, RBAC, gotchas) and `BUSINESS_WORKFLOW.md` (feeds + escalation loop) — Rule 12, only after user confirms.
 
-**Done / Gotchas:** _…_
+**Done / Gotchas (Phase 5 — completed; handover docs pending user confirm):**
+- **#21 flag dedup guard.** `flagPost` now blocks a second PENDING flag for the same `(sourcePostId, targetScope)`: an in-transaction `escalationFlag.findFirst` → `throw HttpError(409)`, with the whole `$transaction` raised to `isolationLevel: Serializable` so two genuinely-concurrent flags can't both pass the check. The Serializable loser aborts with Prisma `P2034`, which the `catch` maps to the same **409** (not a 500). Re-flagging is allowed once the prior flag leaves PENDING (DISMISSED/ACTIONED), and different targets for the same source stay independent — so a full `@@unique` would have been wrong, and a *partial* unique index isn't expressible under `prisma db push`. +4 tests.
+- **#22 bell poll gating.** The Header bell only polls `getPendingEscalations` for Director/Admin/Manager (`ESCALATION_ACTION_ROLES`); GL/Staff never poll and see no badge. The effect is keyed on `user` (not the derived boolean) so a same-role switch refetches, and the badge render is guarded by `canSeeEscalations` so a stale count can never paint for a non-actioner.
+- **Badge self-refresh.** `escalationApi.flagPost`/`actionEscalation` dispatch a `window` `escalations:changed` event on success (the single choke point); the Header listens and re-polls immediately instead of waiting for the 60s tick. SSR-guarded with `typeof window !== 'undefined'`.
+- **Dedicated escalations page.** New `/dashboard/escalations` (Director/Admin/Manager; redirects others — the list endpoint also RBAC-filters server-side) lists the viewer's PENDING queue with loading spinner + empty state matching `FeedPanel`, and reuses the extracted `EscalationActions` cluster. New Sidebar *Escalations* nav item; the bell links here.
+- **#23 + reuse cleanups.** Extracted `utils/feedHelpers.ts` (`formatTimestamp`, `sourceHref`, `TARGET_SCOPE_LABEL` — the last killing a copy in `FlagButton`), `api/templateApi.getPublishedTemplates()` (dedup of the `/templates` + Published filter in the new-task page and the action modal), `components/feed/EscalationActions.tsx` (the 6-action cluster, shared by the card and the page; `canRaiseFinding` is derived internally from `sourceTaskId`, not a prop), and `constants/escalationRoles.ts` (`ESCALATION_ACTION_ROLES`, one home for the Header/page/Sidebar gate).
+- **`getFeed` efficiency (altitude).** The author lookup, flag-status lookup, and the (WP-only) feed-division lookup were three sequential round-trips chained via two helper fns; folded into one `Promise.all` + a single map pass (3 round-trips → 1). The author `findMany` gained `deletedAt: null` (Rule 2) — the old `enrichAuthors` had silently omitted it.
+- **Reviews.** High-effort `/code-review` surfaced the P2034→500, the Header staleness, the Rule 2 gap, and the role/label/prop duplication — all fixed. `/security-review` came back clean: server-side `canActionFlag` is the authority (frontend gates are convenience-only), Rule 2 holds on every new query, no injection/XSS, concurrency handled. Its 3 low findings (cross-division feed transparency, no flag rate-limiting, any-user-may-flag) are all by-design or pre-existing deferred items.
+- **Regression:** `npm run test` → **260/260** (11 suites); frontend `tsc --noEmit` clean (except legacy `clean.ts`); `npm run lint` **70/23 — zero new**; `npm run build` exit 0.
+- ➡️ **Still TODO (Rule 12, after user confirms Phase 5):** update `CLAUDE_HANDOVER.md` (phase status; `FeedPost`/`EscalationFlag` object reference; feed + escalation RBAC matrix; gotchas — Serializable dedup, polymorphic `scopeId`, dual-write) and `BUSINESS_WORKFLOW.md` (the feeds + escalation loop). Optional, deferred: the 70/23 pre-existing lint-debt burn-down (its own commit, not a blocker).
 
 ---
 
