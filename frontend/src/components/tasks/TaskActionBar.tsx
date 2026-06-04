@@ -430,13 +430,13 @@ export default function TaskActionBar({
     });
   };
 
-  const handleDecideExtension = (decision: 'approved' | 'denied') => {
+  const handleDecideExtension = (decision: 'approve' | 'deny') => {
     const extensionIndex = getPendingExtensionIndex(task);
     if (extensionIndex === -1) {
       toast.error('No pending extension request found');
       return;
     }
-    if (decision === 'approved' && extensionNewDeadline) {
+    if (decision === 'approve' && extensionNewDeadline) {
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(extensionNewDeadline) || isNaN(Date.parse(extensionNewDeadline))) {
         toast.error('Invalid date format for new deadline. Please use a valid date.');
@@ -448,9 +448,9 @@ export default function TaskActionBar({
         task.id,
         extensionIndex,
         decision,
-        decision === 'approved' && extensionNewDeadline ? extensionNewDeadline : undefined
+        decision === 'approve' && extensionNewDeadline ? extensionNewDeadline : undefined
       );
-      toast.success(decision === 'approved' ? 'Extension approved' : 'Extension denied');
+      toast.success(decision === 'approve' ? 'Extension approved' : 'Extension denied');
       setShowDecideExtension(false);
       setExtensionNewDeadline('');
       return r;
@@ -703,10 +703,10 @@ export default function TaskActionBar({
                   />
                 </div>
                 <div className="flex gap-2">
-                  <ActionButton id="btn-approve-extension" onClick={() => handleDecideExtension('approved')} disabled={loading === 'extension-approved'} variant="success" icon={CheckCircle2}>
+                  <ActionButton id="btn-approve-extension" onClick={() => handleDecideExtension('approve')} disabled={loading === 'extension-approve'} variant="success" icon={CheckCircle2}>
                     Approve
                   </ActionButton>
-                  <ActionButton id="btn-deny-extension" onClick={() => handleDecideExtension('denied')} disabled={loading === 'extension-denied'} variant="danger" icon={XCircle}>
+                  <ActionButton id="btn-deny-extension" onClick={() => handleDecideExtension('deny')} disabled={loading === 'extension-deny'} variant="danger" icon={XCircle}>
                     Deny
                   </ActionButton>
                 </div>
