@@ -115,8 +115,19 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **`seed-verification.test.ts` fix:** hardcoded `ts-node.cmd` (Windows binary) replaced with platform-aware `process.platform === 'win32' ? 'ts-node.cmd' : 'ts-node'`.
   - **Deferred (not in Phase 6):** `violatorIds` multi-select search against external personnel DB; Findings analytics/charts dashboard.
 
+- **Feed & Escalation System** (Phases 1–5 — ✅ **COMPLETE**, 2026-06-04) — `FEED_ESCALATION_PLAN.md` is the living source of truth for this feature; OBJECT H documents the schema. Branch `claude/sqd-feed-escalation-plan-4dYZa` (NOT yet merged to `main`). End-user + developer manuals: `FEED_ESCALATION_USER_GUIDE.md` + `FEED_ESCALATION_DEV_GUIDE.md`; manual test checklist: `FEED_ESCALATION_TEST_CHECKLIST.md`.
+  - **Phase 1 (on `main`)** — Migrated `TaskActivity` → unified **`FeedPost`** model (behavior-preserving). The Task feed is now `FeedPost where { scope:'TASK', scopeId: task.id }`; `GET/POST /api/tasks/:id/activity` unchanged. New `services/feedService.ts` → `createFeedPost()` is the single feed-write entry point. Added the `EscalationFlag` model; removed the `TaskActivity` model + `Task.activities`.
+  - **Phase 2 (on `main`)** — Generic feed API for all four scopes: `GET /api/feeds/:scope/:scopeId?` + `POST /api/feeds/:scope/:scopeId?/posts` (`feed.controller.ts` + `feed.routes.ts`; two explicit routes per verb — Express 5 rejects `:param?`). RBAC helpers in `feedService.ts` (`buildFeedPostScope`, `canPostToFeed`; Admin = Director-equivalent). WP lifecycle SYSTEM_EVENTs (`logWpSystemEvent` in `wp.controller.ts`). Frontend: generic `FeedPanel` + `FeedPostItem`, Division Board + Org Feed pages, Sidebar nav.
+  - **Phase 3** — Escalation core: flag a COMMENT → `EscalationFlag(PENDING)` + cards.
+    - `POST /api/feeds/posts/:id/flag {targetScope}` and `GET /api/escalations?status=PENDING` (`escalation.controller.ts` + `escalation.routes.ts`). Flag route registered **before** the generic `/:scope` routes.
+    - `services/escalationService.ts` → `placeEscalationCards()` encodes the whole placement matrix as ONE hierarchy rule (`TASK<WP<DIVISION<ORG`: escalation card at target, info card at each strictly-between level). 6 valid origin→target pairs incl. the user-approved `WP→Division`.
+    - Cards store a truncated excerpt + denormalised deep-link fields (`sourceTaskId`/`sourceWpId`/`flagId`) — **never** a copy of the source text. Dual-write: `AuditLog('ESCALATION_RAISED')` + a source-feed SYSTEM_EVENT.
+    - `GET /api/escalations` returns the viewer's **actionable** queue (Director/Admin all; Manager own-div WP/Div + all Org; Group Leader/Staff none). Everyone still SEES cards on feeds (transparency). All queries soft-delete filtered (Rule 2).
+  - **Phase 4** — Flag lifecycle actions: `POST /api/escalations/:id/action {action, payload}`. Six actions — `ACKNOWLEDGE`, `DISMISS`, `RAISE_FINDING`, `CREATE_TASK`, `REASSIGN_TASK`, `DISSEMINATE` — gated by the shared `canActionFlag()` predicate. **Reuse, not re-implement:** the existing `createFinding`/`createTask`/`reassignTask` handlers were each split into an exported `…Service(client, actor, params)` core (running every write on the passed tx client + throwing a typed `HttpError` from `utils/httpError.ts`); the action endpoint opens ONE `$transaction` and calls those cores so the whole action is atomic. `DISSEMINATE` reuses the **same** flag (no second flag). Every action dual-writes `AuditLog('ESCALATION_ACTIONED')` + a target-feed SYSTEM_EVENT. Frontend: card-local `EscalationActionModal`; `getFeed` marks each card with a server-computed `canAction` so cross-division Managers see no buttons.
+  - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
+
 ### Test Suite
-- All **187 integration tests passing** as of 2026-06-01
+- **260 integration tests passing** on the `claude/sqd-feed-escalation-plan-4dYZa` branch (Feed & Escalation Phases 1–5 complete). `main` is at **211** (Feed Phases 1–2). Pre-feed baseline was **187** (Phase 6, 2026-06-01). Frontend lint at baseline **70 errors / 23 warnings (zero new)**; `tsc --noEmit` clean (except legacy `clean.ts`); `next build` exit 0.
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -262,6 +273,8 @@ These are two separate systems that serve different purposes. **Both** are writt
 **When an event occurs (e.g. Task inactivated):**
 - Write a record to `AuditLog` (compliance trail)
 - Write a `SYSTEM_EVENT` entry to `TaskActivity` (so the Task's feed shows it in context)
+
+> **Update (Feed & Escalation, Phase 1):** `TaskActivity` is now the unified **`FeedPost`** model (the Task feed is `scope:'TASK'`). The dual-write rule is unchanged — every significant event still writes BOTH `AuditLog` and a `SYSTEM_EVENT` FeedPost. Escalations additionally dual-write `AuditLog('ESCALATION_RAISED')` + a SYSTEM_EVENT on the source feed. See **OBJECT H**.
 
 ---
 
@@ -495,11 +508,11 @@ These are two separate systems that serve different purposes. **Both** are writt
 
 ---
 
-### OBJECT D: TASK ACTIVITY FEED
+### OBJECT D: TASK ACTIVITY FEED  *(superseded by `FeedPost` — see OBJECT H)*
 
 **Purpose:** Per-Task chronological feed combining system events and human comments. This is the communication layer between reviewer and assignee.
 
-**New model — not yet in schema. Must be added in Phase 5.**
+> **⚠️ Migrated to the unified `FeedPost` model (Feed & Escalation, Phase 1).** The Task feed is now `FeedPost where { scope:'TASK', scopeId: task.id }`; the `taskId` column became polymorphic `scope` + `scopeId`. Endpoints `GET/POST /api/tasks/:id/activity` are unchanged. The attribute table below describes the historical `TaskActivity` shape — see **OBJECT H** for the live schema.
 
 **Scope:** Each Task has its own isolated feed. There is no consolidated cross-task thread. A dashboard-level "recent activity" view may query across tasks as a read-only summary, but the source of truth is always per-Task.
 
@@ -662,6 +675,51 @@ Dedicated analytics view with charts and filters across severity, eventType, err
 - Change `entityId Int` → `entityId String` to support future UUID migration and prevent ID-reuse collisions after soft deletes
 - Extend `entityType` values to include: `WorkPackage`, `TimeBooking`, `TaskActivity`
 - Add soft delete support (`deletedAt DateTime?`) to: `User`, `Task`, `Finding`, `WorkPackage`
+
+---
+
+### OBJECT H: UNIFIED FEED & ESCALATION (`FeedPost`, `EscalationFlag`)
+
+**Added by the Feed & Escalation feature (Phases 1–5 — complete).** Replaces the former `TaskActivity` (OBJECT D). `FeedPost.scopeId` is **polymorphic — no foreign key**; a feed is located by `(scope, scopeId)`.
+
+**`FeedPost`**
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | Int | |
+| `type` | String | `COMMENT` \| `SYSTEM_EVENT` \| `ESCALATION_CARD` \| `INFO_CARD` |
+| `scope` | String | `TASK` \| `WP` \| `DIVISION` \| `ORG` |
+| `scopeId` | Int? | taskId / wpId / divisionId; **NULL for the singleton ORG feed** |
+| `authorId` | Int? | NULL for SYSTEM_EVENT / auto-generated cards |
+| `content` | String | Comment body, system text, or generated card headline |
+| `metadata` | Json? | |
+| `sourcePostId` | Int? | The flagged COMMENT a card references (self-relation) |
+| `sourceExcerpt` | String? | Truncated snippet (≤160 + `…`) — **never the full source text** |
+| `sourceTaskId` / `sourceWpId` | Int? | Denormalised deep-link (no FK — polymorphic origin) |
+| `flagId` | Int? | FK to `EscalationFlag` |
+| `taggedDivisionIds` | Json? | Org Feed only (int array) — used by Disseminate (Phase 4) |
+| `createdAt` | DateTime | Immutable |
+
+**`EscalationFlag`** — one flag tracks an escalation through its whole lifecycle (no flag chains). Immutable; never soft-deleted.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | Int | |
+| `sourcePostId` | Int | The original flagged comment |
+| `flaggedByUserId` | Int | Any authenticated user may flag |
+| `targetScope` | String | `WP` \| `DIVISION` \| `ORG` |
+| `status` | String | `PENDING` (default) → `ACTIONED` / `DISMISSED` |
+| `reviewedByUserId` | Int? | Set when actioned |
+| `action` | String? | ACKNOWLEDGE / DISMISS / RAISE_FINDING / CREATE_TASK / REASSIGN_TASK / DISSEMINATE |
+| `actionedAt` | DateTime? | |
+| `linkedEntityType` / `linkedEntityId` | String? | Finding / Task created by the action |
+| `createdAt` | DateTime | |
+
+**Placement matrix (one hierarchy rule, `TASK<WP<DIVISION<ORG`):** ESCALATION_CARD at the target; INFO_CARD at every level strictly between origin and target. Valid pairs: Task→WP, WP→Division, Task→Division (info@WP), WP→Org (info@Division), Task→Org (info@WP+Division), Division→Org. Anything else (downward/same-level, ORG-comment escalation, non-COMMENT source) → **400**.
+
+**Escalation RBAC (`canActionFlag` in `services/escalationService.ts` — single authority for both the action endpoint and the `getFeed` `canAction` flag):** Director/Admin → any flag; Manager → all ORG flags + own-division WP/DIVISION flags; Group Leader/Staff → none (they still SEE cards via feed transparency). Reading any feed is open to all; posting follows `canPostToFeed` (Task/WP all; Division own-div + Director/Admin any; Org Director/Admin/Manager).
+
+**Dedup guard (#21):** at most ONE PENDING flag per `(sourcePostId, targetScope)`. Enforced by an in-transaction `findFirst` at `isolationLevel: Serializable` → `HttpError(409)`; the concurrent loser aborts with Prisma `P2034`, mapped to the same 409. A full `@@unique` would be wrong (re-flagging is allowed once the prior flag is DISMISSED/ACTIONED), and a *partial* unique index isn't expressible under `prisma db push` — hence the transactional guard.
 
 ---
 
@@ -864,6 +922,14 @@ All changes needed before Phase 5 development begins:
 16. **`decideDeadlineExtension` requires `extensionIndex`**: The backend requires the index of the pending extension within the `deadlineExtensions` JSON array. The frontend uses `getPendingExtensionIndex()` to find the first entry where `decision` is null/undefined. If an extension was already decided, it won't be found and the call is blocked client-side.
 17. **`task.assignedToUser.role` is a flat string**: The user object returned in task responses has `role` as a plain string (e.g. `'Manager'`), not a nested Role object. Do not access `.role.name` — it will always be `undefined`.
 18. **Event Type in Findings is hardcoded until Phase 7**: `RaiseFindingPanel` uses a 9-item hardcoded list. Phase 7 will replace this with an admin-managed `EventType` table. The "Other" option writes a free-text value directly to `Finding.eventType`.
+
+### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
+
+19. **Test DB reset on the Feed & Escalation branch**: Suites seed with `create` (not upsert) and assume an empty DB at process start; each self-cleans in `afterAll` (`escalation.test.ts` mirrors `feed.test.ts`'s FK-safe deletes). There is **no global wipe**. Between local runs, reset with a plain `TRUNCATE … RESTART IDENTITY CASCADE` of every table except `_prisma_migrations`, then a single `npm run test`. **Do NOT** use `prisma db push --force-reset` — Prisma's AI guardrail blocks it, and on an empty DB the `prisma.config.ts` seed auto-runs and then collides with suite fixtures. Also: a stale generated client makes `prisma.feedPost` undefined → run `npx prisma generate` after pulling schema changes. *(Still relevant.)*
+20. ~~**`EscalationCard` badge is hardcoded `Pending`**~~ — **RESOLVED (Phase 4):** `getFeed` pipes posts through `enrichFlagStatus` (batch-loads `EscalationFlag.status` by the cards' `flagId`); the card renders the badge from `post.flagStatus` (Pending amber / Actioned green / Dismissed slate).
+21. ~~**No dedup guard on flagging**~~ — **RESOLVED (Phase 5):** `flagPost` blocks a second PENDING flag for the same `(sourcePostId, targetScope)` → **409** via an in-tx `findFirst` at `isolationLevel: Serializable` (concurrent loser's `P2034` → 409). Re-flagging allowed once the prior flag leaves PENDING. `FlagButton` also tracks per-target flagged state client-side (checkmark + disable). +4 tests.
+22. ~~**Header bell polls for every role**~~ — **RESOLVED (Phase 5):** the poll is gated to `ESCALATION_ACTION_ROLES` (Director/Admin/Manager) via `constants/escalationRoles.ts`; GL/Staff never poll and the badge is guarded by `canSeeEscalations`. Badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers.
+23. ~~**Minor cleanup**~~ — **RESOLVED (Phase 5):** `formatTimestamp`/`sourceHref`/`TARGET_SCOPE_LABEL` extracted to `utils/feedHelpers.ts`; the dedicated **`/dashboard/escalations`** list page now exists (+ Sidebar nav, bell links to it); the 6-action cluster extracted to `components/feed/EscalationActions.tsx` (shared by card + page).
 
 ---
 

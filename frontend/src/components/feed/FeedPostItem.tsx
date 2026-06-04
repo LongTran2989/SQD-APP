@@ -1,7 +1,10 @@
 'use client';
 
 import { Settings } from 'lucide-react';
-import { FeedPostEnriched } from '../../types';
+import { FeedPostEnriched, EscalationTargetScope } from '../../types';
+import EscalationCard from './EscalationCard';
+import InfoCard from './InfoCard';
+import FlagButton from './FlagButton';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,12 +31,26 @@ function getInitials(name: string): string {
 interface FeedPostItemProps {
   post: FeedPostEnriched;
   currentUserId: number;
+  // Scopes a COMMENT on this feed may be escalated to (empty/omitted = no flag
+  // button). Computed by the parent FeedPanel from its own scope.
+  flagTargets?: EscalationTargetScope[];
+  // Called after a successful flag so the parent can refresh the feed.
+  onFlagged?: () => void;
+  // Called after a successful flag action so the parent can refresh the feed.
+  onActioned?: () => void;
 }
 
-// Renders a single feed entry. Phase 2 handles COMMENT + SYSTEM_EVENT; the
-// ESCALATION_CARD / INFO_CARD types fall through to a neutral card and are
-// fleshed out in Phase 3.
-export default function FeedPostItem({ post, currentUserId }: FeedPostItemProps) {
+// Renders a single feed entry: SYSTEM_EVENT, COMMENT (with an optional escalate
+// button), or the real ESCALATION_CARD / INFO_CARD renderers.
+export default function FeedPostItem({ post, currentUserId, flagTargets, onFlagged, onActioned }: FeedPostItemProps) {
+  if (post.type === 'ESCALATION_CARD') {
+    return <EscalationCard post={post} onActioned={onActioned} />;
+  }
+
+  if (post.type === 'INFO_CARD') {
+    return <InfoCard post={post} />;
+  }
+
   if (post.type === 'SYSTEM_EVENT') {
     return (
       <div className="flex items-start gap-2.5">
@@ -66,6 +83,9 @@ export default function FeedPostItem({ post, currentUserId }: FeedPostItemProps)
         <div className={`flex items-center gap-2 mb-1 ${isSelf ? 'flex-row-reverse' : ''}`}>
           <span className="text-xs font-semibold text-slate-700">{isSelf ? 'You' : authorName}</span>
           <span className="text-[10px] text-slate-400">{formatTimestamp(post.createdAt)}</span>
+          {flagTargets && flagTargets.length > 0 && (
+            <FlagButton postId={post.id} targets={flagTargets} onFlagged={onFlagged} />
+          )}
         </div>
         <div
           className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed max-w-full break-words ${

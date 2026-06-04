@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { MessageCircle, Send } from 'lucide-react';
-import { FeedPostEnriched, FeedScope, User } from '../../types';
+import { FeedPostEnriched, FeedScope, EscalationTargetScope, User } from '../../types';
 import { getFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
+import { getApiErrorMessage } from '../../utils/apiError';
 import FeedPostItem from './FeedPostItem';
 
 function getInitials(name: string): string {
@@ -58,6 +59,20 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
 
   const canPost = !readOnly && canPostToFeed(currentUser.role, currentUser.divisionId, scope, scopeId);
 
+  // A comment may only be escalated UPWARD. WP comments → Division / Org; Division
+  // comments → Org; Org comments can't escalate. (Task comments are flagged from
+  // the dedicated task feed, which knows the task's WP.)
+  const flagTargets: EscalationTargetScope[] =
+    scope === 'WP' ? ['DIVISION', 'ORG'] : scope === 'DIVISION' ? ['ORG'] : [];
+
+  // Re-fetch after an escalation so the source-feed SYSTEM_EVENT (and any card
+  // landing on this same feed) appears. Mirrors the load effect's setState.
+  const reloadFeed = () => {
+    getFeed(scope, scopeId)
+      .then(setPosts)
+      .catch(() => {});
+  };
+
   const handlePost = async () => {
     if (!comment.trim()) return;
     setPosting(true);
@@ -66,9 +81,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
       setPosts((prev) => [...prev, created]);
       setComment('');
     } catch (err) {
-      const message =
-        (err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to post comment';
-      toast.error(message);
+      toast.error(getApiErrorMessage(err, 'Failed to post comment'));
     } finally {
       setPosting(false);
     }
@@ -101,7 +114,16 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
             No activity yet. Comments and events will appear here.
           </div>
         ) : (
-          posts.map((post) => <FeedPostItem key={post.id} post={post} currentUserId={currentUser.id} />)
+          posts.map((post) => (
+            <FeedPostItem
+              key={post.id}
+              post={post}
+              currentUserId={currentUser.id}
+              flagTargets={flagTargets}
+              onFlagged={reloadFeed}
+              onActioned={reloadFeed}
+            />
+          ))
         )}
       </div>
 
