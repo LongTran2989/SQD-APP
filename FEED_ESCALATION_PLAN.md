@@ -6,7 +6,7 @@
 
 ---
 
-## STATUS: Phase 5 COMPLETE — pending user confirmation for the `CLAUDE_HANDOVER.md` + `BUSINESS_WORKFLOW.md` doc update (Rule 12). (✅ 260 backend tests pass, 11 suites — 256 + 4 dedup-guard tests; frontend lint at baseline 70/23 — **zero new**; `tsc --noEmit` clean except legacy `clean.ts`; `next build` exit 0. High-effort code review + security review run, findings fixed/triaged.) **This is the final phase — the feature is functionally done.**
+## STATUS: ✅ **FEATURE COMPLETE** (all 5 phases) — user confirmed 2026-06-04; Rule 12 docs done (`CLAUDE_HANDOVER.md` + `BUSINESS_WORKFLOW.md` updated; `FEED_ESCALATION_USER_GUIDE.md` + `FEED_ESCALATION_DEV_GUIDE.md` + `FEED_ESCALATION_TEST_CHECKLIST.md` added). (✅ 260 backend tests pass, 11 suites — 256 + 4 dedup-guard tests; frontend lint at baseline 70/23 — **zero new**; `tsc --noEmit` clean except legacy `clean.ts`; `next build` exit 0. High-effort code review + security review run, findings fixed/triaged. Post-confirmation UX fix: `FlagButton` tracks per-target flagged state.)
 
 | Phase | Title | State |
 |------|-------|-------|
