@@ -6,7 +6,9 @@
 
 ---
 
-## STATUS: ✅ **FEATURE COMPLETE** (all 5 phases) — user confirmed 2026-06-04; Rule 12 docs done (`CLAUDE_HANDOVER.md` + `BUSINESS_WORKFLOW.md` updated; `FEED_ESCALATION_USER_GUIDE.md` + `FEED_ESCALATION_DEV_GUIDE.md` + `FEED_ESCALATION_TEST_CHECKLIST.md` added). (✅ 260 backend tests pass, 11 suites — 256 + 4 dedup-guard tests; frontend lint at baseline 70/23 — **zero new**; `tsc --noEmit` clean except legacy `clean.ts`; `next build` exit 0. High-effort code review + security review run, findings fixed/triaged. Post-confirmation UX fix: `FlagButton` tracks per-target flagged state.)
+## STATUS: ✅ **FEATURE COMPLETE** (all 5 phases + post-ship history page) — user confirmed 2026-06-05; Rule 12 docs done. (✅ 262 backend tests pass, 11 suites; frontend lint at baseline 70/23 — **zero new**; `tsc --noEmit` clean except legacy `clean.ts`; `next build` exit 0.)
+
+**Post-ship UX (branch `claude/eloquent-feynman-G4thG`, 2026-06-05):** Escalations page now retains full history (PENDING + ACTIONED + DISMISSED). Bell still counts PENDING only. Status filter dropdown + Pending/History split in the ALL view. Actioned/dismissed rows show "Actioned by … · action · when" — no dead buttons. Backend: `action`, `actionedAt`, `reviewedBy` fields added to the list response (additive, no schema change). +2 new tests (262 total).
 
 | Phase | Title | State |
 |------|-------|-------|
