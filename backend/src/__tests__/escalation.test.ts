@@ -440,6 +440,44 @@ describe('Escalation core (Phase 3)', () => {
       expect(wpFlag.flaggedBy).toMatchObject({ name: expect.any(String) });
       expect(wpFlag.card).toMatchObject({ scope: 'WP', scopeId: wpAId });
     });
+
+    it('omitting status returns full history (PENDING + ACTIONED) with action-result fields', async () => {
+      // Action one flag so it leaves the pending queue and joins the history.
+      await request(app)
+        .post(`/api/escalations/${fWpA}/action`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ action: 'ACKNOWLEDGE' });
+
+      const res = await request(app).get('/api/escalations').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      // Still returns all four flags regardless of status.
+      expect(ids(res.body)).toEqual([fWpA, fDivA, fOrg, fDivB].sort());
+
+      const actioned = res.body.find((f: any) => f.id === fWpA);
+      expect(actioned.status).toBe('ACTIONED');
+      expect(actioned.action).toBe('ACKNOWLEDGE');
+      expect(actioned.actionedAt).toBeTruthy();
+      expect(actioned.reviewedBy).toMatchObject({ id: directorUserId, name: expect.any(String) });
+
+      // A still-pending flag carries null action-result fields.
+      const stillPending = res.body.find((f: any) => f.id === fDivA);
+      expect(stillPending.status).toBe('PENDING');
+      expect(stillPending.action).toBeNull();
+      expect(stillPending.actionedAt).toBeNull();
+      expect(stillPending.reviewedBy).toBeNull();
+    });
+
+    it('status=ACTIONED returns only actioned flags', async () => {
+      await request(app)
+        .post(`/api/escalations/${fOrg}/action`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ action: 'DISMISS' });
+
+      const res = await request(app).get('/api/escalations?status=ACTIONED').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      // DISMISS sets status DISMISSED, so it should NOT appear under ACTIONED.
+      expect(res.body.map((f: any) => f.id)).not.toContain(fOrg);
+    });
   });
 
   // ─── POST /api/escalations/:id/action — flag lifecycle (Phase 4) ─────────────
