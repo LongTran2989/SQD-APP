@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
   engineType = "library"
 }
 
@@ -12,27 +12,27 @@ datasource db {
 // -----------------------------------------------------------------------
 
 model Department {
-  id             Int        @id @default(autoincrement())
-  name           String     @unique
-  divisions      Division[]
-  findings       Finding[]  @relation("FindingDepartment")
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  divisions Division[]
+  findings  Finding[]  @relation("FindingDepartment")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 }
 
 model Division {
-  id             Int        @id @default(autoincrement())
-  name           String
-  code           String     @unique // e.g. QA, QCH, QCS, SQ — used for templateId generation
-  departmentId   Int
-  department     Department @relation(fields: [departmentId], references: [id])
-  users          User[]
-  templates      Template[] @relation("TemplateDivision")
-  targetedTasks  Task[]     @relation("TaskTargetDivision")
-  targetedFinds  Finding[]  @relation("FindingTargetDivision")
-  workPackages   WorkPackage[]
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id            Int           @id @default(autoincrement())
+  name          String
+  code          String        @unique // e.g. QA, QCH, QCS, SQ — used for templateId generation
+  departmentId  Int
+  department    Department    @relation(fields: [departmentId], references: [id])
+  users         User[]
+  templates     Template[]    @relation("TemplateDivision")
+  targetedTasks Task[]        @relation("TaskTargetDivision")
+  targetedFinds Finding[]     @relation("FindingTargetDivision")
+  workPackages  WorkPackage[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 }
 
 // -----------------------------------------------------------------------
@@ -40,49 +40,56 @@ model Division {
 // -----------------------------------------------------------------------
 
 model Role {
-  id             Int        @id @default(autoincrement())
-  name           String     @unique // e.g. Director, Manager, Group Leader, Staff
-  users          User[]
+  id    Int    @id @default(autoincrement())
+  name  String @unique // e.g. Director, Manager, Group Leader, Staff
+  users User[]
 }
 
 model User {
-  id                  Int        @id @default(autoincrement())
-  employeeId          String?    @unique  // Staff ID — primary login identifier (e.g. VAE00071)
-  name                String
-  email               String?    @unique  // Optional — for notifications / password reset only
-  phone               String?            // Optional contact number
-  passwordHash        String
-  forcePasswordChange Boolean    @default(true)
-  resetPasswordToken  String?
+  id                   Int       @id @default(autoincrement())
+  employeeId           String?   @unique // Staff ID — primary login identifier (e.g. VAE00071)
+  name                 String
+  email                String?   @unique // Optional — for notifications / password reset only
+  phone                String? // Optional contact number
+  passwordHash         String
+  forcePasswordChange  Boolean   @default(true)
+  resetPasswordToken   String?
   resetPasswordExpires DateTime?
-  activeSessionId     String?    // UUID tracking the latest active login session
+  activeSessionId      String? // UUID tracking the latest active login session
 
-  divisionId          Int
-  division            Division   @relation(fields: [divisionId], references: [id])
+  divisionId Int
+  division   Division @relation(fields: [divisionId], references: [id])
 
-  roleId              Int
-  role                Role       @relation(fields: [roleId], references: [id])
+  roleId Int
+  role   Role @relation(fields: [roleId], references: [id])
 
-  assignedTasks       Task[]     @relation("TaskAssignedTo")
-  reportedFindings    Finding[]  @relation("FindingReportedBy")
+  assignedTasks    Task[]    @relation("TaskAssignedTo")
+  reportedFindings Finding[] @relation("FindingReportedBy")
 
   // Templates this user revised or owns
-  revisedTemplates       Template[]               @relation("TemplateRevisedBy")
-  ownedTemplates         Template[]               @relation("TemplateOwnedBy")
-  revisionArchives       TemplateRevisionArchive[] @relation("ArchiveRevisedBy")
+  revisedTemplates Template[]                @relation("TemplateRevisedBy")
+  ownedTemplates   Template[]                @relation("TemplateOwnedBy")
+  revisionArchives TemplateRevisionArchive[] @relation("ArchiveRevisedBy")
 
-  aircraftAuths       UserAircraftAuthorization[]
-  jobAuths            UserJobAuthorization[]
+  aircraftAuths UserAircraftAuthorization[]
+  jobAuths      UserJobAuthorization[]
 
-  issuedTasks         Task[]     @relation("TaskIssuer")
-  closedFindings      Finding[]  @relation("FindingClosedBy")
+  issuedTasks            Task[]                  @relation("TaskIssuer")
+  closedFindings         Finding[]               @relation("FindingClosedBy")
   workPackageAssignments WorkPackageAssignment[]
-  createdWorkPackages WorkPackage[] @relation("WorkPackageCreator")
-  feedPosts           FeedPost[]
+  createdWorkPackages    WorkPackage[]           @relation("WorkPackageCreator")
+  feedPosts              FeedPost[]
 
-  deletedAt           DateTime?
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @updatedAt
+  // Findings expansion reverse relations (virtual — no columns added)
+  rcaInvestigations   RcaInvestigation[] @relation("RcaConductedBy")
+  ownedCapaActions    CapaAction[]       @relation("CapaOwner")
+  verifiedCapaActions CapaAction[]       @relation("CapaVerifiedBy")
+  createdCapaActions  CapaAction[]       @relation("CapaCreatedBy")
+  createdFindingLinks FindingLink[]      @relation("FindingLinkCreatedBy")
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 // -----------------------------------------------------------------------
@@ -90,30 +97,30 @@ model User {
 // -----------------------------------------------------------------------
 
 model AircraftType {
-  id             Int        @id @default(autoincrement())
-  iataCode       String     @unique // e.g. 737, 320
-  icaoCode       String     @unique // e.g. B737, A320
-  manufacturer   String                // e.g. Boeing, Airbus
-  model          String                // e.g. 737-800, A320neo
+  id             Int                         @id @default(autoincrement())
+  iataCode       String                      @unique // e.g. 737, 320
+  icaoCode       String                      @unique // e.g. B737, A320
+  manufacturer   String // e.g. Boeing, Airbus
+  model          String // e.g. 737-800, A320neo
   registrations  AircraftRegistration[]
   authorizations UserAircraftAuthorization[]
-  createdAt      DateTime   @default(now())
+  createdAt      DateTime                    @default(now())
 }
 
 model AircraftRegistration {
   id             Int          @id @default(autoincrement())
-  registration   String       @unique  // e.g. VN-A361
-  operator       String                // e.g. Vietnam Airlines
-  authority      String                // e.g. CAAV
+  registration   String       @unique // e.g. VN-A361
+  operator       String // e.g. Vietnam Airlines
+  authority      String // e.g. CAAV
   aircraftTypeId Int
   aircraftType   AircraftType @relation(fields: [aircraftTypeId], references: [id])
   createdAt      DateTime     @default(now())
 }
 
 model UserAircraftAuthorization {
-  id             Int        @id @default(autoincrement())
+  id             Int          @id @default(autoincrement())
   userId         Int
-  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   aircraftTypeId Int
   aircraftType   AircraftType @relation(fields: [aircraftTypeId], references: [id], onDelete: Cascade)
 
@@ -121,18 +128,18 @@ model UserAircraftAuthorization {
 }
 
 model AuthorizationType {
-  id             Int        @id @default(autoincrement())
-  code           String     @unique // e.g. INSPECTOR, MECHANIC
+  id             Int                    @id @default(autoincrement())
+  code           String                 @unique // e.g. INSPECTOR, MECHANIC
   description    String?
   authorizations UserJobAuthorization[]
 }
 
 model UserJobAuthorization {
-  id                   Int        @id @default(autoincrement())
-  userId               Int
-  user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  authorizationTypeId  Int
-  authorizationType    AuthorizationType @relation(fields: [authorizationTypeId], references: [id], onDelete: Cascade)
+  id                  Int               @id @default(autoincrement())
+  userId              Int
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  authorizationTypeId Int
+  authorizationType   AuthorizationType @relation(fields: [authorizationTypeId], references: [id], onDelete: Cascade)
 
   @@unique([userId, authorizationTypeId])
 }
@@ -142,108 +149,112 @@ model UserJobAuthorization {
 // -----------------------------------------------------------------------
 
 model Template {
-  id               Int        @id @default(autoincrement())
-  templateId       String     @unique // Auto-generated: [DivisionCode]-[3-digit seq], e.g. QA-001
+  id               Int     @id @default(autoincrement())
+  templateId       String  @unique // Auto-generated: [DivisionCode]-[3-digit seq], e.g. QA-001
   title            String
   description      String?
-  status           String     @default("Draft") // Draft, Published, Archived
-  revision         Int        @default(1)
-  requiresApproval Boolean    @default(false)
-  allowsFindings   Boolean    @default(true)
+  status           String  @default("Draft") // Draft, Published, Archived
+  revision         Int     @default(1)
+  requiresApproval Boolean @default(false)
+  allowsFindings   Boolean @default(true)
   estimatedHours   Float?
-  isOneOff         Boolean    @default(false)
+  isOneOff         Boolean @default(false)
   type             String?
-  formSchema       Json       // JSON document for active/published field definitions
-  draftSchema      Json?      // JSON document for unpublished draft changes
-  
+  formSchema       Json // JSON document for active/published field definitions
+  draftSchema      Json? // JSON document for unpublished draft changes
+
   // Division ownership (determines templateId prefix)
-  divisionId       Int
-  division         Division   @relation("TemplateDivision", fields: [divisionId], references: [id])
-  
+  divisionId Int
+  division   Division @relation("TemplateDivision", fields: [divisionId], references: [id])
+
   // Revision tracking
-  revisedByUserId  Int?
-  revisedByUser    User?      @relation("TemplateRevisedBy", fields: [revisedByUserId], references: [id])
-  revisedAt        DateTime?
-  
+  revisedByUserId Int?
+  revisedByUser   User?     @relation("TemplateRevisedBy", fields: [revisedByUserId], references: [id])
+  revisedAt       DateTime?
+
   // Ownership (only owner can edit/publish)
-  ownerId          Int
-  owner            User       @relation("TemplateOwnedBy", fields: [ownerId], references: [id])
-  
+  ownerId Int
+  owner   User @relation("TemplateOwnedBy", fields: [ownerId], references: [id])
+
   tasks            Task[]
   revisionArchives TemplateRevisionArchive[]
-  
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  publishedAt      DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
 }
 
 model TemplateRevisionArchive {
-  id               Int        @id @default(autoincrement())
-  templateId       Int
-  template         Template   @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  revision         Int
-  formSchema       Json       // Snapshot of the formSchema at this revision
-  publishedAt      DateTime
-  
-  revisedByUserId  Int
-  revisedByUser    User       @relation("ArchiveRevisedBy", fields: [revisedByUserId], references: [id])
-  
-  createdAt        DateTime   @default(now())
+  id          Int      @id @default(autoincrement())
+  templateId  Int
+  template    Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  revision    Int
+  formSchema  Json // Snapshot of the formSchema at this revision
+  publishedAt DateTime
+
+  revisedByUserId Int
+  revisedByUser   User @relation("ArchiveRevisedBy", fields: [revisedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
 }
 
 model Task {
-  id                 Int        @id @default(autoincrement())
-  taskId             String     @unique // e.g. QA-000001
-  title              String?    // Optional override label; falls back to template.title when null (used by follow-up tasks)
-  templateId         Int
-  template           Template   @relation(fields: [templateId], references: [id])
+  id         Int      @id @default(autoincrement())
+  taskId     String   @unique // e.g. QA-000001
+  title      String? // Optional override label; falls back to template.title when null (used by follow-up tasks)
+  templateId Int
+  template   Template @relation(fields: [templateId], references: [id])
 
-  status             String     @default("Unassigned") // Assigned, InProgress, Review, Approved, Rejected, etc.
-  
-  issuerId           Int
-  issuer             User       @relation("TaskIssuer", fields: [issuerId], references: [id])
-  
-  assignedToUserId   Int?
-  assignedToUser     User?      @relation("TaskAssignedTo", fields: [assignedToUserId], references: [id])
-  
-  wpId               Int?
-  wp                 WorkPackage? @relation(fields: [wpId], references: [id])
-  
+  status String @default("Unassigned") // Assigned, InProgress, Review, Approved, Rejected, etc.
+
+  issuerId Int
+  issuer   User @relation("TaskIssuer", fields: [issuerId], references: [id])
+
+  assignedToUserId Int?
+  assignedToUser   User? @relation("TaskAssignedTo", fields: [assignedToUserId], references: [id])
+
+  wpId Int?
+  wp   WorkPackage? @relation(fields: [wpId], references: [id])
+
   deadline           DateTime?
   deadlineExtensions Json?
   inactivationLog    Json?
   rejectionReason    String?
   rating             Int?
   estimatedHours     Float?
-  assignmentType     String     @default("INDIVIDUAL")
+  assignmentType     String    @default("INDIVIDUAL")
   schemaSnapshot     Json
-  
+
   // The division being audited/surveilled
-  targetDivisionId   Int?
-  targetDivision     Division?  @relation("TaskTargetDivision", fields: [targetDivisionId], references: [id])
-  
+  targetDivisionId Int?
+  targetDivision   Division? @relation("TaskTargetDivision", fields: [targetDivisionId], references: [id])
+
   // If this task is a follow-up action to a finding
-  parentFindingId    Int?
-  parentFinding      Finding?   @relation("FindingFollowUpTask", fields: [parentFindingId], references: [id])
-  
-  taskData           TaskData?
-  sourceFindings     Finding[]  @relation("FindingSourceTask")
-  timeBooking        TimeBooking?
-  
-  deletedAt          DateTime?
-  createdAt          DateTime   @default(now())
-  completedAt        DateTime?
-  updatedAt          DateTime   @updatedAt
+  parentFindingId Int?
+  parentFinding   Finding? @relation("FindingFollowUpTask", fields: [parentFindingId], references: [id])
+
+  taskData       TaskData?
+  sourceFindings Finding[]    @relation("FindingSourceTask")
+  timeBooking    TimeBooking?
+
+  // CAPA reverse relations (virtual — no columns added, no behaviour change)
+  capaExecutionOf     CapaAction[] @relation("CapaExecutionTask")
+  capaEffectivenessOf CapaAction[] @relation("CapaEffectivenessTask")
+
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
 }
 
 model TaskData {
-  id                 Int        @id @default(autoincrement())
-  taskId             Int        @unique
-  task               Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  data               Json       // The actual answers/inputs matching formSchema
-  
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+  id     Int  @id @default(autoincrement())
+  taskId Int  @unique
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  data   Json // The actual answers/inputs matching formSchema
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // -----------------------------------------------------------------------
@@ -251,44 +262,219 @@ model TaskData {
 // -----------------------------------------------------------------------
 
 model Finding {
-  id                 Int        @id @default(autoincrement())
-  severity           String?    // Observation, Level 1, Level 2
-  category           String?    // Legacy classification (Safety, Documentation, Tools, etc.) — optional; eventType is the primary classifier
-  description        String
-  status             String     @default("Open") // Open, In Progress, Pending Verification, Closed
-  
-  fieldId            String?
-  dueDate            DateTime?
-  eventType          String
+  id          Int     @id @default(autoincrement())
+  severity    String? // Observation, Level 1, Level 2
+  category    String? // Legacy classification (Safety, Documentation, Tools, etc.) — optional; eventType is the primary classifier
+  description String
+  status      String  @default("Open") // Open, In Progress, Pending Verification, Closed
+
+  fieldId              String?
+  dueDate              DateTime?
+  eventType            String
   aircraftRegistration String?
-  regulatoryReference String?
-  errorCode          String?
-  rootCause          String?
-  correctiveAction   String?
-  recurrence         Boolean?
-  violatorIds        Json?
-  
-  sourceTaskId       Int?
-  sourceTask         Task?      @relation("FindingSourceTask", fields: [sourceTaskId], references: [id])
-  
-  reportedByUserId   Int
-  reportedByUser     User       @relation("FindingReportedBy", fields: [reportedByUserId], references: [id])
-  
-  closedByUserId     Int?
-  closedByUser       User?      @relation("FindingClosedBy", fields: [closedByUserId], references: [id])
-  
-  targetDivisionId   Int?
-  targetDivision     Division?  @relation("FindingTargetDivision", fields: [targetDivisionId], references: [id])
+  regulatoryReference  String?
+  errorCode            String?
+  rootCause            String?
+  correctiveAction     String?
+  recurrence           Boolean?
+  violatorIds          Json?
 
-  departmentId       Int        // Department where the finding occurred — required at raise time
-  department         Department @relation("FindingDepartment", fields: [departmentId], references: [id])
+  sourceTaskId Int?
+  sourceTask   Task? @relation("FindingSourceTask", fields: [sourceTaskId], references: [id])
 
-  followUpTasks      Task[]     @relation("FindingFollowUpTask")
-  
-  deletedAt          DateTime?
-  createdAt          DateTime   @default(now())
-  closedAt           DateTime?
-  updatedAt          DateTime   @updatedAt
+  reportedByUserId Int
+  reportedByUser   User @relation("FindingReportedBy", fields: [reportedByUserId], references: [id])
+
+  closedByUserId Int?
+  closedByUser   User? @relation("FindingClosedBy", fields: [closedByUserId], references: [id])
+
+  targetDivisionId Int?
+  targetDivision   Division? @relation("FindingTargetDivision", fields: [targetDivisionId], references: [id])
+
+  departmentId Int // Department where the finding occurred — required at raise time
+  department   Department @relation("FindingDepartment", fields: [departmentId], references: [id])
+
+  followUpTasks Task[] @relation("FindingFollowUpTask")
+
+  // ── Expansion pack (RCA / CAPA / Taxonomy / Traceability) — all optional ──
+  ataChapterId Int?
+  ataChapter   AtaChapter?        @relation("FindingAtaChapter", fields: [ataChapterId], references: [id])
+  rca          RcaInvestigation?  @relation("FindingRca")
+  capaActions  CapaAction[]       @relation("FindingCapa")
+  hazardTags   FindingHazardTag[] @relation("FindingHazardTags")
+  linksFrom    FindingLink[]      @relation("FindingLinkFrom")
+  linksTo      FindingLink[]      @relation("FindingLinkTo")
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  closedAt  DateTime?
+  updatedAt DateTime  @updatedAt
+
+  @@index([departmentId, ataChapterId]) // supports the trend recurrence query
+}
+
+// -----------------------------------------------------------------------
+// Findings Expansion — RCA / CAPA / Taxonomy / Traceability
+// -----------------------------------------------------------------------
+
+// Root Cause Analysis — 1:1 with Finding. `method` discriminates which
+// structured child set applies (5-Whys ladder vs MEDA contributing factors).
+// The determined Cause Code (the conclusion) lives here, not on the Finding.
+model RcaInvestigation {
+  id        Int     @id @default(autoincrement())
+  findingId Int     @unique
+  finding   Finding @relation("FindingRca", fields: [findingId], references: [id], onDelete: Cascade)
+
+  method  String // MEDA | FIVE_WHYS | OTHER  (RCA_METHODS)
+  summary String? // narrative conclusion / OTHER free-text body
+  status  String  @default("Draft") // Draft | Complete (RCA_STATUSES)
+
+  // The determined primary cause — only knowable once the cause is established.
+  causeCodeId Int?
+  causeCode   CauseCode? @relation("RcaCauseCode", fields: [causeCodeId], references: [id])
+
+  conductedByUserId Int?
+  conductedByUser   User? @relation("RcaConductedBy", fields: [conductedByUserId], references: [id])
+
+  whySteps RcaWhyStep[]            @relation("RcaWhySteps")
+  factors  RcaContributingFactor[] @relation("RcaFactors")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([method])
+  @@index([causeCodeId])
+}
+
+// Ordered 5-Whys ladder (method = FIVE_WHYS).
+model RcaWhyStep {
+  id         Int              @id @default(autoincrement())
+  rcaId      Int
+  rca        RcaInvestigation @relation("RcaWhySteps", fields: [rcaId], references: [id], onDelete: Cascade)
+  orderIndex Int // 0-based ladder position
+  question   String
+  answer     String?
+  createdAt  DateTime         @default(now())
+
+  @@unique([rcaId, orderIndex])
+  @@index([rcaId])
+}
+
+// MEDA contributing-factor rows (method = MEDA).
+model RcaContributingFactor {
+  id        Int              @id @default(autoincrement())
+  rcaId     Int
+  rca       RcaInvestigation @relation("RcaFactors", fields: [rcaId], references: [id], onDelete: Cascade)
+  category  String // MEDA category (RCA_MEDA_CATEGORIES)
+  detail    String?
+  isPrimary Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([rcaId])
+}
+
+// Corrective / Preventive Action. Sits beside follow-up Tasks; OPTIONALLY
+// references existing Tasks for execution and effectiveness verification.
+// Never mutates Task fields or the Task status machine.
+model CapaAction {
+  id        Int     @id @default(autoincrement())
+  findingId Int
+  finding   Finding @relation("FindingCapa", fields: [findingId], references: [id], onDelete: Cascade)
+
+  type        String // CORRECTIVE | PREVENTIVE (CAPA_TYPES)
+  description String
+  ownerUserId Int?
+  ownerUser   User?     @relation("CapaOwner", fields: [ownerUserId], references: [id])
+  deadline    DateTime?
+  status      String    @default("Open") // Open | In Progress | Completed | Verified | Waived (CAPA_STATUSES)
+
+  executionTaskId     Int?
+  executionTask       Task? @relation("CapaExecutionTask", fields: [executionTaskId], references: [id])
+  effectivenessTaskId Int?
+  effectivenessTask   Task? @relation("CapaEffectivenessTask", fields: [effectivenessTaskId], references: [id])
+
+  verifiedByUserId Int?
+  verifiedByUser   User?     @relation("CapaVerifiedBy", fields: [verifiedByUserId], references: [id])
+  verifiedAt       DateTime?
+  waivedReason     String? // required when status = Waived
+
+  createdByUserId Int
+  createdByUser   User @relation("CapaCreatedBy", fields: [createdByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([findingId])
+  @@index([type, status])
+}
+
+// ATA 100 chapter reference lookup (admin-managed).
+model AtaChapter {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique // "05", "32", "100"
+  title     String
+  isActive  Boolean   @default(true)
+  findings  Finding[] @relation("FindingAtaChapter")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// Human-factors cause code taxonomy (MEDA-style groups A–J). The conclusion of
+// an RCA references one of these.
+model CauseCode {
+  id        Int                @id @default(autoincrement())
+  code      String             @unique // "A01", "H07"
+  name      String // cause_name
+  groupCode String // "A".."J"
+  groupName String
+  isActive  Boolean            @default(true)
+  rcas      RcaInvestigation[] @relation("RcaCauseCode")
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@index([groupCode])
+}
+
+// Hazard tag reference lookup (admin-managed). Many-to-many with Finding.
+model HazardTag {
+  id          Int                @id @default(autoincrement())
+  label       String             @unique // "FOD", "Fatigue", "Tooling Control"
+  description String?
+  isActive    Boolean            @default(true)
+  findings    FindingHazardTag[] @relation("HazardTagJunction")
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model FindingHazardTag {
+  id          Int       @id @default(autoincrement())
+  findingId   Int
+  finding     Finding   @relation("FindingHazardTags", fields: [findingId], references: [id], onDelete: Cascade)
+  hazardTagId Int
+  hazardTag   HazardTag @relation("HazardTagJunction", fields: [hazardTagId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([findingId, hazardTagId])
+  @@index([hazardTagId]) // supports trend grouping by hazard tag
+}
+
+// Self-referencing cross-reference between two Findings.
+model FindingLink {
+  id               Int     @id @default(autoincrement())
+  fromFindingId    Int
+  fromFinding      Finding @relation("FindingLinkFrom", fields: [fromFindingId], references: [id], onDelete: Cascade)
+  relatedFindingId Int
+  relatedFinding   Finding @relation("FindingLinkTo", fields: [relatedFindingId], references: [id], onDelete: Cascade)
+
+  linkType String // DUPLICATE | RELATED | CAUSED_BY (LINK_TYPES)
+  note     String?
+
+  createdByUserId Int
+  createdByUser   User     @relation("FindingLinkCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+
+  @@unique([fromFindingId, relatedFindingId, linkType])
+  @@index([relatedFindingId])
 }
 
 // -----------------------------------------------------------------------
@@ -296,17 +482,17 @@ model Finding {
 // -----------------------------------------------------------------------
 
 model AuditLog {
-  id                 Int        @id @default(autoincrement())
-  actionType         String     // TASK_REASSIGNED, TASK_REJECTED, FINDING_RAISED, etc.
-  entityType         String     // Task, Finding, WorkPackage, etc.
-  entityId           String     
-  
-  performedByUserId  Int
-  
-  comment            String?    // User's reasoning or feedback
-  details            Json?      // Technical JSON payload of the change
-  
-  timestamp          DateTime   @default(now())
+  id         Int    @id @default(autoincrement())
+  actionType String // TASK_REASSIGNED, TASK_REJECTED, FINDING_RAISED, etc.
+  entityType String // Task, Finding, WorkPackage, etc.
+  entityId   String
+
+  performedByUserId Int
+
+  comment String? // User's reasoning or feedback
+  details Json? // Technical JSON payload of the change
+
+  timestamp DateTime @default(now())
 }
 
 // -----------------------------------------------------------------------
@@ -315,7 +501,7 @@ model AuditLog {
 
 model SystemSetting {
   key         String   @id // e.g. ENFORCE_SINGLE_SESSION
-  value       String   // e.g. "true", "false", JSON payload
+  value       String // e.g. "true", "false", JSON payload
   description String?
   updatedAt   DateTime @updatedAt
 }
@@ -325,49 +511,49 @@ model SystemSetting {
 // -----------------------------------------------------------------------
 
 model WorkPackage {
-  id               Int        @id @default(autoincrement())
-  wpId             String     @unique // e.g. QA-WP-000001
-  name             String
-  type             String     // CHECK, AUDIT, etc. Reference to WpType implicitly or by string
-  
-  divisionId       Int
-  division         Division   @relation(fields: [divisionId], references: [id])
-  
-  timeframeFrom    DateTime
-  timeframeTo      DateTime
-  
-  creatorId        Int
-  creator          User       @relation("WorkPackageCreator", fields: [creatorId], references: [id])
-  
-  checkTemplateId  Int?       // ID of Template to auto-generate daily CHECK tasks
-  
-  status           String     @default("Open") // Open, In Progress, Overdue, Closed, Inactive
-  inactivationLog  Json?
-  
-  assignments      WorkPackageAssignment[]
-  tasks            Task[]
-  
-  deletedAt        DateTime?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  id   Int    @id @default(autoincrement())
+  wpId String @unique // e.g. QA-WP-000001
+  name String
+  type String // CHECK, AUDIT, etc. Reference to WpType implicitly or by string
+
+  divisionId Int
+  division   Division @relation(fields: [divisionId], references: [id])
+
+  timeframeFrom DateTime
+  timeframeTo   DateTime
+
+  creatorId Int
+  creator   User @relation("WorkPackageCreator", fields: [creatorId], references: [id])
+
+  checkTemplateId Int? // ID of Template to auto-generate daily CHECK tasks
+
+  status          String @default("Open") // Open, In Progress, Overdue, Closed, Inactive
+  inactivationLog Json?
+
+  assignments WorkPackageAssignment[]
+  tasks       Task[]
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 model WorkPackageAssignment {
-  id             Int          @id @default(autoincrement())
-  wpId           Int
-  wp             WorkPackage  @relation(fields: [wpId], references: [id], onDelete: Cascade)
-  userId         Int
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt      DateTime     @default(now())
+  id        Int         @id @default(autoincrement())
+  wpId      Int
+  wp        WorkPackage @relation(fields: [wpId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
 
   @@unique([wpId, userId])
 }
 
 model WpType {
-  id             Int        @id @default(autoincrement())
-  code           String     @unique
-  description    String?
-  createdAt      DateTime   @default(now())
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
 }
 
 // -----------------------------------------------------------------------
@@ -383,27 +569,27 @@ model WpType {
 // (taskId / wpId / divisionId; NULL for the singleton ORG feed) so it carries
 // no foreign key — feeds are queried by (scope, scopeId).
 model FeedPost {
-  id              Int       @id @default(autoincrement())
-  type            String    // COMMENT | SYSTEM_EVENT | ESCALATION_CARD | INFO_CARD
-  scope           String    // TASK | WP | DIVISION | ORG
-  scopeId         Int?      // taskId / wpId / divisionId; NULL for ORG
-  authorId        Int?      // NULL for SYSTEM_EVENT / auto-generated cards
-  author          User?     @relation(fields: [authorId], references: [id])
-  content         String
-  metadata        Json?
+  id       Int    @id @default(autoincrement())
+  type     String // COMMENT | SYSTEM_EVENT | ESCALATION_CARD | INFO_CARD
+  scope    String // TASK | WP | DIVISION | ORG
+  scopeId  Int? // taskId / wpId / divisionId; NULL for ORG
+  authorId Int? // NULL for SYSTEM_EVENT / auto-generated cards
+  author   User?  @relation(fields: [authorId], references: [id])
+  content  String
+  metadata Json?
 
   // Escalation linkage (populated from Phase 3 onward)
-  sourcePostId    Int?      // the flagged COMMENT this card references
-  sourcePost      FeedPost? @relation("PostSource", fields: [sourcePostId], references: [id])
-  derivedPosts    FeedPost[] @relation("PostSource")
-  sourceExcerpt   String?
-  sourceTaskId    Int?      // denormalised for deep-linking (no FK — polymorphic origin)
-  sourceWpId      Int?
-  flagId          Int?
-  flag            EscalationFlag? @relation(fields: [flagId], references: [id])
-  taggedDivisionIds Json?   // Org Feed only — int array of tagged divisions
+  sourcePostId      Int? // the flagged COMMENT this card references
+  sourcePost        FeedPost?       @relation("PostSource", fields: [sourcePostId], references: [id])
+  derivedPosts      FeedPost[]      @relation("PostSource")
+  sourceExcerpt     String?
+  sourceTaskId      Int? // denormalised for deep-linking (no FK — polymorphic origin)
+  sourceWpId        Int?
+  flagId            Int?
+  flag              EscalationFlag? @relation(fields: [flagId], references: [id])
+  taggedDivisionIds Json? // Org Feed only — int array of tagged divisions
 
-  createdAt       DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@index([scope, scopeId, createdAt])
   @@index([flagId])
@@ -412,18 +598,18 @@ model FeedPost {
 // One flag tracks an escalation through its entire lifecycle (no flag chains).
 // Immutable record — never soft-deleted.
 model EscalationFlag {
-  id               Int       @id @default(autoincrement())
-  sourcePostId     Int       // immutable ref to the original flagged comment
+  id               Int        @id @default(autoincrement())
+  sourcePostId     Int // immutable ref to the original flagged comment
   flaggedByUserId  Int
-  targetScope      String    // WP | DIVISION | ORG
-  status           String    @default("PENDING") // PENDING | ACTIONED | DISMISSED
+  targetScope      String // WP | DIVISION | ORG
+  status           String     @default("PENDING") // PENDING | ACTIONED | DISMISSED
   reviewedByUserId Int?
-  action           String?   // ACKNOWLEDGE | DISMISS | RAISE_FINDING | CREATE_TASK | REASSIGN_TASK | DISSEMINATE
+  action           String? // ACKNOWLEDGE | DISMISS | RAISE_FINDING | CREATE_TASK | REASSIGN_TASK | DISSEMINATE
   actionedAt       DateTime?
-  linkedEntityType String?   // Finding | Task
+  linkedEntityType String? // Finding | Task
   linkedEntityId   String?
   cards            FeedPost[]
-  createdAt        DateTime  @default(now())
+  createdAt        DateTime   @default(now())
 
   @@index([targetScope, status])
 }
@@ -447,19 +633,18 @@ model TimeBooking {
 model PrivilegeConfig {
   id          Int      @id @default(autoincrement())
   roleId      Int      @unique
-  permissions Json     // Granular permissions map
+  permissions Json // Granular permissions map
   updatedAt   DateTime @updatedAt
 }
 
 model Attachment {
-  id          Int      @id @default(autoincrement())
-  fileName    String
-  fileType    String
-  fileSize    Int
-  storageKey  String   @unique
-  entityType  String
-  entityId    String
+  id           Int      @id @default(autoincrement())
+  fileName     String
+  fileType     String
+  fileSize     Int
+  storageKey   String   @unique
+  entityType   String
+  entityId     String
   uploadedById Int
-  createdAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
 }
-

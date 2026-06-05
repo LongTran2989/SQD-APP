@@ -15,6 +15,7 @@ import datasourceRoutes from './routes/datasource.routes';
 import wpRoutes from './routes/wp.routes';
 import taskRoutes from './routes/task.routes';
 import findingRoutes from './routes/finding.routes';
+import taxonomyRoutes from './routes/taxonomy.routes';
 import feedRoutes from './routes/feed.routes';
 import escalationRoutes from './routes/escalation.routes';
 
@@ -38,6 +39,7 @@ app.use('/api/datasources', datasourceRoutes);
 app.use('/api/work-packages', wpRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/findings', findingRoutes);
+app.use('/api/taxonomy', taxonomyRoutes);
 app.use('/api/feeds', feedRoutes);
 app.use('/api/escalations', escalationRoutes);
 

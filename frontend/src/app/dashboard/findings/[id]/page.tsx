@@ -11,6 +11,10 @@ import { SeverityBadge, FindingStatusBadge } from '../../../../components/findin
 import ReviewPanel from '../../../../components/findings/ReviewPanel';
 import GenerateFollowUpModal from '../../../../components/findings/GenerateFollowUpModal';
 import Stage2Form from '../../../../components/findings/Stage2Form';
+import RcaPanel from '../../../../components/findings/RcaPanel';
+import CapaPanel from '../../../../components/findings/CapaPanel';
+import RelatedFindingsPanel from '../../../../components/findings/RelatedFindingsPanel';
+import TrendBanner from '../../../../components/findings/TrendBanner';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
 import TaskActivityFeed from '../../../../components/tasks/TaskActivityFeed';
 import toast from 'react-hot-toast';
@@ -112,6 +116,9 @@ export default function FindingDetailPage() {
   const stage2Visible = finding.status === 'Pending Verification' || finding.status === 'Closed';
   const stage2Editable = finding.status === 'Pending Verification' && (isReporter || isFollowUpAssignee || isMgrDir);
   const canClose = isMgrDir && finding.status === 'Pending Verification' && !!finding.rootCause && !!finding.correctiveAction;
+  // Expansion sections become available once the finding has been reviewed.
+  const analysisVisible = finding.status !== 'Open';
+  const analysisEditable = finding.status !== 'Closed' && (isReporter || isFollowUpAssignee || isMgrDir);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -124,6 +131,9 @@ export default function FindingDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ── Left column ── */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Trend banner — recurrent-pattern alert */}
+          <TrendBanner trend={finding.trend} />
+
           {/* Section 1 — Header */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -160,6 +170,8 @@ export default function FindingDetailPage() {
             <dl className="space-y-3 text-sm">
               <Field label="Event Type" value={finding.eventType} />
               <Field label="Department" value={finding.department?.name ?? null} />
+              <Field label="ATA Chapter" value={finding.ataChapter ? `${finding.ataChapter.code} — ${finding.ataChapter.title}` : null} />
+              <Field label="Hazard Tags" value={finding.hazardTags.length ? finding.hazardTags.map((h) => h.hazardTag.label).join(', ') : null} />
               <Field label="Aircraft Reg." value={finding.aircraftRegistration} />
               <Field label="Regulatory Ref." value={finding.regulatoryReference} />
               <Field label="Description" value={finding.description} />
@@ -212,6 +224,15 @@ export default function FindingDetailPage() {
 
           {/* Section 5 — Stage 2 */}
           {stage2Visible && <Stage2Form finding={finding} editable={stage2Editable} onSaved={load} />}
+
+          {/* Section 5b — Root Cause Analysis */}
+          {analysisVisible && <RcaPanel finding={finding} editable={analysisEditable} onSaved={load} />}
+
+          {/* Section 5c — CAPA */}
+          {analysisVisible && <CapaPanel finding={finding} canEdit={analysisEditable} isMgrDir={isMgrDir} onChanged={load} />}
+
+          {/* Section 5d — Related findings */}
+          <RelatedFindingsPanel finding={finding} canEdit={isMgrDir && finding.status !== 'Closed'} onChanged={load} />
 
           {/* Section 6 — Close */}
           {canClose && (

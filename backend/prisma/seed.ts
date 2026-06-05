@@ -18,6 +18,8 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcrypt';
+import { readFileSync } from 'fs';
+import path from 'path';
 import 'dotenv/config';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -231,6 +233,87 @@ async function main() {
     created++;
   }
   console.log(`✅ Users seeded (${created})`);
+
+  // ── FINDINGS TAXONOMY: ATA CHAPTERS ────────────────────────────────────────
+  // ATA 100 chapter reference (common subset; admin-extendable via /api/taxonomy).
+  const ataChapters = [
+    { code: '05', title: 'Time Limits / Maintenance Checks' },
+    { code: '12', title: 'Servicing' },
+    { code: '20', title: 'Standard Practices — Airframe' },
+    { code: '21', title: 'Air Conditioning' },
+    { code: '22', title: 'Auto Flight' },
+    { code: '23', title: 'Communications' },
+    { code: '24', title: 'Electrical Power' },
+    { code: '25', title: 'Equipment / Furnishings' },
+    { code: '26', title: 'Fire Protection' },
+    { code: '27', title: 'Flight Controls' },
+    { code: '28', title: 'Fuel' },
+    { code: '29', title: 'Hydraulic Power' },
+    { code: '30', title: 'Ice & Rain Protection' },
+    { code: '31', title: 'Indicating / Recording Systems' },
+    { code: '32', title: 'Landing Gear' },
+    { code: '33', title: 'Lights' },
+    { code: '34', title: 'Navigation' },
+    { code: '35', title: 'Oxygen' },
+    { code: '36', title: 'Pneumatic' },
+    { code: '38', title: 'Water / Waste' },
+    { code: '49', title: 'Airborne Auxiliary Power (APU)' },
+    { code: '51', title: 'Standard Practices & Structures — General' },
+    { code: '52', title: 'Doors' },
+    { code: '53', title: 'Fuselage' },
+    { code: '54', title: 'Nacelles / Pylons' },
+    { code: '55', title: 'Stabilizers' },
+    { code: '56', title: 'Windows' },
+    { code: '57', title: 'Wings' },
+    { code: '71', title: 'Power Plant' },
+    { code: '72', title: 'Engine' },
+    { code: '73', title: 'Engine Fuel & Control' },
+    { code: '74', title: 'Ignition' },
+    { code: '79', title: 'Oil' },
+    { code: '80', title: 'Starting' },
+  ];
+  await Promise.all(
+    ataChapters.map(c =>
+      prisma.ataChapter.upsert({ where: { code: c.code }, update: { title: c.title }, create: c })
+    )
+  );
+  console.log(`✅ ATA chapters seeded (${ataChapters.length})`);
+
+  // ── FINDINGS TAXONOMY: CAUSE CODES ─────────────────────────────────────────
+  // Human-factors cause-code taxonomy (MEDA-style groups A–J). Source of truth
+  // is prisma/data/causeCodes.json.
+  type CauseCodeRow = { group_code: string; group_name: string; cause_code: string; cause_name: string };
+  const causeCodeRows: CauseCodeRow[] = JSON.parse(
+    readFileSync(path.join(__dirname, 'data', 'causeCodes.json'), 'utf-8')
+  );
+  for (const r of causeCodeRows) {
+    await prisma.causeCode.upsert({
+      where: { code: r.cause_code },
+      update: { name: r.cause_name, groupCode: r.group_code, groupName: r.group_name },
+      create: { code: r.cause_code, name: r.cause_name, groupCode: r.group_code, groupName: r.group_name },
+    });
+  }
+  console.log(`✅ Cause codes seeded (${causeCodeRows.length})`);
+
+  // ── FINDINGS TAXONOMY: HAZARD TAGS ─────────────────────────────────────────
+  const hazardTags = [
+    { label: 'FOD', description: 'Foreign Object Debris/Damage' },
+    { label: 'Fatigue', description: 'Personnel fatigue contributing factor' },
+    { label: 'Tooling Control', description: 'Tool accountability / calibration' },
+    { label: 'Documentation', description: 'Documentation / record-keeping' },
+    { label: 'Human Factors', description: 'Human-factors related hazard' },
+    { label: 'Procedural Non-compliance', description: 'Procedure not followed' },
+    { label: 'Environmental', description: 'Environmental / facility condition' },
+    { label: 'Communication', description: 'Communication breakdown' },
+    { label: 'Training Gap', description: 'Knowledge / training shortfall' },
+    { label: 'Safety Critical', description: 'Directly affects flight safety' },
+  ];
+  await Promise.all(
+    hazardTags.map(t =>
+      prisma.hazardTag.upsert({ where: { label: t.label }, update: { description: t.description }, create: t })
+    )
+  );
+  console.log(`✅ Hazard tags seeded (${hazardTags.length})`);
 
   // ── AVIATION DATA PLACEHOLDER ──────────────────────────────────────────────
   // AircraftTypes, Operators, Authorities, Registrations,

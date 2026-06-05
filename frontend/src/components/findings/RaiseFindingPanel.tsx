@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react';
 import { raiseFinding } from '../../api/findingApi';
 import { getDatasource } from '../../api/taskApi';
+import { listAtaChapters, listHazardTags } from '../../api/taxonomyApi';
+import { apiErrorMessage } from '../../api/errorMessage';
+import { AtaChapter, HazardTag } from '../../types';
 import toast from 'react-hot-toast';
 import { X, AlertTriangle } from 'lucide-react';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
@@ -15,9 +18,13 @@ interface Props {
 
 export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) {
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
+  const [ataChapters, setAtaChapters] = useState<AtaChapter[]>([]);
+  const [hazardTags, setHazardTags] = useState<HazardTag[]>([]);
   const [eventType, setEventType] = useState('');
   const [eventTypeOther, setEventTypeOther] = useState('');
   const [departmentId, setDepartmentId] = useState('');
+  const [ataChapterId, setAtaChapterId] = useState('');
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [aircraftRegistration, setAircraftRegistration] = useState('');
   const [regulatoryReference, setRegulatoryReference] = useState('');
   const [description, setDescription] = useState('');
@@ -26,7 +33,12 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
 
   useEffect(() => {
     getDatasource('departments').then(setDepartments).catch(() => {});
+    listAtaChapters(true).then(setAtaChapters).catch(() => {});
+    listHazardTags(true).then(setHazardTags).catch(() => {});
   }, []);
+
+  const toggleTag = (id: number) =>
+    setSelectedTagIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
 
   const resolvedEventType = eventType === 'Other' ? eventTypeOther.trim() : eventType;
 
@@ -46,11 +58,13 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
         aircraftRegistration: aircraftRegistration.trim() || undefined,
         regulatoryReference: regulatoryReference.trim() || undefined,
         fieldId: fieldId.trim() || undefined,
+        ataChapterId: ataChapterId ? Number(ataChapterId) : undefined,
+        hazardTagIds: selectedTagIds.length ? selectedTagIds : undefined,
       });
       toast.success(`Finding #${finding.id} raised`);
       onRaised();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to raise finding');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to raise finding'));
     } finally {
       setSubmitting(false);
     }
@@ -111,6 +125,47 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
                 <option key={d.value} value={d.value}>{d.label}</option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+              ATA Chapter
+            </label>
+            <select
+              value={ataChapterId}
+              onChange={(e) => setAtaChapterId(e.target.value)}
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select ATA chapter… (optional)</option>
+              {ataChapters.map((a) => (
+                <option key={a.id} value={a.id}>{a.code} — {a.title}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+              Hazard Tags
+            </label>
+            {hazardTags.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No hazard tags configured.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {hazardTags.map((t) => {
+                  const on = selectedTagIds.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => toggleTag(t.id)}
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${on ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div>

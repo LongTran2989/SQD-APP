@@ -55,6 +55,46 @@ export async function logFindingAuditAndActivity(
 }
 
 /**
+ * Conditional close-gate for the expansion pack. Additive and backward-compatible:
+ * the legacy rootCause/correctiveAction checks stay in the controller and ALWAYS
+ * apply. This helper only adds constraints WHEN RCA / CAPA data exists, so legacy
+ * findings (no RCA, no CAPA) close exactly as before.
+ *
+ *  - If an RcaInvestigation exists, it must be status 'Complete'.
+ *  - If any CapaAction exists, every CORRECTIVE must be 'Verified' and every
+ *    PREVENTIVE must be 'Verified' or 'Waived'.
+ *
+ * Returns { ok } or { ok:false, reason } for the caller to map to a 400.
+ */
+export async function evaluateCloseGate(
+  findingId: number
+): Promise<{ ok: boolean; reason?: string }> {
+  const finding = await prisma.finding.findUnique({
+    where: { id: findingId, deletedAt: null },
+    select: {
+      rca: { select: { status: true } },
+      capaActions: { select: { type: true, status: true } },
+    },
+  });
+  if (!finding) return { ok: false, reason: 'Finding not found' };
+
+  if (finding.rca && finding.rca.status !== 'Complete') {
+    return { ok: false, reason: 'The Root Cause Analysis must be marked Complete before closing' };
+  }
+
+  for (const capa of finding.capaActions) {
+    if (capa.type === 'CORRECTIVE' && capa.status !== 'Verified') {
+      return { ok: false, reason: 'All corrective actions must be verified effective before closing' };
+    }
+    if (capa.type === 'PREVENTIVE' && capa.status !== 'Verified' && capa.status !== 'Waived') {
+      return { ok: false, reason: 'All preventive actions must be verified or waived before closing' };
+    }
+  }
+
+  return { ok: true };
+}
+
+/**
  * Pending Verification hook. Call this after a Task reaches a final state
  * (Closed / Rejected / Terminated). If the Task is a follow-up to a Finding and
  * ALL of that Finding's follow-up Tasks are now final, the Finding transitions
