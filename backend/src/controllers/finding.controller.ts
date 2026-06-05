@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { logFindingAuditAndActivity } from '../services/findingService';
+import { logFindingAuditAndActivity, evaluateCloseGate } from '../services/findingService';
+import { computeTrend } from '../services/trendService';
 import { HttpError, isHttpError } from '../utils/httpError';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -134,6 +135,8 @@ export interface CreateFindingParams {
   fieldId?: string | null;
   aircraftRegistration?: string | null;
   regulatoryReference?: string | null;
+  ataChapterId?: number | null;
+  hazardTagIds?: number[];
 }
 
 /**
@@ -148,7 +151,7 @@ export async function createFindingService(
   actor: { userId: number },
   params: CreateFindingParams
 ) {
-  const { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description } = params;
+  const { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds } = params;
 
   if (!taskId || !eventType || !departmentId || !description) {
     throw new HttpError(400, 'taskId, eventType, departmentId, and description are required');
@@ -168,6 +171,17 @@ export async function createFindingService(
   const department = await client.department.findUnique({ where: { id: departmentId }, select: { id: true } });
   if (!department) throw new HttpError(400, 'Department not found');
 
+  // Optional taxonomy: ATA chapter (must exist) + hazard tags (must all exist).
+  if (ataChapterId != null) {
+    const ata = await client.ataChapter.findUnique({ where: { id: ataChapterId }, select: { id: true } });
+    if (!ata) throw new HttpError(400, 'ATA chapter not found');
+  }
+  const tagIds = Array.isArray(hazardTagIds) ? [...new Set(hazardTagIds)] : [];
+  if (tagIds.length > 0) {
+    const found = await client.hazardTag.count({ where: { id: { in: tagIds } } });
+    if (found !== tagIds.length) throw new HttpError(400, 'One or more hazard tags not found');
+  }
+
   const reporter = await client.user.findUnique({ where: { id: actor.userId }, select: { name: true } });
   const reporterName = reporter?.name ?? `User ${actor.userId}`;
 
@@ -183,7 +197,11 @@ export async function createFindingService(
       sourceTaskId: task.id,
       reportedByUserId: actor.userId,
       // Inherit the source task's division for RBAC division-scoping.
-      targetDivisionId: task.targetDivisionId ?? null
+      targetDivisionId: task.targetDivisionId ?? null,
+      ataChapterId: ataChapterId ?? null,
+      ...(tagIds.length > 0
+        ? { hazardTags: { create: tagIds.map((hazardTagId) => ({ hazardTagId })) } }
+        : {})
     }
   });
 
@@ -203,10 +221,10 @@ export async function createFindingService(
 export const createFinding = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req.user!;
-    const { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description } = req.body;
+    const { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds } = req.body;
 
     const finding = await prisma.$transaction((tx) =>
-      createFindingService(tx, { userId }, { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description })
+      createFindingService(tx, { userId }, { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds })
     );
 
     res.status(201).json(finding);
@@ -302,7 +320,28 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
             assignedToUser: { select: { id: true, name: true } },
             template: { select: { title: true } }
           }
-        }
+        },
+        ataChapter: true,
+        hazardTags: { include: { hazardTag: true } },
+        rca: {
+          include: {
+            causeCode: true,
+            conductedByUser: { select: { id: true, name: true } },
+            whySteps: { orderBy: { orderIndex: 'asc' } },
+            factors: { orderBy: { id: 'asc' } }
+          }
+        },
+        capaActions: {
+          orderBy: [{ type: 'asc' }, { id: 'asc' }],
+          include: {
+            ownerUser: { select: { id: true, name: true } },
+            verifiedByUser: { select: { id: true, name: true } },
+            executionTask: { select: { id: true, taskId: true, status: true } },
+            effectivenessTask: { select: { id: true, taskId: true, status: true } }
+          }
+        },
+        linksFrom: { include: { relatedFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },
+        linksTo: { include: { fromFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } }
       }
     });
 
@@ -317,9 +356,11 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
     }
 
     const dueDateBreached = await ensureDueDateBreachLogged(finding, user.userId);
+    const trend = await computeTrend(finding.id);
 
     res.json({
       ...finding,
+      trend,
       sourceTask: finding.sourceTask
         ? {
             id: finding.sourceTask.id,
@@ -350,7 +391,7 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
   try {
     const id = parseInt(req.params.id as string, 10);
     const { userId, role } = req.user!;
-    const { severity, dueDate } = req.body;
+    const { severity, dueDate, ataChapterId, hazardTagIds } = req.body;
 
     if (!FINDING_REVIEWER_ROLES.includes(role)) {
       res.status(403).json({ message: 'Only a Manager or Director can review findings' });
@@ -374,17 +415,42 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Optional taxonomy adjustments at review time.
+    if (ataChapterId != null) {
+      const ata = await prisma.ataChapter.findUnique({ where: { id: ataChapterId }, select: { id: true } });
+      if (!ata) {
+        res.status(400).json({ message: 'ATA chapter not found' });
+        return;
+      }
+    }
+    const tagIds = Array.isArray(hazardTagIds) ? [...new Set(hazardTagIds as number[])] : null;
+    if (tagIds && tagIds.length > 0) {
+      const found = await prisma.hazardTag.count({ where: { id: { in: tagIds } } });
+      if (found !== tagIds.length) {
+        res.status(400).json({ message: 'One or more hazard tags not found' });
+        return;
+      }
+    }
+
     const reviewerName = await getUserName(userId);
     const newStatus = 'In Progress';
     const parsedDueDate = dueDate ? new Date(dueDate) : null;
 
     const updated = await prisma.$transaction(async (tx) => {
+      // Replace hazard tags only when the caller explicitly provided the field.
+      if (tagIds !== null) {
+        await tx.findingHazardTag.deleteMany({ where: { findingId: id } });
+        for (const hazardTagId of tagIds) {
+          await tx.findingHazardTag.create({ data: { findingId: id, hazardTagId } });
+        }
+      }
       const result = await tx.finding.update({
         where: { id },
         data: {
           severity,
           dueDate: parsedDueDate,
-          status: newStatus
+          status: newStatus,
+          ...(ataChapterId !== undefined ? { ataChapterId } : {})
         }
       });
 
@@ -686,6 +752,14 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
     }
     if (!finding.rootCause || !finding.correctiveAction) {
       res.status(400).json({ message: 'Stage 2 fields (rootCause and correctiveAction) must be completed before closing' });
+      return;
+    }
+
+    // Conditional expansion-pack gate: only constrains findings that actually
+    // carry RCA / CAPA data, so legacy findings close exactly as before.
+    const gate = await evaluateCloseGate(finding.id);
+    if (!gate.ok) {
+      res.status(400).json({ message: gate.reason });
       return;
     }
 

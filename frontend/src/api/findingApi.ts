@@ -5,6 +5,16 @@ import {
   FindingsListResponse,
   FindingListItem,
   FindingSeverity,
+  RcaInvestigation,
+  RcaMethod,
+  RcaStatus,
+  RcaWhyStep,
+  RcaContributingFactor,
+  CapaAction,
+  CapaType,
+  CapaStatus,
+  FindingLinkType,
+  FindingLinkRecord,
 } from '../types';
 
 // ─── List & detail ──────────────────────────────────────────────────────────
@@ -39,6 +49,8 @@ export interface RaiseFindingPayload {
   aircraftRegistration?: string;
   regulatoryReference?: string;
   fieldId?: string;
+  ataChapterId?: number;
+  hazardTagIds?: number[];
 }
 
 export const raiseFinding = (payload: RaiseFindingPayload): Promise<Finding> =>
@@ -48,7 +60,7 @@ export const raiseFinding = (payload: RaiseFindingPayload): Promise<Finding> =>
 
 export const reviewFinding = (
   id: number,
-  payload: { severity: FindingSeverity; dueDate?: string }
+  payload: { severity: FindingSeverity; dueDate?: string; ataChapterId?: number; hazardTagIds?: number[] }
 ): Promise<Finding> =>
   apiClient.put(`/findings/${id}/review`, payload).then((r) => r.data);
 
@@ -83,3 +95,73 @@ export const completeStage2 = (id: number, payload: Stage2Payload): Promise<Find
 
 export const closeFinding = (id: number): Promise<Finding> =>
   apiClient.put(`/findings/${id}/close`).then((r) => r.data);
+
+// ─── RCA (Root Cause Analysis) ────────────────────────────────────────────────
+
+export const getRca = (id: number): Promise<RcaInvestigation | null> =>
+  apiClient.get(`/findings/${id}/rca`).then((r) => r.data);
+
+export const upsertRca = (
+  id: number,
+  payload: { method: RcaMethod; summary?: string | null; status?: RcaStatus; causeCodeId?: number | null }
+): Promise<RcaInvestigation> =>
+  apiClient.put(`/findings/${id}/rca`, payload).then((r) => r.data);
+
+export const saveWhySteps = (
+  id: number,
+  steps: { question: string; answer?: string | null }[]
+): Promise<RcaWhyStep[]> =>
+  apiClient.put(`/findings/${id}/rca/why-steps`, { steps }).then((r) => r.data);
+
+export const saveFactors = (
+  id: number,
+  factors: { category: string; detail?: string | null; isPrimary?: boolean }[]
+): Promise<RcaContributingFactor[]> =>
+  apiClient.put(`/findings/${id}/rca/factors`, { factors }).then((r) => r.data);
+
+// ─── CAPA (Corrective / Preventive Actions) ──────────────────────────────────
+
+export interface CapaPayload {
+  type: CapaType;
+  description: string;
+  ownerUserId?: number | null;
+  deadline?: string | null;
+  executionTaskId?: number | null;
+  effectivenessTaskId?: number | null;
+}
+
+export const listCapa = (id: number): Promise<CapaAction[]> =>
+  apiClient.get(`/findings/${id}/capa`).then((r) => r.data);
+
+export const createCapa = (id: number, payload: CapaPayload): Promise<CapaAction> =>
+  apiClient.post(`/findings/${id}/capa`, payload).then((r) => r.data);
+
+export const updateCapa = (
+  id: number,
+  capaId: number,
+  payload: Partial<CapaPayload> & { status?: CapaStatus }
+): Promise<CapaAction> =>
+  apiClient.put(`/findings/${id}/capa/${capaId}`, payload).then((r) => r.data);
+
+export const verifyCapa = (id: number, capaId: number): Promise<CapaAction> =>
+  apiClient.put(`/findings/${id}/capa/${capaId}/verify`).then((r) => r.data);
+
+export const waiveCapa = (id: number, capaId: number, waivedReason: string): Promise<CapaAction> =>
+  apiClient.put(`/findings/${id}/capa/${capaId}/waive`, { waivedReason }).then((r) => r.data);
+
+export const deleteCapa = (id: number, capaId: number): Promise<void> =>
+  apiClient.delete(`/findings/${id}/capa/${capaId}`).then((r) => r.data);
+
+// ─── Traceability (cross-finding links) ──────────────────────────────────────
+
+export const getFindingLinks = (id: number): Promise<{ outgoing: FindingLinkRecord[]; incoming: FindingLinkRecord[] }> =>
+  apiClient.get(`/findings/${id}/links`).then((r) => r.data);
+
+export const createFindingLink = (
+  id: number,
+  payload: { relatedFindingId: number; linkType: FindingLinkType; note?: string }
+): Promise<FindingLinkRecord> =>
+  apiClient.post(`/findings/${id}/links`, payload).then((r) => r.data);
+
+export const deleteFindingLink = (id: number, linkId: number): Promise<void> =>
+  apiClient.delete(`/findings/${id}/links/${linkId}`).then((r) => r.data);

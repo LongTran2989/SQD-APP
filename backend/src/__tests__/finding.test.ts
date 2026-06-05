@@ -82,6 +82,13 @@ describe('Findings Backend (Phase 6)', () => {
 
   beforeEach(async () => {
     // FK-safe wipe (Task <-> Finding are mutually referential).
+    // Expansion child tables first (CapaAction restricts Task deletes).
+    await prisma.findingLink.deleteMany({});
+    await prisma.findingHazardTag.deleteMany({});
+    await prisma.rcaWhyStep.deleteMany({});
+    await prisma.rcaContributingFactor.deleteMany({});
+    await prisma.rcaInvestigation.deleteMany({});
+    await prisma.capaAction.deleteMany({});
     await prisma.feedPost.deleteMany({});
     await prisma.timeBooking.deleteMany({});
     await prisma.taskData.deleteMany({});
@@ -108,6 +115,12 @@ describe('Findings Backend (Phase 6)', () => {
   });
 
   afterAll(async () => {
+    await prisma.findingLink.deleteMany({});
+    await prisma.findingHazardTag.deleteMany({});
+    await prisma.rcaWhyStep.deleteMany({});
+    await prisma.rcaContributingFactor.deleteMany({});
+    await prisma.rcaInvestigation.deleteMany({});
+    await prisma.capaAction.deleteMany({});
     await prisma.feedPost.deleteMany({});
     await prisma.timeBooking.deleteMany({});
     await prisma.taskData.deleteMany({});

@@ -355,9 +355,80 @@ export interface Finding {
   reportedByUserId: number;
   closedByUserId: number | null;
   targetDivisionId: number | null;
+  ataChapterId: number | null;
   createdAt: string;
   closedAt: string | null;
   updatedAt: string;
+}
+
+// ─── Findings expansion: RCA / CAPA / Taxonomy / Traceability / Trend ─────────
+
+export type RcaMethod = 'MEDA' | 'FIVE_WHYS' | 'OTHER';
+export type RcaStatus = 'Draft' | 'Complete';
+export type CapaType = 'CORRECTIVE' | 'PREVENTIVE';
+export type CapaStatus = 'Open' | 'In Progress' | 'Completed' | 'Verified' | 'Waived';
+export type FindingLinkType = 'DUPLICATE' | 'RELATED' | 'CAUSED_BY';
+
+export interface AtaChapter { id: number; code: string; title: string; isActive: boolean; }
+export interface CauseCode { id: number; code: string; name: string; groupCode: string; groupName: string; isActive: boolean; }
+export interface HazardTag { id: number; label: string; description: string | null; isActive: boolean; }
+
+export interface RcaWhyStep { id: number; orderIndex: number; question: string; answer: string | null; }
+export interface RcaContributingFactor { id: number; category: string; detail: string | null; isPrimary: boolean; }
+
+export interface RcaInvestigation {
+  id: number;
+  method: RcaMethod;
+  summary: string | null;
+  status: RcaStatus;
+  causeCodeId: number | null;
+  causeCode?: CauseCode | null;
+  conductedByUserId: number | null;
+  conductedByUser?: { id: number; name: string } | null;
+  whySteps: RcaWhyStep[];
+  factors: RcaContributingFactor[];
+}
+
+export interface CapaTaskRef { id: number; taskId: string; status: TaskStatus; }
+
+export interface CapaAction {
+  id: number;
+  findingId: number;
+  type: CapaType;
+  description: string;
+  ownerUserId: number | null;
+  ownerUser?: { id: number; name: string } | null;
+  deadline: string | null;
+  status: CapaStatus;
+  executionTaskId: number | null;
+  executionTask?: CapaTaskRef | null;
+  effectivenessTaskId: number | null;
+  effectivenessTask?: CapaTaskRef | null;
+  verifiedByUserId: number | null;
+  verifiedByUser?: { id: number; name: string } | null;
+  verifiedAt: string | null;
+  waivedReason: string | null;
+}
+
+export interface TrendInfo {
+  isRecurring: boolean;
+  matchCount: number;
+  threshold: number;
+  windowDays: number;
+  signature: { departmentId: number | null; ataChapterId: number | null; causeCodeId: number | null; hazardTagIds: number[] };
+}
+
+export interface FindingHazardTagRef { id: number; hazardTagId: number; hazardTag: HazardTag; }
+
+export interface LinkedFindingRef { id: number; description: string; status: FindingStatus; severity: FindingSeverity | null; eventType: string; }
+
+export interface FindingLinkRecord {
+  id: number;
+  linkType: FindingLinkType;
+  note: string | null;
+  relatedFinding?: LinkedFindingRef;
+  fromFinding?: LinkedFindingRef;
+  createdByUser?: { id: number; name: string };
 }
 
 // Shared nested shapes returned by the findings API
@@ -408,4 +479,12 @@ export interface FindingDetail extends Finding {
   closedByUser: FindingUserRef | null;
   targetDivision: { id: number; name: string; code: string } | null;
   department: { id: number; name: string } | null;
+  // Expansion pack
+  ataChapter: AtaChapter | null;
+  hazardTags: FindingHazardTagRef[];
+  rca: RcaInvestigation | null;
+  capaActions: CapaAction[];
+  linksFrom: FindingLinkRecord[];
+  linksTo: FindingLinkRecord[];
+  trend: TrendInfo;
 }

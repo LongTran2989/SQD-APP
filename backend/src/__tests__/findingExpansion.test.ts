@@ -1,0 +1,487 @@
+import request from 'supertest';
+import app from '../index';
+import { PrismaClient } from '@prisma/client';
+import jwt from 'jsonwebtoken';
+import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
+
+function makeToken(userId: number, role: string, divisionId: number): string {
+  const secret = process.env.JWT_SECRET || 'fallback_secret';
+  return jwt.sign({ userId, role, divisionId }, secret);
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Findings Expansion — RCA / CAPA / Taxonomy / Traceability / Trend
+// ───────────────────────────────────────────────────────────────────────────────
+
+describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
+  let directorToken: string;
+  let adminToken: string;
+  let managerToken: string;
+  let staffToken: string;
+  let outsiderToken: string;
+
+  let directorId: number;
+  let managerId: number;
+  let staffId: number;
+  let outsiderId: number;
+
+  let divisionId: number;
+  let departmentId: number;
+
+  let allowsFindingsTemplateId: number;
+  let autoCloseTemplateId: number;
+
+  let ataA: number;
+  let ataB: number;
+  let causeA: number;
+  let causeB: number;
+  let hazX: number;
+  let hazY: number;
+
+  let sourceTaskId: number;
+
+  beforeAll(async () => {
+    const directorRole = await prisma.role.upsert({ where: { name: 'Director' }, update: {}, create: { name: 'Director' } });
+    const adminRole = await prisma.role.upsert({ where: { name: 'Admin' }, update: {}, create: { name: 'Admin' } });
+    const managerRole = await prisma.role.upsert({ where: { name: 'Manager' }, update: {}, create: { name: 'Manager' } });
+    const staffRole = await prisma.role.upsert({ where: { name: 'Staff' }, update: {}, create: { name: 'Staff' } });
+
+    const dept = await prisma.department.upsert({ where: { name: 'FExp Dept' }, update: {}, create: { name: 'FExp Dept' } });
+    departmentId = dept.id;
+    const div = await prisma.division.upsert({ where: { code: 'FEX' }, update: {}, create: { name: 'FExp Div', code: 'FEX', departmentId: dept.id } });
+    divisionId = div.id;
+
+    const director = await prisma.user.create({ data: { name: 'FExp Director', email: 'fexp_director@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId, roleId: directorRole.id } });
+    directorId = director.id;
+    const admin = await prisma.user.create({ data: { name: 'FExp Admin', email: 'fexp_admin@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId, roleId: adminRole.id } });
+    const manager = await prisma.user.create({ data: { name: 'FExp Manager', email: 'fexp_manager@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId, roleId: managerRole.id } });
+    managerId = manager.id;
+    const staff = await prisma.user.create({ data: { name: 'FExp Staff', email: 'fexp_staff@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId, roleId: staffRole.id } });
+    staffId = staff.id;
+    const outsider = await prisma.user.create({ data: { name: 'FExp Outsider', email: 'fexp_outsider@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId, roleId: staffRole.id } });
+    outsiderId = outsider.id;
+
+    directorToken = makeToken(directorId, 'Director', divisionId);
+    adminToken = makeToken(admin.id, 'Admin', divisionId);
+    managerToken = makeToken(managerId, 'Manager', divisionId);
+    staffToken = makeToken(staffId, 'Staff', divisionId);
+    outsiderToken = makeToken(outsiderId, 'Staff', divisionId);
+
+    const baseSchema = [{ id: '1', type: 'radio', label: 'Pass/Fail', options: ['Pass', 'Fail'] }];
+    const af = await prisma.template.create({ data: { templateId: 'FEX-T-001', title: 'Allows Findings', formSchema: baseSchema, status: 'Published', publishedAt: new Date(), ownerId: managerId, divisionId, requiresApproval: true, allowsFindings: true, estimatedHours: 2 } });
+    allowsFindingsTemplateId = af.id;
+    const ac = await prisma.template.create({ data: { templateId: 'FEX-T-002', title: 'Auto Close', formSchema: baseSchema, status: 'Published', publishedAt: new Date(), ownerId: managerId, divisionId, requiresApproval: false, allowsFindings: true } });
+    autoCloseTemplateId = ac.id;
+
+    // Reference taxonomies (persist across tests; not wiped in beforeEach).
+    const a1 = await prisma.ataChapter.upsert({ where: { code: 'FEX-32' }, update: {}, create: { code: 'FEX-32', title: 'Landing Gear' } });
+    ataA = a1.id;
+    const a2 = await prisma.ataChapter.upsert({ where: { code: 'FEX-24' }, update: {}, create: { code: 'FEX-24', title: 'Electrical Power' } });
+    ataB = a2.id;
+    const c1 = await prisma.causeCode.upsert({ where: { code: 'FEXH01' }, update: {}, create: { code: 'FEXH01', name: 'Quality of support', groupCode: 'H', groupName: 'Organizational Factors' } });
+    causeA = c1.id;
+    const c2 = await prisma.causeCode.upsert({ where: { code: 'FEXE03' }, update: {}, create: { code: 'FEXE03', name: 'Task planning', groupCode: 'E', groupName: 'Knowledge/Skills' } });
+    causeB = c2.id;
+    const h1 = await prisma.hazardTag.upsert({ where: { label: 'FEX-FOD' }, update: {}, create: { label: 'FEX-FOD' } });
+    hazX = h1.id;
+    const h2 = await prisma.hazardTag.upsert({ where: { label: 'FEX-Fatigue' }, update: {}, create: { label: 'FEX-Fatigue' } });
+    hazY = h2.id;
+  });
+
+  beforeEach(async () => {
+    // FK-safe wipe — child tables first (CapaAction restricts Task deletes).
+    await prisma.findingLink.deleteMany({});
+    await prisma.findingHazardTag.deleteMany({});
+    await prisma.rcaWhyStep.deleteMany({});
+    await prisma.rcaContributingFactor.deleteMany({});
+    await prisma.rcaInvestigation.deleteMany({});
+    await prisma.capaAction.deleteMany({});
+    await prisma.feedPost.deleteMany({});
+    await prisma.timeBooking.deleteMany({});
+    await prisma.taskData.deleteMany({});
+    await prisma.task.updateMany({ data: { parentFindingId: null } });
+    await prisma.finding.updateMany({ data: { sourceTaskId: null } });
+    await prisma.finding.deleteMany({});
+    await prisma.workPackageAssignment.deleteMany({});
+    await prisma.task.deleteMany({});
+    await prisma.workPackage.deleteMany({});
+    await prisma.auditLog.deleteMany({});
+
+    const t = await prisma.task.create({
+      data: { taskId: 'FEX-900001', templateId: allowsFindingsTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Closed', schemaSnapshot: [] as any, assignmentType: 'INDIVIDUAL' }
+    });
+    sourceTaskId = t.id;
+  });
+
+  afterAll(async () => {
+    await prisma.findingLink.deleteMany({});
+    await prisma.findingHazardTag.deleteMany({});
+    await prisma.rcaWhyStep.deleteMany({});
+    await prisma.rcaContributingFactor.deleteMany({});
+    await prisma.rcaInvestigation.deleteMany({});
+    await prisma.capaAction.deleteMany({});
+    await prisma.feedPost.deleteMany({});
+    await prisma.timeBooking.deleteMany({});
+    await prisma.taskData.deleteMany({});
+    await prisma.task.updateMany({ data: { parentFindingId: null } });
+    await prisma.finding.updateMany({ data: { sourceTaskId: null } });
+    await prisma.finding.deleteMany({});
+    await prisma.workPackageAssignment.deleteMany({});
+    await prisma.task.deleteMany({});
+    await prisma.workPackage.deleteMany({});
+    await prisma.auditLog.deleteMany({});
+    await prisma.template.deleteMany({ where: { templateId: { startsWith: 'FEX-T-' } } });
+    await prisma.user.deleteMany({ where: { email: { startsWith: 'fexp_' } } });
+    await prisma.$disconnect();
+  });
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const raiseFinding = (token: string, overrides: Record<string, unknown> = {}) =>
+    request(app).post('/api/findings').set('Authorization', `Bearer ${token}`)
+      .send({ taskId: sourceTaskId, eventType: 'Procedural Breach', departmentId, description: 'Issue', ...overrides });
+
+  // Drive a finding to Pending Verification with one Closed follow-up task.
+  async function makePendingVerification(reporterToken = staffToken): Promise<{ findingId: number; followUpId: number }> {
+    const r = await raiseFinding(reporterToken);
+    const findingId = r.body.id;
+    await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+    const gen = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: autoCloseTemplateId, title: 'CAR' }] });
+    const followUpId = gen.body.createdTasks[0].id;
+    await prisma.task.update({ where: { id: followUpId }, data: { assignedToUserId: staffId, status: 'Assigned' } });
+    await request(app).put(`/api/tasks/${followUpId}/submit`).set('Authorization', `Bearer ${staffToken}`);
+    return { findingId, followUpId };
+  }
+
+  // Create a finding row directly with optional RCA cause code + hazard tags (for trend tests).
+  async function createClusterFinding(opts: { ataChapterId?: number; causeCodeId?: number; hazardTagIds?: number[]; createdAt?: Date; deletedAt?: Date }) {
+    const f = await prisma.finding.create({
+      data: {
+        eventType: 'Procedural Breach',
+        description: 'cluster',
+        departmentId,
+        reportedByUserId: staffId,
+        targetDivisionId: divisionId,
+        status: 'In Progress',
+        ataChapterId: opts.ataChapterId ?? null,
+        ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+        ...(opts.deletedAt ? { deletedAt: opts.deletedAt } : {}),
+        ...(opts.hazardTagIds && opts.hazardTagIds.length ? { hazardTags: { create: opts.hazardTagIds.map((hazardTagId) => ({ hazardTagId })) } } : {}),
+      },
+    });
+    if (opts.causeCodeId) {
+      await prisma.rcaInvestigation.create({ data: { findingId: f.id, method: 'OTHER', status: 'Complete', causeCodeId: opts.causeCodeId } });
+    }
+    return f.id;
+  }
+
+  // ── Group 9 — RCA ──────────────────────────────────────────────────────────
+  describe('RCA', () => {
+    it('R01: reporter creates a FIVE_WHYS RCA and saves an ordered ladder', async () => {
+      const r = await raiseFinding(staffToken);
+      const fid = r.body.id;
+      const up = await request(app).put(`/api/findings/${fid}/rca`).set('Authorization', `Bearer ${staffToken}`).send({ method: 'FIVE_WHYS' });
+      expect(up.status).toBe(200);
+      const steps = await request(app).put(`/api/findings/${fid}/rca/why-steps`).set('Authorization', `Bearer ${staffToken}`)
+        .send({ steps: [{ question: 'Why 1', answer: 'A1' }, { question: 'Why 2', answer: 'A2' }] });
+      expect(steps.status).toBe(200);
+      expect(steps.body).toHaveLength(2);
+      expect(steps.body[0].orderIndex).toBe(0);
+      expect(steps.body[1].orderIndex).toBe(1);
+    });
+
+    it('R02: MEDA RCA accepts contributing factors', async () => {
+      const r = await raiseFinding(staffToken);
+      const fid = r.body.id;
+      await request(app).put(`/api/findings/${fid}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'MEDA' });
+      const res = await request(app).put(`/api/findings/${fid}/rca/factors`).set('Authorization', `Bearer ${managerToken}`)
+        .send({ factors: [{ category: 'Communication', detail: 'Between shifts', isPrimary: true }] });
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].isPrimary).toBe(true);
+    });
+
+    it('R03: why-steps rejected on a MEDA RCA → 400', async () => {
+      const r = await raiseFinding(staffToken);
+      const fid = r.body.id;
+      await request(app).put(`/api/findings/${fid}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'MEDA' });
+      const res = await request(app).put(`/api/findings/${fid}/rca/why-steps`).set('Authorization', `Bearer ${managerToken}`).send({ steps: [{ question: 'Why' }] });
+      expect(res.status).toBe(400);
+    });
+
+    it('R04: invalid method → 400', async () => {
+      const r = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${r.body.id}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'ISHIKAWA' });
+      expect(res.status).toBe(400);
+    });
+
+    it('R05: cannot mark RCA Complete without a cause code → 400', async () => {
+      const r = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${r.body.id}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'OTHER', status: 'Complete' });
+      expect(res.status).toBe(400);
+    });
+
+    it('R06: cause code persists and Complete is allowed once set', async () => {
+      const r = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${r.body.id}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'OTHER', status: 'Complete', causeCodeId: causeA });
+      expect(res.status).toBe(200);
+      expect(res.body.causeCodeId).toBe(causeA);
+      expect(res.body.status).toBe('Complete');
+    });
+
+    it('R07: an unrelated user cannot edit the RCA → 403', async () => {
+      const r = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${r.body.id}/rca`).set('Authorization', `Bearer ${outsiderToken}`).send({ method: 'OTHER' });
+      expect(res.status).toBe(403);
+    });
+
+    it('R08: RCA_UPDATED audit entry is written (dual write)', async () => {
+      const r = await raiseFinding(staffToken);
+      await request(app).put(`/api/findings/${r.body.id}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'OTHER' });
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(r.body.id), actionType: 'RCA_UPDATED' } });
+      expect(audit).not.toBeNull();
+    });
+  });
+
+  // ── Group 10 — CAPA + close-gate ────────────────────────────────────────────
+  describe('CAPA & close-gate', () => {
+    it('C01: reporter can create a CORRECTIVE CAPA', async () => {
+      const r = await raiseFinding(staffToken);
+      const res = await request(app).post(`/api/findings/${r.body.id}/capa`).set('Authorization', `Bearer ${staffToken}`).send({ type: 'CORRECTIVE', description: 'Re-torque bolts' });
+      expect(res.status).toBe(201);
+      expect(res.body.type).toBe('CORRECTIVE');
+      expect(res.body.status).toBe('Open');
+    });
+
+    it('C02: an outsider cannot create a CAPA → 403', async () => {
+      const r = await raiseFinding(staffToken);
+      const res = await request(app).post(`/api/findings/${r.body.id}/capa`).set('Authorization', `Bearer ${outsiderToken}`).send({ type: 'CORRECTIVE', description: 'x' });
+      expect(res.status).toBe(403);
+    });
+
+    it('C03: invalid type → 400', async () => {
+      const r = await raiseFinding(staffToken);
+      const res = await request(app).post(`/api/findings/${r.body.id}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'MITIGATING', description: 'x' });
+      expect(res.status).toBe(400);
+    });
+
+    it('C04: linking a task that is not a follow-up of this finding → 400', async () => {
+      const r = await raiseFinding(staffToken);
+      const res = await request(app).post(`/api/findings/${r.body.id}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'x', executionTaskId: sourceTaskId });
+      expect(res.status).toBe(400);
+    });
+
+    it('C05: verify is blocked without a completed effectiveness task → 400', async () => {
+      const { findingId } = await makePendingVerification();
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      const res = await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('C06: verify succeeds once a Closed effectiveness task is linked', async () => {
+      const { findingId, followUpId } = await makePendingVerification();
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix', effectivenessTaskId: followUpId });
+      const res = await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Verified');
+      expect(res.body.verifiedByUserId).toBe(managerId);
+    });
+
+    it('C07: staff cannot verify a CAPA → 403', async () => {
+      const { findingId, followUpId } = await makePendingVerification();
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix', effectivenessTaskId: followUpId });
+      const res = await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(403);
+    });
+
+    it('C08: preventive action can be waived with a reason; corrective cannot', async () => {
+      const { findingId } = await makePendingVerification();
+      const prev = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'PREVENTIVE', description: 'update procedure' });
+      const wOk = await request(app).put(`/api/findings/${findingId}/capa/${prev.body.id}/waive`).set('Authorization', `Bearer ${managerToken}`).send({ reason: 'risk accepted', waivedReason: 'Risk accepted by QA' });
+      expect(wOk.status).toBe(200);
+      expect(wOk.body.status).toBe('Waived');
+
+      const corr = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      const wBad = await request(app).put(`/api/findings/${findingId}/capa/${corr.body.id}/waive`).set('Authorization', `Bearer ${managerToken}`).send({ waivedReason: 'no' });
+      expect(wBad.status).toBe(400);
+    });
+
+    it('C09: close is BLOCKED while a corrective CAPA is unverified → 400', async () => {
+      const { findingId } = await makePendingVerification();
+      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
+      await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/corrective/i);
+    });
+
+    it('C10: close succeeds once the corrective CAPA is verified', async () => {
+      const { findingId, followUpId } = await makePendingVerification();
+      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix', effectivenessTaskId: followUpId });
+      await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Closed');
+    });
+
+    it('C11: close is BLOCKED while an RCA is still Draft → 400', async () => {
+      const { findingId } = await makePendingVerification();
+      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
+      await request(app).put(`/api/findings/${findingId}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'OTHER' });
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/root cause/i);
+    });
+
+    it('C12: REGRESSION — legacy finding with no RCA/CAPA still closes', async () => {
+      const { findingId } = await makePendingVerification();
+      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Closed');
+    });
+  });
+
+  // ── Group 11 — Taxonomy ─────────────────────────────────────────────────────
+  describe('Taxonomy', () => {
+    it('T01: any authenticated user can list active taxonomies', async () => {
+      const res = await request(app).get('/api/taxonomy/cause-codes?activeOnly=true').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it('T02: admin can create a hazard tag; staff cannot → 403', async () => {
+      const ok = await request(app).post('/api/taxonomy/hazard-tags').set('Authorization', `Bearer ${adminToken}`).send({ label: 'FEX-Tooling' });
+      expect(ok.status).toBe(201);
+      const bad = await request(app).post('/api/taxonomy/hazard-tags').set('Authorization', `Bearer ${staffToken}`).send({ label: 'FEX-Nope' });
+      expect(bad.status).toBe(403);
+      await prisma.hazardTag.deleteMany({ where: { label: 'FEX-Tooling' } });
+    });
+
+    it('T03: isActive=false hides a tag from the activeOnly list', async () => {
+      const tag = await prisma.hazardTag.create({ data: { label: 'FEX-Hidden', isActive: false } });
+      const res = await request(app).get('/api/taxonomy/hazard-tags?activeOnly=true').set('Authorization', `Bearer ${staffToken}`);
+      const labels = res.body.map((t: any) => t.label);
+      expect(labels).not.toContain('FEX-Hidden');
+      await prisma.hazardTag.delete({ where: { id: tag.id } });
+    });
+
+    it('T04: raising a finding with ATA chapter + hazard tags persists the junction', async () => {
+      const res = await raiseFinding(staffToken, { ataChapterId: ataA, hazardTagIds: [hazX, hazY] });
+      expect(res.status).toBe(201);
+      expect(res.body.ataChapterId).toBe(ataA);
+      const tags = await prisma.findingHazardTag.findMany({ where: { findingId: res.body.id } });
+      expect(tags).toHaveLength(2);
+    });
+
+    it('T05: raising with an unknown ATA chapter → 400', async () => {
+      const res = await raiseFinding(staffToken, { ataChapterId: 999999 });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // ── Group 12 — Finding links ────────────────────────────────────────────────
+  describe('Finding links', () => {
+    it('L01: Manager can link two findings (RELATED) and read both directions', async () => {
+      const a = await raiseFinding(staffToken);
+      const b = await raiseFinding(staffToken);
+      const res = await request(app).post(`/api/findings/${a.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ relatedFindingId: b.body.id, linkType: 'RELATED' });
+      expect(res.status).toBe(201);
+
+      const fromA = await request(app).get(`/api/findings/${a.body.id}/links`).set('Authorization', `Bearer ${managerToken}`);
+      expect(fromA.body.outgoing).toHaveLength(1);
+      const toB = await request(app).get(`/api/findings/${b.body.id}/links`).set('Authorization', `Bearer ${managerToken}`);
+      expect(toB.body.incoming).toHaveLength(1);
+    });
+
+    it('L02: self-link → 400', async () => {
+      const a = await raiseFinding(staffToken);
+      const res = await request(app).post(`/api/findings/${a.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ relatedFindingId: a.body.id, linkType: 'DUPLICATE' });
+      expect(res.status).toBe(400);
+    });
+
+    it('L03: duplicate identical edge → 400', async () => {
+      const a = await raiseFinding(staffToken);
+      const b = await raiseFinding(staffToken);
+      await request(app).post(`/api/findings/${a.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ relatedFindingId: b.body.id, linkType: 'CAUSED_BY' });
+      const res = await request(app).post(`/api/findings/${a.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ relatedFindingId: b.body.id, linkType: 'CAUSED_BY' });
+      expect(res.status).toBe(400);
+    });
+
+    it('L04: staff cannot create a link → 403', async () => {
+      const a = await raiseFinding(staffToken);
+      const b = await raiseFinding(staffToken);
+      const res = await request(app).post(`/api/findings/${a.body.id}/links`).set('Authorization', `Bearer ${staffToken}`).send({ relatedFindingId: b.body.id, linkType: 'RELATED' });
+      expect(res.status).toBe(403);
+    });
+
+    it('L05: link can be deleted', async () => {
+      const a = await raiseFinding(staffToken);
+      const b = await raiseFinding(staffToken);
+      const created = await request(app).post(`/api/findings/${a.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ relatedFindingId: b.body.id, linkType: 'RELATED' });
+      const res = await request(app).delete(`/api/findings/${a.body.id}/links/${created.body.id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(200);
+      const after = await prisma.findingLink.count({ where: { fromFindingId: a.body.id } });
+      expect(after).toBe(0);
+    });
+  });
+
+  // ── Group 13 — Trend engine ─────────────────────────────────────────────────
+  describe('Trend engine', () => {
+    it('TR01: flags recurring when the signature repeats at threshold', async () => {
+      const ids = [];
+      for (let i = 0; i < 3; i++) ids.push(await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] }));
+      const res = await request(app).get(`/api/findings/${ids[0]}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.body.trend.isRecurring).toBe(true);
+      expect(res.body.trend.matchCount).toBe(3);
+    });
+
+    it('TR02: below threshold is not recurring', async () => {
+      const a = await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      const res = await request(app).get(`/api/findings/${a}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.body.trend.isRecurring).toBe(false);
+      expect(res.body.trend.matchCount).toBe(2);
+    });
+
+    it('TR03: findings outside the time window are excluded', async () => {
+      const old = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000);
+      const a = await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX], createdAt: old });
+      const res = await request(app).get(`/api/findings/${a}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.body.trend.matchCount).toBe(2);
+      expect(res.body.trend.isRecurring).toBe(false);
+    });
+
+    it('TR04: soft-deleted findings are excluded', async () => {
+      const a = await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX], deletedAt: new Date() });
+      const res = await request(app).get(`/api/findings/${a}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.body.trend.matchCount).toBe(2);
+    });
+
+    it('TR05: a different cause code does not join the cluster', async () => {
+      const a = await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeB, hazardTagIds: [hazX] });
+      const res = await request(app).get(`/api/findings/${a}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.body.trend.matchCount).toBe(2);
+    });
+
+    it('TR06: a finding with no cause code is never recurring', async () => {
+      const a = await createClusterFinding({ ataChapterId: ataA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, hazardTagIds: [hazX] });
+      const res = await request(app).get(`/api/findings/${a}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.body.trend.isRecurring).toBe(false);
+      expect(res.body.trend.matchCount).toBe(0);
+    });
+  });
+});
