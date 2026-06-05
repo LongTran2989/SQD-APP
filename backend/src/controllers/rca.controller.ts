@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
-import { canViewFinding, canEditAnalysis } from '../utils/findingAccess';
+import { canAccessFinding, canEditAnalysis } from '../utils/findingAccess';
 import { RCA_METHODS, RCA_STATUSES, RCA_MEDA_CATEGORIES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -41,7 +41,7 @@ export const getRca = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canViewFinding(req.user!, finding)) {
+    if (!(await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
@@ -66,7 +66,7 @@ export const upsertRca = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding)) {
+    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have permission to edit this RCA' });
       return;
     }
@@ -152,7 +152,7 @@ export const saveWhySteps = async (req: Request, res: Response): Promise<void> =
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding)) {
+    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have permission to edit this RCA' });
       return;
     }
@@ -178,9 +178,14 @@ export const saveWhySteps = async (req: Request, res: Response): Promise<void> =
     const rcaId = finding.rca.id;
     const updated = await prisma.$transaction(async (tx) => {
       await tx.rcaWhyStep.deleteMany({ where: { rcaId } });
-      for (let i = 0; i < steps.length; i++) {
-        await tx.rcaWhyStep.create({
-          data: { rcaId, orderIndex: i, question: steps[i].question, answer: steps[i].answer ?? null },
+      if (steps.length > 0) {
+        await tx.rcaWhyStep.createMany({
+          data: steps.map((s: { question: string; answer?: string | null }, i: number) => ({
+            rcaId,
+            orderIndex: i,
+            question: s.question,
+            answer: s.answer ?? null,
+          })),
         });
       }
       await logFindingAuditAndActivity(
@@ -216,7 +221,7 @@ export const saveFactors = async (req: Request, res: Response): Promise<void> =>
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding)) {
+    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have permission to edit this RCA' });
       return;
     }
@@ -242,9 +247,14 @@ export const saveFactors = async (req: Request, res: Response): Promise<void> =>
     const rcaId = finding.rca.id;
     const updated = await prisma.$transaction(async (tx) => {
       await tx.rcaContributingFactor.deleteMany({ where: { rcaId } });
-      for (const f of factors) {
-        await tx.rcaContributingFactor.create({
-          data: { rcaId, category: f.category, detail: f.detail ?? null, isPrimary: !!f.isPrimary },
+      if (factors.length > 0) {
+        await tx.rcaContributingFactor.createMany({
+          data: factors.map((f: { category: string; detail?: string | null; isPrimary?: boolean }) => ({
+            rcaId,
+            category: f.category,
+            detail: f.detail ?? null,
+            isPrimary: !!f.isPrimary,
+          })),
         });
       }
       await logFindingAuditAndActivity(

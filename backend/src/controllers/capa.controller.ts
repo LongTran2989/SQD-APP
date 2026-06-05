@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
-import { canViewFinding, canEditAnalysis, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
+import { canAccessFinding, canEditAnalysis, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
 import { CAPA_TYPES, CAPA_STATUSES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -48,7 +48,7 @@ export const listCapa = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canViewFinding(req.user!, finding)) {
+    if (!(await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
@@ -82,7 +82,7 @@ export const createCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding)) {
+    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have permission to add CAPA actions to this finding' });
       return;
     }
@@ -150,7 +150,7 @@ export const updateCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding)) {
+    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have permission to edit CAPA actions on this finding' });
       return;
     }
@@ -226,6 +226,10 @@ export const verifyCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
+    if (!(await canAccessFinding(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
+    }
     const capa = await prisma.capaAction.findFirst({
       where: { id: capaId, findingId: id },
       include: { effectivenessTask: { select: { id: true, status: true } } },
@@ -286,6 +290,10 @@ export const waiveCapa = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
+    if (!(await canAccessFinding(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
+    }
     const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id } });
     if (!capa) {
       res.status(404).json({ message: 'CAPA action not found' });
@@ -339,6 +347,10 @@ export const deleteCapa = async (req: Request, res: Response): Promise<void> => 
     const finding = await loadFindingForCapa(id);
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (!(await canAccessFinding(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
     const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id } });

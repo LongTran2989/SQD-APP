@@ -3,31 +3,24 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
-import { canViewFinding, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
+import { canAccessFinding, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
 import { LINK_TYPES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-const linkFindingSelect = {
-  id: true,
-  reportedByUserId: true,
-  targetDivisionId: true,
-  followUpTasks: { where: { deletedAt: null }, select: { assignedToUserId: true } },
-} as const;
-
 // ─── GET /api/findings/:id/links ──────────────────────────────────────────────
 
 export const getFindingLinks = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id as string, 10);
-    const finding = await prisma.finding.findUnique({ where: { id, deletedAt: null }, select: linkFindingSelect });
-    if (!finding) {
+    const exists = await prisma.finding.findUnique({ where: { id, deletedAt: null }, select: { id: true } });
+    if (!exists) {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canViewFinding(req.user!, finding)) {
+    if (!(await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
@@ -80,22 +73,22 @@ export const createFindingLink = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    const finding = await prisma.finding.findUnique({ where: { id, deletedAt: null }, select: linkFindingSelect });
+    const finding = await prisma.finding.findUnique({ where: { id, deletedAt: null }, select: { id: true } });
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canViewFinding(req.user!, finding)) {
+    if (!(await canAccessFinding(prisma, req.user!, id))) {
       res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
 
-    const related = await prisma.finding.findUnique({ where: { id: relatedFindingId, deletedAt: null }, select: linkFindingSelect });
+    const related = await prisma.finding.findUnique({ where: { id: relatedFindingId, deletedAt: null }, select: { id: true } });
     if (!related) {
       res.status(404).json({ message: 'Related finding not found' });
       return;
     }
-    if (!canViewFinding(req.user!, related)) {
+    if (!(await canAccessFinding(prisma, req.user!, relatedFindingId))) {
       res.status(403).json({ message: 'You do not have access to the related finding' });
       return;
     }
@@ -141,6 +134,12 @@ export const deleteFindingLink = async (req: Request, res: Response): Promise<vo
 
     if (!FINDING_REVIEWER_ROLES.includes(role)) {
       res.status(403).json({ message: 'Only a Manager or Director can remove a finding link' });
+      return;
+    }
+    // Same access gate as create/get — a reviewer may only manage links on a
+    // finding within their visibility scope.
+    if (!(await canAccessFinding(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
     const link = await prisma.findingLink.findFirst({ where: { id: linkId, fromFindingId: id } });

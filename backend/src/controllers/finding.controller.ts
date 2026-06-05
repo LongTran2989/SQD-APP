@@ -3,7 +3,9 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity, evaluateCloseGate } from '../services/findingService';
-import { computeTrend } from '../services/trendService';
+import { computeTrendForSignature } from '../services/trendService';
+import { buildFindingScope, canAccessFinding } from '../utils/findingAccess';
+import { FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 import { HttpError, isHttpError } from '../utils/httpError';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -55,32 +57,6 @@ async function generateWpId(divisionCode: string, tx: Prisma.TransactionClient):
     if (seqPart) nextSeq = parseInt(seqPart, 10) + 1;
   }
   return `${divisionCode}-WP-${String(nextSeq).padStart(6, '0')}`;
-}
-
-/** Builds the Prisma WHERE clause that scopes a Finding query to a user's RBAC visibility. */
-function buildFindingScope(user: { userId: number; role: string; divisionId: number }): Prisma.FindingWhereInput {
-  const { userId, role, divisionId } = user;
-  if (role === 'Director' || role === 'Admin') return {};
-  if (role === 'Manager') return { targetDivisionId: divisionId };
-  // Staff / Group Leader: own findings or findings whose follow-up Task they are assigned.
-  return {
-    OR: [
-      { reportedByUserId: userId },
-      { followUpTasks: { some: { assignedToUserId: userId, deletedAt: null } } }
-    ]
-  };
-}
-
-/** JS-side equivalent of buildFindingScope, for a single already-loaded Finding. */
-function canViewFinding(
-  user: { userId: number; role: string; divisionId: number },
-  finding: { targetDivisionId: number | null; reportedByUserId: number; followUpTasks?: { assignedToUserId: number | null }[] }
-): boolean {
-  const { userId, role, divisionId } = user;
-  if (role === 'Director' || role === 'Admin') return true;
-  if (role === 'Manager') return finding.targetDivisionId === divisionId;
-  if (finding.reportedByUserId === userId) return true;
-  return finding.followUpTasks?.some((t) => t.assignedToUserId === userId) ?? false;
 }
 
 function computeDueDateBreached(finding: { dueDate: Date | null; status: string }): boolean {
@@ -171,15 +147,15 @@ export async function createFindingService(
   const department = await client.department.findUnique({ where: { id: departmentId }, select: { id: true } });
   if (!department) throw new HttpError(400, 'Department not found');
 
-  // Optional taxonomy: ATA chapter (must exist) + hazard tags (must all exist).
+  // Optional taxonomy: ATA chapter + hazard tags must exist AND be active.
   if (ataChapterId != null) {
-    const ata = await client.ataChapter.findUnique({ where: { id: ataChapterId }, select: { id: true } });
-    if (!ata) throw new HttpError(400, 'ATA chapter not found');
+    const ata = await client.ataChapter.findFirst({ where: { id: ataChapterId, isActive: true }, select: { id: true } });
+    if (!ata) throw new HttpError(400, 'ATA chapter not found or inactive');
   }
   const tagIds = Array.isArray(hazardTagIds) ? [...new Set(hazardTagIds)] : [];
   if (tagIds.length > 0) {
-    const found = await client.hazardTag.count({ where: { id: { in: tagIds } } });
-    if (found !== tagIds.length) throw new HttpError(400, 'One or more hazard tags not found');
+    const found = await client.hazardTag.count({ where: { id: { in: tagIds }, isActive: true } });
+    if (found !== tagIds.length) throw new HttpError(400, 'One or more hazard tags not found or inactive');
   }
 
   const reporter = await client.user.findUnique({ where: { id: actor.userId }, select: { name: true } });
@@ -350,13 +326,21 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (!canViewFinding(user, finding)) {
+    if (!(await canAccessFinding(prisma, user, finding.id))) {
       res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
 
     const dueDateBreached = await ensureDueDateBreachLogged(finding, user.userId);
-    const trend = await computeTrend(finding.id);
+    // Reuse the already-loaded signature (department + ATA + cause code + hazard
+    // tags) instead of re-querying the finding inside the trend service.
+    const trend = await computeTrendForSignature({
+      findingId: finding.id,
+      departmentId: finding.departmentId,
+      ataChapterId: finding.ataChapterId,
+      causeCodeId: finding.rca?.causeCodeId ?? null,
+      hazardTagIds: finding.hazardTags.map((h) => h.hazardTagId)
+    });
 
     res.json({
       ...finding,
@@ -415,22 +399,24 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Optional taxonomy adjustments at review time.
+    // Optional taxonomy adjustments at review time (must exist AND be active).
     if (ataChapterId != null) {
-      const ata = await prisma.ataChapter.findUnique({ where: { id: ataChapterId }, select: { id: true } });
+      const ata = await prisma.ataChapter.findFirst({ where: { id: ataChapterId, isActive: true }, select: { id: true } });
       if (!ata) {
-        res.status(400).json({ message: 'ATA chapter not found' });
+        res.status(400).json({ message: 'ATA chapter not found or inactive' });
         return;
       }
     }
     const tagIds = Array.isArray(hazardTagIds) ? [...new Set(hazardTagIds as number[])] : null;
     if (tagIds && tagIds.length > 0) {
-      const found = await prisma.hazardTag.count({ where: { id: { in: tagIds } } });
+      const found = await prisma.hazardTag.count({ where: { id: { in: tagIds }, isActive: true } });
       if (found !== tagIds.length) {
-        res.status(400).json({ message: 'One or more hazard tags not found' });
+        res.status(400).json({ message: 'One or more hazard tags not found or inactive' });
         return;
       }
     }
+    // Whether this review actually changes the finding's taxonomy (for audit).
+    const taxonomyChanged = ataChapterId !== undefined || tagIds !== null;
 
     const reviewerName = await getUserName(userId);
     const newStatus = 'In Progress';
@@ -473,6 +459,20 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
           userId,
           `Due date set to ${parsedDueDate.toISOString().slice(0, 10)} by ${reviewerName}`,
           { findingId: finding.id, dueDate: parsedDueDate.toISOString() }
+        );
+      }
+
+      // Dual-write an audit entry whenever the review touches the taxonomy, so
+      // ATA/hazard changes are not silently applied.
+      if (taxonomyChanged) {
+        await logFindingAuditAndActivity(
+          tx,
+          finding.id,
+          finding.sourceTaskId,
+          FINDING_EXPANSION_ACTIONS.TAXONOMY_SET,
+          userId,
+          `Taxonomy updated on Finding #${finding.id} by ${reviewerName}`,
+          { findingId: finding.id, ataChapterId: ataChapterId ?? null, hazardTagIds: tagIds }
         );
       }
 

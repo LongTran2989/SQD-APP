@@ -24,13 +24,17 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
   let managerToken: string;
   let staffToken: string;
   let outsiderToken: string;
+  let manager2Token: string; // Manager in a different division (FEX2)
+  let staff2Token: string;   // Staff in FEX2
 
   let directorId: number;
   let managerId: number;
   let staffId: number;
   let outsiderId: number;
+  let staff2Id: number;
 
   let divisionId: number;
+  let division2Id: number;
   let departmentId: number;
 
   let allowsFindingsTemplateId: number;
@@ -55,6 +59,8 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
     departmentId = dept.id;
     const div = await prisma.division.upsert({ where: { code: 'FEX' }, update: {}, create: { name: 'FExp Div', code: 'FEX', departmentId: dept.id } });
     divisionId = div.id;
+    const div2 = await prisma.division.upsert({ where: { code: 'FEX2' }, update: {}, create: { name: 'FExp Div 2', code: 'FEX2', departmentId: dept.id } });
+    division2Id = div2.id;
 
     const director = await prisma.user.create({ data: { name: 'FExp Director', email: 'fexp_director@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId, roleId: directorRole.id } });
     directorId = director.id;
@@ -65,12 +71,17 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
     staffId = staff.id;
     const outsider = await prisma.user.create({ data: { name: 'FExp Outsider', email: 'fexp_outsider@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId, roleId: staffRole.id } });
     outsiderId = outsider.id;
+    const manager2 = await prisma.user.create({ data: { name: 'FExp Manager2', email: 'fexp_manager2@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId: division2Id, roleId: managerRole.id } });
+    const staff2 = await prisma.user.create({ data: { name: 'FExp Staff2', email: 'fexp_staff2@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId: division2Id, roleId: staffRole.id } });
+    staff2Id = staff2.id;
 
     directorToken = makeToken(directorId, 'Director', divisionId);
     adminToken = makeToken(admin.id, 'Admin', divisionId);
     managerToken = makeToken(managerId, 'Manager', divisionId);
     staffToken = makeToken(staffId, 'Staff', divisionId);
     outsiderToken = makeToken(outsiderId, 'Staff', divisionId);
+    manager2Token = makeToken(manager2.id, 'Manager', division2Id);
+    staff2Token = makeToken(staff2Id, 'Staff', division2Id);
 
     const baseSchema = [{ id: '1', type: 'radio', label: 'Pass/Fail', options: ['Pass', 'Fail'] }];
     const af = await prisma.template.create({ data: { templateId: 'FEX-T-001', title: 'Allows Findings', formSchema: baseSchema, status: 'Published', publishedAt: new Date(), ownerId: managerId, divisionId, requiresApproval: true, allowsFindings: true, estimatedHours: 2 } });
@@ -482,6 +493,75 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
       const res = await request(app).get(`/api/findings/${a}`).set('Authorization', `Bearer ${directorToken}`);
       expect(res.body.trend.isRecurring).toBe(false);
       expect(res.body.trend.matchCount).toBe(0);
+    });
+
+    it('TR07: the subject finding is counted even when raised before the window', async () => {
+      // Subject is 200 days old; two recent matches share the signature.
+      const old = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000);
+      const subject = await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX], createdAt: old });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      await createClusterFinding({ ataChapterId: ataA, causeCodeId: causeA, hazardTagIds: [hazX] });
+      const res = await request(app).get(`/api/findings/${subject}`).set('Authorization', `Bearer ${directorToken}`);
+      // 2 recent + the subject itself = 3 → recurring at threshold.
+      expect(res.body.trend.matchCount).toBe(3);
+      expect(res.body.trend.isRecurring).toBe(true);
+    });
+  });
+
+  // ── Group 14 — Inactive taxonomy guard ──────────────────────────────────────
+  describe('Inactive taxonomy', () => {
+    it('IT01: raising with an inactive ATA chapter → 400', async () => {
+      const inactive = await prisma.ataChapter.create({ data: { code: 'FEX-INACT', title: 'Retired', isActive: false } });
+      const res = await raiseFinding(staffToken, { ataChapterId: inactive.id });
+      expect(res.status).toBe(400);
+      await prisma.ataChapter.delete({ where: { id: inactive.id } });
+    });
+
+    it('IT02: raising with an inactive hazard tag → 400', async () => {
+      const inactive = await prisma.hazardTag.create({ data: { label: 'FEX-INACT-HAZ', isActive: false } });
+      const res = await raiseFinding(staffToken, { hazardTagIds: [inactive.id] });
+      expect(res.status).toBe(400);
+      await prisma.hazardTag.delete({ where: { id: inactive.id } });
+    });
+  });
+
+  // ── Group 15 — Link RBAC (broadened manager scope) ──────────────────────────
+  describe('Link RBAC', () => {
+    // Create two linkable FEX findings and link them as the FEX manager.
+    async function linkTwoFindings(): Promise<{ aId: number; linkId: number }> {
+      const a = await raiseFinding(staffToken);
+      const b = await raiseFinding(staffToken);
+      const created = await request(app).post(`/api/findings/${a.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ relatedFindingId: b.body.id, linkType: 'RELATED' });
+      return { aId: a.body.id, linkId: created.body.id };
+    }
+
+    it('LR01: a manager of an uninvolved division cannot delete the link → 403', async () => {
+      const { aId, linkId } = await linkTwoFindings();
+      const res = await request(app).delete(`/api/findings/${aId}/links/${linkId}`).set('Authorization', `Bearer ${manager2Token}`);
+      expect(res.status).toBe(403);
+      expect(await prisma.findingLink.count({ where: { fromFindingId: aId } })).toBe(1);
+    });
+
+    it('LR02: a manager whose division is involved via a follow-up assignee can view and delete the link', async () => {
+      const { aId, linkId } = await linkTwoFindings();
+      // Generate a follow-up task on the finding and assign it to a FEX2 staffer.
+      await request(app).put(`/api/findings/${aId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+      const gen = await request(app).post(`/api/findings/${aId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'CAR' }] });
+      await prisma.task.update({ where: { id: gen.body.createdTasks[0].id }, data: { assignedToUserId: staff2Id, status: 'Assigned' } });
+
+      // manager2 (FEX2) is now involved → can view links and delete.
+      const view = await request(app).get(`/api/findings/${aId}/links`).set('Authorization', `Bearer ${manager2Token}`);
+      expect(view.status).toBe(200);
+      const res = await request(app).delete(`/api/findings/${aId}/links/${linkId}`).set('Authorization', `Bearer ${manager2Token}`);
+      expect(res.status).toBe(200);
+      expect(await prisma.findingLink.count({ where: { fromFindingId: aId } })).toBe(0);
+    });
+
+    it('LR03: an uninvolved manager cannot see another division\'s finding in their list', async () => {
+      const a = await raiseFinding(staffToken);
+      const res = await request(app).get('/api/findings').set('Authorization', `Bearer ${manager2Token}`);
+      const ids = res.body.findings.map((f: any) => f.id);
+      expect(ids).not.toContain(a.body.id);
     });
   });
 });

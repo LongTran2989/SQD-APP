@@ -20,32 +20,26 @@ export interface TrendInfo {
   };
 }
 
+export interface TrendSignature {
+  findingId: number;
+  departmentId: number | null;
+  ataChapterId: number | null;
+  causeCodeId: number | null;
+  hazardTagIds: number[];
+}
+
 /**
- * Compute-on-read recurrence detection. A finding is "recurring" when at least
- * TREND_THRESHOLD non-deleted findings (inclusive of itself) within the rolling
- * window share the SAME Department + ATA Chapter + Cause Code AND at least one
- * common Hazard Tag.
+ * Compute-on-read recurrence detection from an already-known signature. A finding
+ * is "recurring" when at least TREND_THRESHOLD non-deleted findings (inclusive of
+ * itself) share the SAME Department + ATA Chapter + Cause Code AND at least one
+ * common Hazard Tag. The subject finding is always counted regardless of the
+ * rolling window, so a long-lived finding still reflects a recurring pattern.
  *
- * Cause Code lives on the finding's RcaInvestigation (it is only known once the
- * RCA establishes the cause), so a finding without a completed cause code never
- * participates in cause-based trend grouping. Pure read — never writes.
+ * Cause Code lives on the finding's RcaInvestigation, so a finding without a
+ * determined cause never participates in cause-based grouping. Pure read.
  */
-export async function computeTrend(findingId: number): Promise<TrendInfo> {
-  const finding = await prisma.finding.findUnique({
-    where: { id: findingId, deletedAt: null },
-    select: {
-      departmentId: true,
-      ataChapterId: true,
-      rca: { select: { causeCodeId: true } },
-      hazardTags: { select: { hazardTagId: true } },
-    },
-  });
-
-  const departmentId = finding?.departmentId ?? null;
-  const ataChapterId = finding?.ataChapterId ?? null;
-  const causeCodeId = finding?.rca?.causeCodeId ?? null;
-  const hazardTagIds = finding?.hazardTags.map((h) => h.hazardTagId) ?? [];
-
+export async function computeTrendForSignature(sig: TrendSignature): Promise<TrendInfo> {
+  const { findingId, departmentId, ataChapterId, causeCodeId, hazardTagIds } = sig;
   const signature = { departmentId, ataChapterId, causeCodeId, hazardTagIds };
   const empty: TrendInfo = {
     isRecurring: false,
@@ -67,9 +61,11 @@ export async function computeTrend(findingId: number): Promise<TrendInfo> {
       deletedAt: null,
       departmentId,
       ataChapterId,
-      createdAt: { gte: cutoff },
       rca: { causeCodeId },
       hazardTags: { some: { hazardTagId: { in: hazardTagIds } } },
+      // Count matches within the window, but always include the subject finding
+      // itself even if it was raised before the window opened.
+      OR: [{ createdAt: { gte: cutoff } }, { id: findingId }],
     },
   });
 
@@ -80,4 +76,29 @@ export async function computeTrend(findingId: number): Promise<TrendInfo> {
     windowDays: TREND_WINDOW_DAYS,
     signature,
   };
+}
+
+/**
+ * Convenience wrapper that loads a finding's signature then computes its trend.
+ * Prefer computeTrendForSignature when the caller has already loaded the finding
+ * (e.g. getFindingById) to avoid the extra query.
+ */
+export async function computeTrend(findingId: number): Promise<TrendInfo> {
+  const finding = await prisma.finding.findUnique({
+    where: { id: findingId, deletedAt: null },
+    select: {
+      departmentId: true,
+      ataChapterId: true,
+      rca: { select: { causeCodeId: true } },
+      hazardTags: { select: { hazardTagId: true } },
+    },
+  });
+
+  return computeTrendForSignature({
+    findingId,
+    departmentId: finding?.departmentId ?? null,
+    ataChapterId: finding?.ataChapterId ?? null,
+    causeCodeId: finding?.rca?.causeCodeId ?? null,
+    hazardTagIds: finding?.hazardTags.map((h) => h.hazardTagId) ?? [],
+  });
 }
