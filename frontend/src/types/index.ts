@@ -282,11 +282,12 @@ export type EscalationActionPayload =
   | DisseminateActionPayload
   | Record<string, never>;
 
-// One row of the viewer's actionable escalation queue (GET /api/escalations).
+// One row of the viewer's escalation list (GET /api/escalations). Serves both the
+// live action queue (PENDING) and the retained history (ACTIONED / DISMISSED).
 export interface PendingEscalation {
   id: number;
   targetScope: EscalationTargetScope;
-  status: string;
+  status: EscalationFlagStatus;
   createdAt: string;
   sourcePostId: number;
   sourceExcerpt: string | null;
@@ -295,6 +296,10 @@ export interface PendingEscalation {
   flaggedByUserId: number;
   flaggedBy: { id: number; name: string | null } | null;
   card: { scope: FeedScope; scopeId: number | null } | null;
+  // Action result — null while PENDING; populated once actioned/dismissed.
+  action?: EscalationAction | null;
+  actionedAt?: string | null;
+  reviewedBy?: { id: number; name: string | null } | null;
 }
 
 export interface TimeBookingEntry {

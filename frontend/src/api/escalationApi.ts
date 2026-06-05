@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { EscalationAction, EscalationActionPayload, EscalationTargetScope, PendingEscalation } from '../types';
+import { EscalationAction, EscalationActionPayload, EscalationFlagStatus, EscalationTargetScope, PendingEscalation } from '../types';
 
 // Broadcast that the viewer's pending-escalation queue may have changed (a new
 // flag was raised, or a flag was actioned). The Header bell listens for this so
@@ -21,9 +21,16 @@ export const flagPost = (postId: number, targetScope: EscalationTargetScope): Pr
   });
 
 // The viewer's actionable escalation queue (Director/Admin: all; Manager:
-// own-division WP/Division + all Org; others: none). Drives the Header bell.
+// own-division WP/Division + all Org; others: none). Drives the Header bell — the
+// bell counts PENDING only, so this stays the single source of truth for the badge.
 export const getPendingEscalations = (): Promise<PendingEscalation[]> =>
   apiClient.get('/escalations', { params: { status: 'PENDING' } }).then((r) => r.data);
+
+// The viewer's full escalation list within their RBAC scope. Omitting status
+// returns the whole history (PENDING + ACTIONED + DISMISSED); pass a status to
+// filter. Drives the dedicated Escalations page (queue + retained history).
+export const getEscalations = (status?: EscalationFlagStatus): Promise<PendingEscalation[]> =>
+  apiClient.get('/escalations', { params: status ? { status } : {} }).then((r) => r.data);
 
 // Action a PENDING flag (Director/Admin any; Manager own-div WP/Division + all
 // Org). The backend reuses the existing createFinding / createTask / reassignTask

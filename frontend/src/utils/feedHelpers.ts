@@ -1,4 +1,4 @@
-import { FeedPostEnriched, EscalationTargetScope } from '../types';
+import { FeedPostEnriched, EscalationTargetScope, EscalationAction } from '../types';
 
 // Shared escalation/info-card presentation helpers. Centralised so the timestamp
 // format, deep-link rule, and target-scope labels live in one place (were
@@ -9,6 +9,16 @@ export const TARGET_SCOPE_LABEL: Record<EscalationTargetScope, string> = {
   WP: 'Work Package',
   DIVISION: 'Division Board',
   ORG: 'Org Feed',
+};
+
+/** Past-tense label for a completed escalation action (history summary line). */
+export const ACTION_LABEL: Record<EscalationAction, string> = {
+  ACKNOWLEDGE: 'Acknowledged',
+  DISMISS: 'Dismissed',
+  RAISE_FINDING: 'Raised Finding',
+  CREATE_TASK: 'Created Task',
+  REASSIGN_TASK: 'Reassigned Task',
+  DISSEMINATE: 'Disseminated',
 };
 
 /** Compact `dd Mon HH:MM` (en-GB) timestamp for feed cards. */

@@ -214,9 +214,17 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
       });
     }
 
-    const flaggerIds = [...new Set(actionable.map((f) => f.flaggedByUserId))];
-    const users = flaggerIds.length
-      ? await prisma.user.findMany({ where: { id: { in: flaggerIds }, deletedAt: null }, select: { id: true, name: true } })
+    // Resolve names for both the flagger AND the reviewer (who actioned the flag)
+    // in a single batch — the history view shows "Actioned by <reviewer>".
+    const userIds = [
+      ...new Set(
+        actionable.flatMap((f) =>
+          f.reviewedByUserId != null ? [f.flaggedByUserId, f.reviewedByUserId] : [f.flaggedByUserId]
+        )
+      ),
+    ];
+    const users = userIds.length
+      ? await prisma.user.findMany({ where: { id: { in: userIds }, deletedAt: null }, select: { id: true, name: true } })
       : [];
     const nameMap = new Map(users.map((u) => [u.id, u.name]));
 
@@ -235,6 +243,12 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
           flaggedByUserId: f.flaggedByUserId,
           flaggedBy: { id: f.flaggedByUserId, name: nameMap.get(f.flaggedByUserId) ?? null },
           card: card ? { scope: card.scope, scopeId: card.scopeId } : null,
+          // Action result (null while PENDING) — drives the history summary line.
+          action: f.action ?? null,
+          actionedAt: f.actionedAt ?? null,
+          reviewedBy: f.reviewedByUserId
+            ? { id: f.reviewedByUserId, name: nameMap.get(f.reviewedByUserId) ?? null }
+            : null,
         };
       })
     );
