@@ -30,14 +30,14 @@ export interface TrendSignature {
 }
 
 /**
- * Compute-on-read recurrence detection from an already-known signature. A finding
- * is "recurring" when at least TREND_THRESHOLD non-deleted findings (inclusive of
- * itself) share the SAME Department + ATA Chapter + Cause Code AND at least one
- * common Hazard Tag. The subject finding is always counted regardless of the
- * rolling window, so a long-lived finding still reflects a recurring pattern.
+ * Computes whether a finding is part of a recurring pattern. Two-tier signature:
+ *   strong  — dept + ATA + causeCode + hazardTags all match (hazardTagIds non-empty)
+ *   partial — dept + ATA + causeCode match, no hazardTags supplied
+ *   none    — any core dimension (dept / ATA / causeCode) is null; returns immediately
  *
- * Cause Code lives on the finding's RcaInvestigation, so a finding without a
- * determined cause never participates in cause-based grouping. Pure read.
+ * The subject finding is always counted regardless of the rolling window.
+ * Cause code lives on the RcaInvestigation, so a finding without a determined
+ * cause never participates in cause-based grouping. Pure read.
  */
 export async function computeTrendForSignature(sig: TrendSignature): Promise<TrendInfo> {
   const { findingId, departmentId, ataChapterId, causeCodeId, hazardTagIds } = sig;

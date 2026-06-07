@@ -4,7 +4,7 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity, evaluateCloseGate } from '../services/findingService';
 import { computeTrendForSignature } from '../services/trendService';
-import { buildFindingScope, canAccessFinding } from '../utils/findingAccess';
+import { buildFindingScope, assertManagerDivisionScope, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
 import { FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 import { HttpError, isHttpError } from '../utils/httpError';
 
@@ -18,8 +18,6 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 const SEVERITIES = ['Observation', 'Level 1', 'Level 2'];
 const FINDING_STATUSES = ['Open', 'In Progress', 'Pending Verification', 'Closed', 'Dismissed'];
-// Manager (any division) or Director may review / generate tasks / sign off.
-const FINDING_REVIEWER_ROLES = ['Manager', 'Director'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -886,23 +884,9 @@ export const updateSeverity = async (req: Request, res: Response): Promise<void>
     }
 
     // Director is global; Manager is division-scoped for classification changes.
-    if (role === 'Manager') {
-      const inScope = await prisma.finding.findFirst({
-        where: {
-          id,
-          deletedAt: null,
-          OR: [
-            { targetDivisionId: req.user!.divisionId },
-            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
-            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
-          ],
-        },
-        select: { id: true },
-      });
-      if (!inScope) {
-        res.status(403).json({ message: 'You do not have access to this finding' });
-        return;
-      }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
     }
 
     const finding = await prisma.finding.findUnique({
@@ -966,23 +950,9 @@ export const dismissFinding = async (req: Request, res: Response): Promise<void>
     }
 
     // Director is global; Manager is division-scoped for irreversible mutations.
-    if (role === 'Manager') {
-      const inScope = await prisma.finding.findFirst({
-        where: {
-          id,
-          deletedAt: null,
-          OR: [
-            { targetDivisionId: req.user!.divisionId },
-            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
-            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
-          ],
-        },
-        select: { id: true },
-      });
-      if (!inScope) {
-        res.status(403).json({ message: 'You do not have access to this finding' });
-        return;
-      }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
     }
 
     const finding = await prisma.finding.findUnique({
@@ -1040,23 +1010,9 @@ export const updateTaxonomy = async (req: Request, res: Response): Promise<void>
     }
 
     // Director is global; Manager is division-scoped for classification changes.
-    if (role === 'Manager') {
-      const inScope = await prisma.finding.findFirst({
-        where: {
-          id,
-          deletedAt: null,
-          OR: [
-            { targetDivisionId: req.user!.divisionId },
-            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
-            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
-          ],
-        },
-        select: { id: true },
-      });
-      if (!inScope) {
-        res.status(403).json({ message: 'You do not have access to this finding' });
-        return;
-      }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
     }
 
     const finding = await prisma.finding.findUnique({

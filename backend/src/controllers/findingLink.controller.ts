@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
-import { canAccessFinding, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
+import { assertManagerDivisionScope, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
 import { LINK_TYPES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -76,23 +76,9 @@ export const createFindingLink = async (req: Request, res: Response): Promise<vo
       return;
     }
     // Director is global; Manager is division-scoped for link mutations.
-    if (role === 'Manager') {
-      const inScope = await prisma.finding.findFirst({
-        where: {
-          id,
-          deletedAt: null,
-          OR: [
-            { targetDivisionId: req.user!.divisionId },
-            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
-            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
-          ],
-        },
-        select: { id: true },
-      });
-      if (!inScope) {
-        res.status(403).json({ message: 'You do not have access to this finding' });
-        return;
-      }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
     }
 
     const related = await prisma.finding.findUnique({ where: { id: relatedFindingId, deletedAt: null }, select: { id: true } });
@@ -144,23 +130,9 @@ export const deleteFindingLink = async (req: Request, res: Response): Promise<vo
       res.status(403).json({ message: 'Only a Manager or Director can remove a finding link' });
       return;
     }
-    if (role === 'Manager') {
-      const inScope = await prisma.finding.findFirst({
-        where: {
-          id,
-          deletedAt: null,
-          OR: [
-            { targetDivisionId: req.user!.divisionId },
-            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
-            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
-          ],
-        },
-        select: { id: true },
-      });
-      if (!inScope) {
-        res.status(403).json({ message: 'You do not have access to this finding' });
-        return;
-      }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
     }
     const link = await prisma.findingLink.findFirst({ where: { id: linkId, fromFindingId: id } });
     if (!link) {

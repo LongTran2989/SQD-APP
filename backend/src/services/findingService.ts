@@ -38,7 +38,7 @@ export async function logFindingAuditAndActivity(
       entityId: String(findingId),
       performedByUserId,
       comment: auditComment ?? null,
-      details: (details as any) ?? Prisma.DbNull
+      details: (details as Prisma.InputJsonValue) ?? Prisma.DbNull
     }
   });
 

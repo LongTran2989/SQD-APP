@@ -45,6 +45,10 @@ export interface AnalysisFindingShape {
  * is linked via CapaTaskLink, or a Manager (globally, since visibility is open).
  * Admin views but does not edit.
  *
+ * managerMayEdit — pass `true` to grant Managers edit access (the current
+ * default since all findings are globally visible). Pass `false` only if a
+ * future policy restricts Manager editing to a specific scope.
+ *
  * capaLinkedUserIds — optional list of assignedToUserIds drawn from this
  * finding's CapaTaskLink-linked tasks; callers that already load CAPA data
  * derive and pass this to avoid an extra round-trip.
@@ -52,7 +56,7 @@ export interface AnalysisFindingShape {
 export function canEditAnalysis(
   user: Actor,
   finding: AnalysisFindingShape,
-  hasAccess: boolean,
+  managerMayEdit: boolean,
   capaLinkedUserIds?: number[]
 ): boolean {
   const { userId, role } = user;
@@ -60,6 +64,48 @@ export function canEditAnalysis(
   if (finding.reportedByUserId === userId) return true;
   if (finding.followUpTasks?.some((t) => t.assignedToUserId === userId)) return true;
   if (capaLinkedUserIds?.includes(userId)) return true;
-  if (role === 'Manager') return hasAccess;
+  if (role === 'Manager') return managerMayEdit;
   return false;
+}
+
+/**
+ * Division-scope gate for Manager mutations (dismiss, severity, taxonomy,
+ * finding links). Returns true immediately for Directors (global access).
+ * Managers pass only when the finding is associated with their division via
+ * targetDivisionId, a follow-up task's division, or a follow-up assignee's division.
+ */
+export async function assertManagerDivisionScope(
+  client: PrismaLike,
+  user: Actor,
+  findingId: number,
+): Promise<boolean> {
+  if (user.role !== 'Manager') return true;
+  const found = await client.finding.findFirst({
+    where: {
+      id: findingId,
+      deletedAt: null,
+      OR: [
+        { targetDivisionId: user.divisionId },
+        { followUpTasks: { some: { deletedAt: null, targetDivisionId: user.divisionId } } },
+        { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: user.divisionId } } } } },
+      ],
+    },
+    select: { id: true },
+  });
+  return !!found;
+}
+
+/**
+ * Extracts the assignedToUserIds of all Tasks linked to a finding's CAPA
+ * actions via CapaTaskLink. Used to grant edit rights to task assignees.
+ */
+export function extractCapaLinkedUserIds(
+  capaActions: {
+    linkedItems: { task: { assignedToUserId: number | null } | null }[];
+  }[]
+): number[] {
+  return capaActions
+    .flatMap((c) => c.linkedItems)
+    .map((l) => l.task?.assignedToUserId)
+    .filter((id): id is number => id != null);
 }

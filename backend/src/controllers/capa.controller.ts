@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
-import { canAccessFinding, canEditAnalysis, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
+import { canEditAnalysis, extractCapaLinkedUserIds, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
 import { CAPA_TYPES, CAPA_STATUSES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -38,15 +38,6 @@ async function loadFindingForCapa(id: number) {
   });
 }
 
-function extractCapaLinkedUserIds(
-  finding: { capaActions: { linkedItems: { task: { assignedToUserId: number | null } | null }[] }[] }
-): number[] {
-  return finding.capaActions
-    .flatMap((c) => c.linkedItems)
-    .map((l) => l.task?.assignedToUserId)
-    .filter((uid): uid is number => uid != null);
-}
-
 // ─── GET /api/findings/:id/capa ───────────────────────────────────────────────
 
 export const listCapa = async (req: Request, res: Response): Promise<void> => {
@@ -57,10 +48,7 @@ export const listCapa = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
-      return;
-    }
+    // Visibility is open to all authenticated users — no scope check needed.
     const actions = await prisma.capaAction.findMany({
       where: { findingId: id, deletedAt: null },
       orderBy: [{ type: 'asc' }, { id: 'asc' }],
@@ -95,8 +83,8 @@ export const createCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    const capaLinkedUserIds = extractCapaLinkedUserIds(finding);
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id), capaLinkedUserIds)) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to add CAPA actions to this finding' });
       return;
     }
@@ -153,8 +141,8 @@ export const updateCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    const capaLinkedUserIds = extractCapaLinkedUserIds(finding);
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id), capaLinkedUserIds)) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to edit CAPA actions on this finding' });
       return;
     }
@@ -219,8 +207,9 @@ export const verifyCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
+      res.status(403).json({ message: 'You do not have permission to verify this CAPA action' });
       return;
     }
     const capa = await prisma.capaAction.findFirst({
@@ -296,8 +285,9 @@ export const waiveCapa = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
+      res.status(403).json({ message: 'You do not have permission to waive this CAPA action' });
       return;
     }
     const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id, deletedAt: null } });
@@ -355,8 +345,9 @@ export const deleteCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
+      res.status(403).json({ message: 'You do not have permission to delete this CAPA action' });
       return;
     }
     const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id, deletedAt: null } });
@@ -399,8 +390,8 @@ export const addCapaLink = async (req: Request, res: Response): Promise<void> =>
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    const capaLinkedUserIds = extractCapaLinkedUserIds(finding);
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id), capaLinkedUserIds)) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to link items on this finding' });
       return;
     }
@@ -480,8 +471,9 @@ export const removeCapaLink = async (req: Request, res: Response): Promise<void>
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
+      res.status(403).json({ message: 'You do not have permission to remove this CAPA link' });
       return;
     }
     const link = await prisma.capaTaskLink.findFirst({ where: { id: linkId, capaId, capa: { findingId: id, deletedAt: null } } });
