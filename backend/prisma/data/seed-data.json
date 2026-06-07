@@ -1,0 +1,292 @@
+{
+  "_meta": {
+    "title": "SQD-APP — Master Seed Data (review & edit)",
+    "generatedAt": "2026-06-07",
+    "purpose": "Single human-editable source for ALL production seed data. Existing data was extracted verbatim from prisma/seed.ts and prisma/data/causeCodes.json. Missing reference tables are included with placeholder example rows for you to fill in.",
+    "statusLegend": {
+      "SEEDED": "Already populated by prisma/seed.ts — production-ready.",
+      "MISSING": "Required reference/lookup table NOT yet seeded — fill in before production.",
+      "REVIEW": "Depends on a roadmap decision (see _note)."
+    },
+    "howToUse": "Edit the `rows` arrays below. Once finalized, the seed.ts script can be wired to read this file (same pattern already used for causeCodes.json). Ask Claude to do the wiring when you are happy with the data.",
+    "doNotSeed": [
+      "Template", "TemplateRevisionArchive", "Task", "TaskData", "Finding",
+      "RcaInvestigation", "RcaWhyStep", "RcaContributingFactor", "CapaAction",
+      "CapaTaskLink", "FindingHazardTag", "FindingLink", "WorkPackage",
+      "WorkPackageAssignment", "TimeBooking", "FeedPost", "EscalationFlag",
+      "AuditLog", "Attachment"
+    ],
+    "doNotSeedReason": "Transactional / runtime data created by users in-app. Never seeded for production."
+  },
+
+  "roles": {
+    "_status": "SEEDED",
+    "_model": "Role",
+    "rows": [
+      { "name": "Director" },
+      { "name": "Admin" },
+      { "name": "Manager" },
+      { "name": "Group Leader" },
+      { "name": "Staff" }
+    ]
+  },
+
+  "departments": {
+    "_status": "SEEDED",
+    "_model": "Department",
+    "rows": [
+      { "name": "SQD" },
+      { "name": "EGD" },
+      { "name": "MCC" },
+      { "name": "HAN BMC" },
+      { "name": "HAN RMC" },
+      { "name": "HCM BMC" },
+      { "name": "HCM RMC" },
+      { "name": "DAD BRANCH" },
+      { "name": "LGC" },
+      { "name": "BDD" },
+      { "name": "HRD" },
+      { "name": "TC" },
+      { "name": "ADM" },
+      { "name": "HCM BRANCH" },
+      { "name": "EXTERNAL" }
+    ]
+  },
+
+  "divisions": {
+    "_status": "SEEDED",
+    "_model": "Division",
+    "_note": "code is the prefix for Template IDs (QA-001) and Task IDs (QA-000001). department refers to departments[].name.",
+    "rows": [
+      { "name": "Quality Assurance",           "code": "QA",  "department": "SQD" },
+      { "name": "Hanoi Quality Control",       "code": "QCH", "department": "SQD" },
+      { "name": "Ho Chi Minh Quality Control", "code": "QCS", "department": "SQD" },
+      { "name": "Staff Qualification",         "code": "KS",  "department": "SQD" }
+    ]
+  },
+
+  "systemSettings": {
+    "_status": "SEEDED",
+    "_model": "SystemSetting",
+    "_note": "Only ENFORCE_SINGLE_SESSION is seeded today. Add any other runtime config keys your controllers expect before go-live.",
+    "rows": [
+      {
+        "key": "ENFORCE_SINGLE_SESSION",
+        "value": "false",
+        "description": "If true, logging in on a new device invalidates all other active sessions."
+      }
+    ]
+  },
+
+  "wpTypes": {
+    "_status": "SEEDED",
+    "_model": "WpType",
+    "rows": [
+      { "code": "CHECK",         "description": "Check" },
+      { "code": "AUDIT",         "description": "Audit" },
+      { "code": "INVESTIGATION", "description": "Investigation" },
+      { "code": "OTHER",         "description": "Other" }
+    ]
+  },
+
+  "users": {
+    "_status": "SEEDED",
+    "_model": "User",
+    "_note": "login field = employeeId. division refers to divisions[].code. ALL users currently share password 'Abc@123' with forcePasswordChange=true. Change/rotate before production. email is optional (notifications only).",
+    "rows": [
+      { "employeeId": "VAE00071", "name": "Lê Viết Thành",           "role": "Director", "division": "QCH", "phone": "0868325588", "password": "Abc@123" },
+      { "employeeId": "VAE00483", "name": "Vũ Hồng Hải",             "role": "Manager",  "division": "QCH", "phone": "0912233470", "password": "Abc@123" },
+      { "employeeId": "VAE02285", "name": "Lê Xuân Anh",             "role": "Manager",  "division": "QCH", "phone": "0983801230", "password": "Abc@123" },
+      { "employeeId": "VAE00057", "name": "Chu Thế Cường",           "role": "Staff",    "division": "QCH", "phone": "0983012228", "password": "Abc@123" },
+      { "employeeId": "VAE02207", "name": "Lê Viết Dũng",            "role": "Staff",    "division": "QCH", "phone": "0982455985", "password": "Abc@123" },
+      { "employeeId": "VAE02250", "name": "Hoàng Đức Lâm",           "role": "Staff",    "division": "QCH", "phone": "0987999545", "password": "Abc@123" },
+      { "employeeId": "VAE02244", "name": "Nguyễn Gia Quỳnh",        "role": "Staff",    "division": "QCH", "phone": "0979707986", "password": "Abc@123" },
+      { "employeeId": "VAE02424", "name": "Lê Ngọc Hưng",            "role": "Staff",    "division": "QCH", "phone": "0948680570", "password": "Abc@123" },
+      { "employeeId": "VAE02431", "name": "Nguyễn Quốc Đức",         "role": "Staff",    "division": "QCH", "phone": "0915071214", "password": "Abc@123" },
+      { "employeeId": "VAE00560", "name": "Đào Văn Đức",             "role": "Staff",    "division": "QCH", "phone": "0988456890", "password": "Abc@123" },
+      { "employeeId": "VAE00534", "name": "Đinh Thanh Mạnh",         "role": "Staff",    "division": "QCH", "phone": "0982217580", "password": "Abc@123" },
+      { "employeeId": "VAE02562", "name": "Nguyễn Đăng Minh",        "role": "Staff",    "division": "QCH", "phone": "0936208235", "password": "Abc@123" },
+      { "employeeId": "VAE02205", "name": "Bùi Ngọc Đức",            "role": "Staff",    "division": "QCH", "phone": "0912535966", "password": "Abc@123" },
+      { "employeeId": "VAE02690", "name": "Trần Thanh Long",         "role": "Manager",  "division": "QCH", "phone": "0902274888", "password": "Abc@123" },
+      { "employeeId": "VAE02142", "name": "Nguyễn Văn Trọng",        "role": "Staff",    "division": "QCH", "phone": "0869368368", "password": "Abc@123" },
+      { "employeeId": "VAE02705", "name": "Bùi Hoài Nam",            "role": "Staff",    "division": "QCH", "phone": "0914282004", "password": "Abc@123" },
+      { "employeeId": "VAE00870", "name": "Tô Quang Hoàn",           "role": "Staff",    "division": "QCH", "phone": "0902174567", "password": "Abc@123" },
+      { "employeeId": "VAE02682", "name": "Vũ Ngọc Duy",             "role": "Staff",    "division": "QCH", "phone": "0904001216", "password": "Abc@123" },
+      { "employeeId": "VAE03594", "name": "Kim Anh Tú",              "role": "Staff",    "division": "QCH", "phone": "0395295696", "password": "Abc@123" },
+      { "employeeId": "VAE03073", "name": "Trần Mạnh Hùng",          "role": "Staff",    "division": "QCH", "phone": "0969393626", "password": "Abc@123" },
+
+      { "employeeId": "VAE02576", "name": "Võ Lục Nguyên Thông",     "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE00713", "name": "Trương Quảng Phú",        "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE01191", "name": "Trần Phương Nam",         "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE01202", "name": "Trần Phương",             "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE01267", "name": "Phạm Vương Quý",          "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE00087", "name": "Nguyễn Thế Khôi",         "role": "Manager",  "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE04091", "name": "Nguyễn Thái Thành",       "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE01363", "name": "Nguyễn Minh Việt",        "role": "Manager",  "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE00739", "name": "Nguyễn Khoa",             "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE00089", "name": "Nguyễn Công Toàn",        "role": "Manager",  "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE00098", "name": "Lê Thu Vân",              "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE02483", "name": "Lê Thanh Nga",            "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE02729", "name": "Hồ Nguyễn Bảo Phương",   "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE03546", "name": "Đỗ Ngọc Quỳnh Như",      "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+      { "employeeId": "VAE02578", "name": "Đỗ Hoàng Tuấn",          "role": "Staff",    "division": "QCS", "password": "Abc@123" },
+
+      { "employeeId": "VAE02566", "name": "Trần Thị Kim Tú",         "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE00061", "name": "Trần Quốc Hải",           "role": "Manager",  "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE00548", "name": "Trần Quang Anh",          "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE03740", "name": "Phạm Thanh Tùng",         "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE00051", "name": "Nguyễn Việt Hồng",        "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE01514", "name": "Nguyễn Thị Thanh Thiêm", "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE00053", "name": "Nguyễn Minh Phương",      "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE04093", "name": "Nguyễn Hữu Đức",         "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE03211", "name": "Nguyễn Đức Dinh",         "role": "Manager",  "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE03215", "name": "Lê Văn Sơn",              "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE04092", "name": "Lê Huy Phúc",             "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE02442", "name": "Đoàn Văn Chung",          "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE03209", "name": "Đỗ Trường Sơn",           "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE03200", "name": "Đình Xuân Đài",           "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+      { "employeeId": "VAE02294", "name": "Bùi Thị Nhuận",           "role": "Staff",    "division": "QA",  "password": "Abc@123" },
+
+      { "employeeId": "VAE00049", "name": "Trương Kỳ Long",          "role": "Manager",  "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE02279", "name": "Trịnh Xuân Thắng",        "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE03267", "name": "Trần Minh Khôi",          "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE02918", "name": "Trần Hữu Tiến",           "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE03741", "name": "Trần Đình Dương",         "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE03991", "name": "Nguyễn Tiến Sơn",         "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE02676", "name": "Nguyễn Hùng Thắng",       "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE02960", "name": "Nguyễn Hoàng Anh",        "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE04004", "name": "Nguyễn Duy Khánh",        "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE03742", "name": "Nguyễn Đức Đông",         "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE00420", "name": "Nguyễn Đăng Tùng",        "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE02679", "name": "Lỗ Quang Nam",            "role": "Staff",    "division": "KS",  "password": "Abc@123" },
+      { "employeeId": "VAE03210", "name": "Đỗ Hồng Hà",              "role": "Staff",    "division": "KS",  "password": "Abc@123" }
+    ]
+  },
+
+  "ataChapters": {
+    "_status": "SEEDED",
+    "_model": "AtaChapter",
+    "_note": "ATA 100 chapter reference (findings taxonomy). Admin-extendable via /api/taxonomy.",
+    "rows": [
+      { "code": "05", "title": "Time Limits / Maintenance Checks" },
+      { "code": "12", "title": "Servicing" },
+      { "code": "20", "title": "Standard Practices — Airframe" },
+      { "code": "21", "title": "Air Conditioning" },
+      { "code": "22", "title": "Auto Flight" },
+      { "code": "23", "title": "Communications" },
+      { "code": "24", "title": "Electrical Power" },
+      { "code": "25", "title": "Equipment / Furnishings" },
+      { "code": "26", "title": "Fire Protection" },
+      { "code": "27", "title": "Flight Controls" },
+      { "code": "28", "title": "Fuel" },
+      { "code": "29", "title": "Hydraulic Power" },
+      { "code": "30", "title": "Ice & Rain Protection" },
+      { "code": "31", "title": "Indicating / Recording Systems" },
+      { "code": "32", "title": "Landing Gear" },
+      { "code": "33", "title": "Lights" },
+      { "code": "34", "title": "Navigation" },
+      { "code": "35", "title": "Oxygen" },
+      { "code": "36", "title": "Pneumatic" },
+      { "code": "38", "title": "Water / Waste" },
+      { "code": "49", "title": "Airborne Auxiliary Power (APU)" },
+      { "code": "51", "title": "Standard Practices & Structures — General" },
+      { "code": "52", "title": "Doors" },
+      { "code": "53", "title": "Fuselage" },
+      { "code": "54", "title": "Nacelles / Pylons" },
+      { "code": "55", "title": "Stabilizers" },
+      { "code": "56", "title": "Windows" },
+      { "code": "57", "title": "Wings" },
+      { "code": "71", "title": "Power Plant" },
+      { "code": "72", "title": "Engine" },
+      { "code": "73", "title": "Engine Fuel & Control" },
+      { "code": "74", "title": "Ignition" },
+      { "code": "79", "title": "Oil" },
+      { "code": "80", "title": "Starting" }
+    ]
+  },
+
+  "causeCodes": {
+    "_status": "SEEDED",
+    "_model": "CauseCode",
+    "_note": "Human-factors taxonomy (MEDA-style groups A–J). The live source of truth is prisma/data/causeCodes.json (100 rows). Edit there, or here once wired. Not duplicated inline to keep this file readable.",
+    "_sourceFile": "prisma/data/causeCodes.json",
+    "_rowCount": 100,
+    "rows": "SEE prisma/data/causeCodes.json"
+  },
+
+  "hazardTags": {
+    "_status": "SEEDED",
+    "_model": "HazardTag",
+    "rows": [
+      { "label": "FOD",                        "description": "Foreign Object Debris/Damage" },
+      { "label": "Fatigue",                     "description": "Personnel fatigue contributing factor" },
+      { "label": "Tooling Control",             "description": "Tool accountability / calibration" },
+      { "label": "Documentation",               "description": "Documentation / record-keeping" },
+      { "label": "Human Factors",               "description": "Human-factors related hazard" },
+      { "label": "Procedural Non-compliance",   "description": "Procedure not followed" },
+      { "label": "Environmental",               "description": "Environmental / facility condition" },
+      { "label": "Communication",               "description": "Communication breakdown" },
+      { "label": "Training Gap",                "description": "Knowledge / training shortfall" },
+      { "label": "Safety Critical",             "description": "Directly affects flight safety" }
+    ]
+  },
+
+  "aircraftTypes": {
+    "_status": "MISSING",
+    "_model": "AircraftType",
+    "_note": "NOT YET SEEDED — seed.ts line ~318 explicitly skips aviation data. iataCode and icaoCode must each be unique. Replace the examples below with your real fleet.",
+    "rows": [
+      { "iataCode": "320", "icaoCode": "A320", "manufacturer": "Airbus", "model": "A320neo" },
+      { "iataCode": "321", "icaoCode": "A321", "manufacturer": "Airbus", "model": "A321neo" },
+      { "iataCode": "787", "icaoCode": "B788", "manufacturer": "Boeing", "model": "787-8" },
+      { "iataCode": "359", "icaoCode": "A359", "manufacturer": "Airbus", "model": "A350-900" }
+    ]
+  },
+
+  "aircraftRegistrations": {
+    "_status": "MISSING",
+    "_model": "AircraftRegistration",
+    "_note": "NOT YET SEEDED. registration must be unique. aircraftType refers to aircraftTypes[].icaoCode (resolve to id at seed time). Replace examples with your real tail numbers.",
+    "rows": [
+      { "registration": "VN-A361", "operator": "Vietnam Airlines", "authority": "CAAV", "aircraftType": "A321" },
+      { "registration": "VN-A867", "operator": "Vietnam Airlines", "authority": "CAAV", "aircraftType": "A359" }
+    ]
+  },
+
+  "authorizationTypes": {
+    "_status": "MISSING",
+    "_model": "AuthorizationType",
+    "_note": "NOT YET SEEDED. code must be unique. These back UserJobAuthorization. Replace/extend with your real authorization catalogue.",
+    "rows": [
+      { "code": "INSPECTOR",     "description": "Authorized to perform inspections" },
+      { "code": "MECHANIC",      "description": "Authorized to perform mechanical maintenance" },
+      { "code": "AVIONICS",      "description": "Authorized for avionics work" },
+      { "code": "CRS_SIGNATORY", "description": "Certificate of Release to Service signatory" }
+    ]
+  },
+
+  "userAircraftAuthorizations": {
+    "_status": "MISSING",
+    "_model": "UserAircraftAuthorization",
+    "_note": "NOT YET SEEDED. Join table: which user is authorized on which aircraft type. user refers to users[].employeeId; aircraftType refers to aircraftTypes[].icaoCode. Unique on (user, aircraftType).",
+    "rows": [
+      { "user": "VAE00071", "aircraftType": "A321" }
+    ]
+  },
+
+  "userJobAuthorizations": {
+    "_status": "MISSING",
+    "_model": "UserJobAuthorization",
+    "_note": "NOT YET SEEDED. Join table: which user holds which job authorization. user refers to users[].employeeId; authorizationType refers to authorizationTypes[].code. Unique on (user, authorizationType).",
+    "rows": [
+      { "user": "VAE00071", "authorizationType": "INSPECTOR" }
+    ]
+  },
+
+  "privilegeConfig": {
+    "_status": "REVIEW",
+    "_model": "PrivilegeConfig",
+    "_note": "Phase 7 (User Management & Settings) target. Per CLAUDE_HANDOVER.md the table exists but is intentionally EMPTY in Phases 5–6 (RBAC is hardcoded in middleware). Only seed this when DB-driven RBAC is activated. permissions is a JSON map keyed by action. unique on roleId.",
+    "rows": []
+  }
+}
