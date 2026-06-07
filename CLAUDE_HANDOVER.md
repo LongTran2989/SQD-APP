@@ -143,12 +143,16 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Trend engine two-tier** — "strong" signature (all 4 dims: dept+ATA+cause+hazard), "partial" (dept+ATA+cause only), "none" (any dim missing). Both strong/partial use same TREND_THRESHOLD for isRecurring
   - **Dismissed status added** — new terminal status for erroneous findings (`PUT /:id/dismiss`, Manager/Director only, requires reason)
   - **Manual advance endpoint** — `PUT /:id/advance` for findings with no follow-up tasks (admin escape hatch)
+  - **Open visibility** — `buildFindingScope` returns `{}` (all authenticated users can view all findings). Mutation access enforced per endpoint.
+  - **`assertManagerDivisionScope(client, user, findingId)`** — shared helper in `findingAccess.ts`; replaces 5 identical inline OR-clause blocks in `finding.controller`, `findingLink.controller`. Returns `true` immediately for Directors; Managers pass only when the finding belongs to their division via `targetDivisionId`, a follow-up task's division, or a follow-up assignee's division.
+  - **`extractCapaLinkedUserIds(capaActions[])`** — shared helper in `findingAccess.ts`; previously duplicated in `capa.controller` and `rca.controller`. Call with `finding.capaActions`.
+  - **`canEditAnalysis` third param** — renamed from `hasAccess` to `managerMayEdit`; pass `true` at all current call sites (Managers can globally edit RCA/CAPA). CAPA verify/waive/delete/removeCapaLink now use `canEditAnalysis` (consistent with createCapa/updateCapa/addCapaLink) instead of the dead `canAccessFinding` gate.
   
   **New audit action strings:**
   - `NO_FOLLOWUP_REQUIRED`, `SEVERITY_UPDATED`, `MANUAL_ADVANCE`, `DISMISSED`, `TAXONOMY_UPDATED`
   - `CAPA_LINK_ADDED`, `CAPA_LINK_REMOVED`
   
-  **Tests:** All 300 backend tests passing. Frontend migrated to CapaTaskLink model (types, API, CapaPanel components).
+  **Tests:** All 307 backend tests passing. Frontend migrated to CapaTaskLink model (types, API, CapaPanel components).
 
 - **Feed & Escalation System** (Phases 1–5 + post-ship UX — ✅ **COMPLETE**, 2026-06-05) — `FEED_ESCALATION_PLAN.md` is the living source of truth for this feature; OBJECT H documents the schema. Branch `claude/sqd-feed-escalation-plan-4dYZa` (NOT yet merged to `main`). End-user + developer manuals: `FEED_ESCALATION_USER_GUIDE.md` + `FEED_ESCALATION_DEV_GUIDE.md`; manual test checklist: `FEED_ESCALATION_TEST_CHECKLIST.md`.
   - **Phase 1–5** — see previous entries (schema migration, feed API, escalation core, flag lifecycle, badges/polish/docs). 260 backend tests on that branch.
