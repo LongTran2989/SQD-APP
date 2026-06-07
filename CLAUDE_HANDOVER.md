@@ -115,6 +115,41 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **`seed-verification.test.ts` fix:** hardcoded `ts-node.cmd` (Windows binary) replaced with platform-aware `process.platform === 'win32' ? 'ts-node.cmd' : 'ts-node'`.
   - **Deferred (not in Phase 6):** `violatorIds` multi-select search against external personnel DB; Findings analytics/charts dashboard.
 
+- **Phase 6.x — Finding Workflow Expansion** (COMPLETED 2026-06-07)
+  > [!NOTE]
+  > **Branch:** `claude/nice-bell-LZ29I` (merged to main after audit fixes)
+  
+  **New schema models added:**
+  - `RcaInvestigation`, `RcaWhyStep`, `RcaContributingFactor` — structured root cause analysis
+  - `CapaAction` with soft-delete (`deletedAt DateTime?`) — Corrective/Preventive actions
+  - `CapaTaskLink` (many-to-many) — replaces flat `executionTaskId`/`effectivenessTaskId` FK columns; includes `role` (EXECUTION | EFFECTIVENESS | SUPPORTING)
+  - `AtaChapter`, `CauseCode`, `HazardTag`, `FindingHazardTag` — taxonomy models
+  - `FindingLink` — cross-finding traceability (DUPLICATE | RELATED | CAUSED_BY)
+  - `TrendInfo` with `signatureStrength` ('strong' | 'partial' | 'none') — two-tier trend engine
+  
+  **New controllers:**
+  - `rca.controller.ts` — RCA lifecycle (upsert header, save why-steps, save factors)
+  - `capa.controller.ts` — CAPA create/update/delete (soft-delete); verify/waive; link management (`addCapaLink`, `removeCapaLink`)
+  - `findingLink.controller.ts` — cross-finding link CRUD
+  - `taxonomy.controller.ts` — ATA chapters, cause codes, hazard tags list + create/update (Admin/Director)
+  
+  **New service:** `trendService.ts` (compute-on-read recurrence detection)
+  
+  **Key design decisions:**
+  - **Stage 2 removed** — all analytical data now captured via structured RCA + CAPA (rootCause/correctiveAction legacy fields preserved with @deprecated comments but not used)
+  - **PREVENTIVE CAPAs do NOT block finding closure** — only CORRECTIVE CAPAs must be Verified; PREVENTIVE may remain Open/In Progress/Completed
+  - **CAPA soft-delete enforced** (compliance mandate) — `deleteCapa` sets `deletedAt`, not physical delete
+  - **CapaTaskLink many-to-many** — replaces old 1:1 relationship model; supports Task OR Work Package as either execution or effectiveness endpoint
+  - **Trend engine two-tier** — "strong" signature (all 4 dims: dept+ATA+cause+hazard), "partial" (dept+ATA+cause only), "none" (any dim missing). Both strong/partial use same TREND_THRESHOLD for isRecurring
+  - **Dismissed status added** — new terminal status for erroneous findings (`PUT /:id/dismiss`, Manager/Director only, requires reason)
+  - **Manual advance endpoint** — `PUT /:id/advance` for findings with no follow-up tasks (admin escape hatch)
+  
+  **New audit action strings:**
+  - `NO_FOLLOWUP_REQUIRED`, `SEVERITY_UPDATED`, `MANUAL_ADVANCE`, `DISMISSED`, `TAXONOMY_UPDATED`
+  - `CAPA_LINK_ADDED`, `CAPA_LINK_REMOVED`
+  
+  **Tests:** All 300 backend tests passing. Frontend migrated to CapaTaskLink model (types, API, CapaPanel components).
+
 - **Feed & Escalation System** (Phases 1–5 + post-ship UX — ✅ **COMPLETE**, 2026-06-05) — `FEED_ESCALATION_PLAN.md` is the living source of truth for this feature; OBJECT H documents the schema. Branch `claude/sqd-feed-escalation-plan-4dYZa` (NOT yet merged to `main`). End-user + developer manuals: `FEED_ESCALATION_USER_GUIDE.md` + `FEED_ESCALATION_DEV_GUIDE.md`; manual test checklist: `FEED_ESCALATION_TEST_CHECKLIST.md`.
   - **Phase 1–5** — see previous entries (schema migration, feed API, escalation core, flag lifecycle, badges/polish/docs). 260 backend tests on that branch.
   - **Post-ship UX (branch `claude/eloquent-feynman-G4thG`)** — The Escalations page (`/dashboard/escalations`) now **retains the full escalation history** (PENDING + ACTIONED + DISMISSED), not just the live pending queue:
