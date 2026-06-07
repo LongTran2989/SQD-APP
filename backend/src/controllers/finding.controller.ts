@@ -312,8 +312,12 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
           include: {
             ownerUser: { select: { id: true, name: true } },
             verifiedByUser: { select: { id: true, name: true } },
-            executionTask: { select: { id: true, taskId: true, status: true } },
-            effectivenessTask: { select: { id: true, taskId: true, status: true } }
+            linkedItems: {
+              include: {
+                task: { select: { id: true, taskId: true, title: true, status: true, template: { select: { title: true } } } },
+                wp: { select: { id: true, wpId: true, name: true, status: true } }
+              }
+            }
           }
         },
         linksFrom: { include: { relatedFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },

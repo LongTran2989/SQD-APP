@@ -280,10 +280,20 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
       expect(res.status).toBe(400);
     });
 
-    it('C04: linking a task that is not a follow-up of this finding → 400', async () => {
+    it('C04: any non-deleted task can be linked to a CAPA via the links endpoint (no follow-up restriction)', async () => {
       const r = await raiseFinding(staffToken);
-      const res = await request(app).post(`/api/findings/${r.body.id}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'x', executionTaskId: sourceTaskId });
-      expect(res.status).toBe(400);
+      const capa = await request(app).post(`/api/findings/${r.body.id}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'x' });
+      // sourceTaskId is NOT a follow-up of this finding — under the per-CAPA-item model it links fine.
+      const ok = await request(app).post(`/api/findings/${r.body.id}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EXECUTION', taskId: sourceTaskId });
+      expect(ok.status).toBe(201);
+      expect(ok.body.taskId).toBe(sourceTaskId);
+      expect(ok.body.role).toBe('EXECUTION');
+      // a non-existent task is still rejected
+      const bad = await request(app).post(`/api/findings/${r.body.id}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EXECUTION', taskId: 999999 });
+      expect(bad.status).toBe(400);
+      // exactly one of taskId / wpId must be supplied
+      const both = await request(app).post(`/api/findings/${r.body.id}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EXECUTION', taskId: sourceTaskId, wpId: 1 });
+      expect(both.status).toBe(400);
     });
 
     it('C05: verify is blocked without a completed effectiveness task → 400', async () => {
@@ -295,7 +305,8 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
 
     it('C06: verify succeeds once a Closed effectiveness task is linked', async () => {
       const { findingId, followUpId } = await makePendingVerification();
-      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix', effectivenessTaskId: followUpId });
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      await request(app).post(`/api/findings/${findingId}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EFFECTIVENESS', taskId: followUpId });
       const res = await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Verified');
@@ -304,7 +315,8 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
 
     it('C07: staff cannot verify a CAPA → 403', async () => {
       const { findingId, followUpId } = await makePendingVerification();
-      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix', effectivenessTaskId: followUpId });
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      await request(app).post(`/api/findings/${findingId}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EFFECTIVENESS', taskId: followUpId });
       const res = await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${staffToken}`);
       expect(res.status).toBe(403);
     });
@@ -333,7 +345,8 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
     it('C10: close succeeds once the corrective CAPA is verified', async () => {
       const { findingId, followUpId } = await makePendingVerification();
       await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
-      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix', effectivenessTaskId: followUpId });
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      await request(app).post(`/api/findings/${findingId}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EFFECTIVENESS', taskId: followUpId });
       await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(200);
@@ -355,6 +368,31 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');
+    });
+
+    it('C13: a Manager can remove a CAPA link (hard delete); staff cannot', async () => {
+      const { findingId } = await makePendingVerification();
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      const link = await request(app).post(`/api/findings/${findingId}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'SUPPORTING', taskId: sourceTaskId });
+      expect(link.status).toBe(201);
+      const staffDel = await request(app).delete(`/api/findings/${findingId}/capa/${capa.body.id}/links/${link.body.id}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(staffDel.status).toBe(403);
+      const del = await request(app).delete(`/api/findings/${findingId}/capa/${capa.body.id}/links/${link.body.id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(del.status).toBe(200);
+      expect(await prisma.capaTaskLink.count({ where: { capaId: capa.body.id } })).toBe(0);
+    });
+
+    it('C14: an EFFECTIVENESS-linked WP gates verify until the WP is Closed', async () => {
+      const { findingId } = await makePendingVerification();
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      const wp = await prisma.workPackage.create({ data: { wpId: 'FEX-WP-EFF1', name: 'Eff WP', type: 'INVESTIGATION', divisionId, timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000), creatorId: managerId, status: 'Open' } });
+      await request(app).post(`/api/findings/${findingId}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EFFECTIVENESS', wpId: wp.id });
+      const blocked = await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
+      expect(blocked.status).toBe(400);
+      await prisma.workPackage.update({ where: { id: wp.id }, data: { status: 'Closed' } });
+      const ok = await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
+      expect(ok.status).toBe(200);
+      expect(ok.body.status).toBe('Verified');
     });
   });
 

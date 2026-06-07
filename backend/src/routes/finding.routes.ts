@@ -16,7 +16,7 @@ import {
   updateTaxonomy
 } from '../controllers/finding.controller';
 import { getRca, upsertRca, saveWhySteps, saveFactors } from '../controllers/rca.controller';
-import { listCapa, createCapa, updateCapa, verifyCapa, waiveCapa, deleteCapa } from '../controllers/capa.controller';
+import { listCapa, createCapa, updateCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink } from '../controllers/capa.controller';
 import { getFindingLinks, createFindingLink, deleteFindingLink } from '../controllers/findingLink.controller';
 
 const router = Router();
@@ -61,6 +61,8 @@ router.post('/:id/capa', createCapa);
 router.put('/:id/capa/:capaId', updateCapa);
 router.put('/:id/capa/:capaId/verify', verifyCapa);
 router.put('/:id/capa/:capaId/waive', waiveCapa);
+router.post('/:id/capa/:capaId/links', addCapaLink);
+router.delete('/:id/capa/:capaId/links/:linkId', removeCapaLink);
 router.delete('/:id/capa/:capaId', deleteCapa);
 
 // ─── Traceability (cross-finding links) ──────────────────────────────
