@@ -401,8 +401,9 @@ model CapaAction {
   createdByUserId Int
   createdByUser   User @relation("CapaCreatedBy", fields: [createdByUserId], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([findingId])
   @@index([type, status])

@@ -12,7 +12,7 @@ const prisma = new PrismaClient({ adapter });
 
 // A linked effectiveness Task must be in one of these states for its CAPA to be
 // verifiable — i.e. the verification work is genuinely done.
-const EFFECTIVENESS_DONE_STATUSES = ['Closed', 'Approved'];
+const EFFECTIVENESS_DONE_STATUSES = ['Closed'];
 
 async function loadFindingForCapa(id: number) {
   return prisma.finding.findUnique({
@@ -53,7 +53,7 @@ export const listCapa = async (req: Request, res: Response): Promise<void> => {
       return;
     }
     const actions = await prisma.capaAction.findMany({
-      where: { findingId: id },
+      where: { findingId: id, deletedAt: null },
       orderBy: [{ type: 'asc' }, { id: 'asc' }],
       include: {
         ownerUser: { select: { id: true, name: true } },
@@ -154,7 +154,7 @@ export const updateCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(403).json({ message: 'You do not have permission to edit CAPA actions on this finding' });
       return;
     }
-    const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id } });
+    const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id, deletedAt: null } });
     if (!capa) {
       res.status(404).json({ message: 'CAPA action not found' });
       return;
@@ -231,7 +231,7 @@ export const verifyCapa = async (req: Request, res: Response): Promise<void> => 
       return;
     }
     const capa = await prisma.capaAction.findFirst({
-      where: { id: capaId, findingId: id },
+      where: { id: capaId, findingId: id, deletedAt: null },
       include: { effectivenessTask: { select: { id: true, status: true } } },
     });
     if (!capa) {
@@ -294,7 +294,7 @@ export const waiveCapa = async (req: Request, res: Response): Promise<void> => {
       res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
-    const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id } });
+    const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id, deletedAt: null } });
     if (!capa) {
       res.status(404).json({ message: 'CAPA action not found' });
       return;
@@ -353,14 +353,14 @@ export const deleteCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(403).json({ message: 'You do not have access to this finding' });
       return;
     }
-    const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id } });
+    const capa = await prisma.capaAction.findFirst({ where: { id: capaId, findingId: id, deletedAt: null } });
     if (!capa) {
       res.status(404).json({ message: 'CAPA action not found' });
       return;
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.capaAction.delete({ where: { id: capaId } });
+      await tx.capaAction.update({ where: { id: capaId }, data: { deletedAt: new Date() } });
       await logFindingAuditAndActivity(
         tx,
         finding.id,
