@@ -657,78 +657,6 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
   }
 };
 
-// ─── PUT /api/findings/:id/stage2 ─────────────────────────────────────────────
-
-export const completeStage2 = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const id = parseInt(req.params.id as string, 10);
-    const { userId, role } = req.user!;
-    const { errorCode, rootCause, correctiveAction, recurrence, violatorIds, category } = req.body;
-
-    const finding = await prisma.finding.findUnique({
-      where: { id, deletedAt: null },
-      select: {
-        id: true,
-        status: true,
-        sourceTaskId: true,
-        reportedByUserId: true,
-        followUpTasks: { where: { deletedAt: null }, select: { assignedToUserId: true } }
-      }
-    });
-    if (!finding) {
-      res.status(404).json({ message: 'Finding not found' });
-      return;
-    }
-
-    // Auth: reporter, any follow-up Task assignee, Manager, or Director.
-    const isReporter = finding.reportedByUserId === userId;
-    const isFollowUpAssignee = finding.followUpTasks.some((t) => t.assignedToUserId === userId);
-    const isManagerOrDirector = role === 'Manager' || role === 'Director';
-    if (!isReporter && !isFollowUpAssignee && !isManagerOrDirector) {
-      res.status(403).json({ message: 'You do not have permission to complete Stage 2 for this finding' });
-      return;
-    }
-
-    if (finding.status !== 'Pending Verification') {
-      res.status(400).json({ message: 'Finding is not yet pending verification' });
-      return;
-    }
-
-    const actorName = await getUserName(userId);
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const result = await tx.finding.update({
-        where: { id },
-        data: {
-          ...(errorCode !== undefined ? { errorCode } : {}),
-          ...(rootCause !== undefined ? { rootCause } : {}),
-          ...(correctiveAction !== undefined ? { correctiveAction } : {}),
-          recurrence: typeof recurrence === 'boolean' ? recurrence : null,
-          ...(violatorIds !== undefined ? { violatorIds: violatorIds as any } : {}),
-          ...(category !== undefined ? { category } : {})
-        }
-      });
-
-      await logFindingAuditAndActivity(
-        tx,
-        finding.id,
-        finding.sourceTaskId,
-        'STAGE2_COMPLETED',
-        userId,
-        `Stage 2 analytical fields completed by ${actorName}`,
-        { findingId: finding.id }
-      );
-
-      return result;
-    });
-
-    res.json(updated);
-  } catch (error) {
-    console.error('Error completing stage 2:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
 // ─── PUT /api/findings/:id/close ──────────────────────────────────────────────
 
 export const closeFinding = async (req: Request, res: Response): Promise<void> => {
@@ -743,7 +671,7 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, status: true, sourceTaskId: true, rootCause: true, correctiveAction: true }
+      select: { id: true, status: true, sourceTaskId: true }
     });
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
@@ -754,13 +682,8 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
       res.status(400).json({ message: 'Finding must be in Pending Verification to be closed' });
       return;
     }
-    if (!finding.rootCause || !finding.correctiveAction) {
-      res.status(400).json({ message: 'Stage 2 fields (rootCause and correctiveAction) must be completed before closing' });
-      return;
-    }
 
-    // Conditional expansion-pack gate: only constrains findings that actually
-    // carry RCA / CAPA data, so legacy findings close exactly as before.
+    // Close-gate: RCA must be Complete (if present); all CORRECTIVE CAPAs must be Verified.
     const gate = await evaluateCloseGate(finding.id);
     if (!gate.ok) {
       res.status(400).json({ message: gate.reason });

@@ -272,11 +272,16 @@ model Finding {
   eventType            String
   aircraftRegistration String?
   regulatoryReference  String?
-  errorCode            String?
-  rootCause            String?
-  correctiveAction     String?
-  recurrence           Boolean?
-  violatorIds          Json?
+  // @deprecated superseded by structured RCA + CAPA
+  errorCode        String?
+  // @deprecated superseded by structured RCA + CAPA
+  rootCause        String?
+  // @deprecated
+  correctiveAction String?
+  // @deprecated
+  recurrence       Boolean?
+  // @deprecated
+  violatorIds      Json?
 
   sourceTaskId Int?
   sourceTask   Task? @relation("FindingSourceTask", fields: [sourceTaskId], references: [id])

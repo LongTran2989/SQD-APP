@@ -335,7 +335,6 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
 
     it('C09: close is BLOCKED while a corrective CAPA is unverified → 400', async () => {
       const { findingId } = await makePendingVerification();
-      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
       await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(400);
@@ -344,7 +343,6 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
 
     it('C10: close succeeds once the corrective CAPA is verified', async () => {
       const { findingId, followUpId } = await makePendingVerification();
-      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
       const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
       await request(app).post(`/api/findings/${findingId}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EFFECTIVENESS', taskId: followUpId });
       await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
@@ -355,16 +353,14 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
 
     it('C11: close is BLOCKED while an RCA is still Draft → 400', async () => {
       const { findingId } = await makePendingVerification();
-      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
       await request(app).put(`/api/findings/${findingId}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'OTHER' });
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/root cause/i);
+      expect(res.body.message).toMatch(/rca|complete/i);
     });
 
     it('C12: REGRESSION — legacy finding with no RCA/CAPA still closes', async () => {
       const { findingId } = await makePendingVerification();
-      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');

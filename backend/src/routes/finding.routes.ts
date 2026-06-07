@@ -6,7 +6,6 @@ import {
   getFindingById,
   reviewFinding,
   generateFollowUpTasks,
-  completeStage2,
   closeFinding,
   advanceFinding,
   getStuckFindings,
@@ -45,8 +44,7 @@ router.put('/:id/severity', updateSeverity);
 router.put('/:id/dismiss', dismissFinding);
 router.put('/:id/taxonomy', updateTaxonomy);
 
-// ─── Two-stage closure ───────────────────────────────────────────────
-router.put('/:id/stage2', completeStage2);
+// ─── Closure ─────────────────────────────────────────────────────────
 router.put('/:id/close', closeFinding);
 
 // ─── RCA (Root Cause Analysis) ───────────────────────────────────────
