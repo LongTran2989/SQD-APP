@@ -10,7 +10,6 @@ import { getTaskById, getTaskActivity } from '../../../../api/taskApi';
 import { SeverityBadge, FindingStatusBadge } from '../../../../components/findings/FindingBadges';
 import ReviewPanel from '../../../../components/findings/ReviewPanel';
 import GenerateFollowUpModal from '../../../../components/findings/GenerateFollowUpModal';
-import Stage2Form from '../../../../components/findings/Stage2Form';
 import RcaPanel from '../../../../components/findings/RcaPanel';
 import CapaPanel from '../../../../components/findings/CapaPanel';
 import RelatedFindingsPanel from '../../../../components/findings/RelatedFindingsPanel';
@@ -113,9 +112,7 @@ export default function FindingDetailPage() {
   const canGenerate = isMgrDir && (finding.status === 'Open' || finding.status === 'In Progress');
   const isReporter = finding.reportedByUserId === user.id;
   const isFollowUpAssignee = finding.followUpTasks.some((t) => t.assignedToUserId === user.id);
-  const stage2Visible = finding.status === 'Pending Verification' || finding.status === 'Closed';
-  const stage2Editable = finding.status === 'Pending Verification' && (isReporter || isFollowUpAssignee || isMgrDir);
-  const canClose = isMgrDir && finding.status === 'Pending Verification' && !!finding.rootCause && !!finding.correctiveAction;
+  const canClose = isMgrDir && finding.status === 'Pending Verification';
   // Expansion sections become available once the finding has been reviewed.
   const analysisVisible = finding.status !== 'Open';
   const analysisEditable = finding.status !== 'Closed' && (isReporter || isFollowUpAssignee || isMgrDir);
@@ -221,9 +218,6 @@ export default function FindingDetailPage() {
               </div>
             )}
           </div>
-
-          {/* Section 5 — Stage 2 */}
-          {stage2Visible && <Stage2Form finding={finding} editable={stage2Editable} onSaved={load} />}
 
           {/* Section 5b — Root Cause Analysis */}
           {analysisVisible && <RcaPanel finding={finding} editable={analysisEditable} onSaved={load} />}

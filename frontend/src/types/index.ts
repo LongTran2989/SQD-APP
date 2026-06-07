@@ -332,7 +332,7 @@ export interface Attachment {
 }
 
 export type FindingSeverity = 'Observation' | 'Level 1' | 'Level 2';
-export type FindingStatus = 'Open' | 'In Progress' | 'Pending Verification' | 'Closed';
+export type FindingStatus = 'Open' | 'In Progress' | 'Pending Verification' | 'Closed' | 'Dismissed';
 
 export interface Finding {
   id: number;
@@ -367,7 +367,20 @@ export type RcaMethod = 'MEDA' | 'FIVE_WHYS' | 'OTHER';
 export type RcaStatus = 'Draft' | 'Complete';
 export type CapaType = 'CORRECTIVE' | 'PREVENTIVE';
 export type CapaStatus = 'Open' | 'In Progress' | 'Completed' | 'Verified' | 'Waived';
+export type CapaLinkRole = 'EXECUTION' | 'EFFECTIVENESS' | 'SUPPORTING';
 export type FindingLinkType = 'DUPLICATE' | 'RELATED' | 'CAUSED_BY';
+
+export interface CapaWpRef { id: number; wpId: string; name: string; status: string; }
+
+export interface CapaTaskLink {
+  id: number;
+  capaId: number;
+  role: CapaLinkRole;
+  taskId: number | null;
+  task?: { id: number; taskId: string; title: string | null; status: TaskStatus; } | null;
+  wpId: number | null;
+  wp?: CapaWpRef | null;
+}
 
 export interface AtaChapter { id: number; code: string; title: string; isActive: boolean; }
 export interface CauseCode { id: number; code: string; name: string; groupCode: string; groupName: string; isActive: boolean; }
@@ -400,10 +413,7 @@ export interface CapaAction {
   ownerUser?: { id: number; name: string } | null;
   deadline: string | null;
   status: CapaStatus;
-  executionTaskId: number | null;
-  executionTask?: CapaTaskRef | null;
-  effectivenessTaskId: number | null;
-  effectivenessTask?: CapaTaskRef | null;
+  linkedItems: CapaTaskLink[];
   verifiedByUserId: number | null;
   verifiedByUser?: { id: number; name: string } | null;
   verifiedAt: string | null;
@@ -415,6 +425,7 @@ export interface TrendInfo {
   matchCount: number;
   threshold: number;
   windowDays: number;
+  signatureStrength: 'strong' | 'partial' | 'none';
   signature: { departmentId: number | null; ataChapterId: number | null; causeCodeId: number | null; hazardTagIds: number[] };
 }
 
