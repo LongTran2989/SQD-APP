@@ -26,8 +26,25 @@ async function loadFindingForCapa(id: number) {
       reportedByUserId: true,
       targetDivisionId: true,
       followUpTasks: { where: { deletedAt: null }, select: { assignedToUserId: true } },
+      capaActions: {
+        where: { deletedAt: null },
+        select: {
+          linkedItems: {
+            select: { task: { select: { assignedToUserId: true } } },
+          },
+        },
+      },
     },
   });
+}
+
+function extractCapaLinkedUserIds(
+  finding: { capaActions: { linkedItems: { task: { assignedToUserId: number | null } | null }[] }[] }
+): number[] {
+  return finding.capaActions
+    .flatMap((c) => c.linkedItems)
+    .map((l) => l.task?.assignedToUserId)
+    .filter((uid): uid is number => uid != null);
 }
 
 // ─── GET /api/findings/:id/capa ───────────────────────────────────────────────
@@ -78,7 +95,8 @@ export const createCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding);
+    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id), capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to add CAPA actions to this finding' });
       return;
     }
@@ -135,7 +153,8 @@ export const updateCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding);
+    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id), capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to edit CAPA actions on this finding' });
       return;
     }
@@ -380,7 +399,8 @@ export const addCapaLink = async (req: Request, res: Response): Promise<void> =>
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding);
+    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id), capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to link items on this finding' });
       return;
     }

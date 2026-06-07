@@ -330,10 +330,7 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (!(await canAccessFinding(prisma, user, finding.id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
-      return;
-    }
+    // Visibility is open to all authenticated users — no scope check needed.
 
     const dueDateBreached = await ensureDueDateBreachLogged(finding, user.userId);
     // Reuse the already-loaded signature (department + ATA + cause code + hazard
@@ -888,6 +885,26 @@ export const updateSeverity = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Director is global; Manager is division-scoped for classification changes.
+    if (role === 'Manager') {
+      const inScope = await prisma.finding.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          OR: [
+            { targetDivisionId: req.user!.divisionId },
+            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
+            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!inScope) {
+        res.status(403).json({ message: 'You do not have access to this finding' });
+        return;
+      }
+    }
+
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
       select: { id: true, status: true, severity: true, sourceTaskId: true }
@@ -948,6 +965,26 @@ export const dismissFinding = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Director is global; Manager is division-scoped for irreversible mutations.
+    if (role === 'Manager') {
+      const inScope = await prisma.finding.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          OR: [
+            { targetDivisionId: req.user!.divisionId },
+            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
+            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!inScope) {
+        res.status(403).json({ message: 'You do not have access to this finding' });
+        return;
+      }
+    }
+
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
       select: { id: true, status: true, sourceTaskId: true }
@@ -1000,6 +1037,26 @@ export const updateTaxonomy = async (req: Request, res: Response): Promise<void>
     if (!FINDING_REVIEWER_ROLES.includes(role)) {
       res.status(403).json({ message: 'Only a Manager or Director can update taxonomy' });
       return;
+    }
+
+    // Director is global; Manager is division-scoped for classification changes.
+    if (role === 'Manager') {
+      const inScope = await prisma.finding.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          OR: [
+            { targetDivisionId: req.user!.divisionId },
+            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
+            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!inScope) {
+        res.status(403).json({ message: 'You do not have access to this finding' });
+        return;
+      }
     }
 
     const finding = await prisma.finding.findUnique({

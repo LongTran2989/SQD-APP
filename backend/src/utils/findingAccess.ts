@@ -15,32 +15,11 @@ export const FINDING_REVIEWER_ROLES = ['Manager', 'Director'];
 
 /**
  * Prisma WHERE fragment scoping a Finding query to a user's visibility.
- *
- * - Director / Admin: everything.
- * - Manager: findings targeted at their division, OR findings their division is
- *   involved in via a follow-up task (the task targets their division, or its
- *   assignee belongs to their division).
- * - Staff / Group Leader: findings they reported, or whose follow-up task they
- *   are individually assigned.
+ * All authenticated users may view all findings — read access is open.
+ * Mutation access is enforced separately per endpoint.
  */
-export function buildFindingScope(user: Actor): Prisma.FindingWhereInput {
-  const { userId, role, divisionId } = user;
-  if (role === 'Director' || role === 'Admin') return {};
-  if (role === 'Manager') {
-    return {
-      OR: [
-        { targetDivisionId: divisionId },
-        { followUpTasks: { some: { deletedAt: null, targetDivisionId: divisionId } } },
-        { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId } } } } },
-      ],
-    };
-  }
-  return {
-    OR: [
-      { reportedByUserId: userId },
-      { followUpTasks: { some: { assignedToUserId: userId, deletedAt: null } } },
-    ],
-  };
+export function buildFindingScope(_user: Actor): Prisma.FindingWhereInput {
+  return {};
 }
 
 /**
@@ -61,16 +40,26 @@ export interface AnalysisFindingShape {
 }
 
 /**
- * Can the user edit analytical data (RCA / CAPA create-edit / Stage 2)?
- * Director, the reporter, any follow-up assignee, or a Manager who has access to
- * the finding (`hasAccess` is the result of canAccessFinding — keeps managers
- * scoped rather than globally privileged). Admin views but does not edit.
+ * Can the user edit analytical data (RCA / CAPA create-edit)?
+ * Director, the reporter, any follow-up assignee, any user whose task or WP
+ * is linked via CapaTaskLink, or a Manager (globally, since visibility is open).
+ * Admin views but does not edit.
+ *
+ * capaLinkedUserIds — optional list of assignedToUserIds drawn from this
+ * finding's CapaTaskLink-linked tasks; callers that already load CAPA data
+ * derive and pass this to avoid an extra round-trip.
  */
-export function canEditAnalysis(user: Actor, finding: AnalysisFindingShape, hasAccess: boolean): boolean {
+export function canEditAnalysis(
+  user: Actor,
+  finding: AnalysisFindingShape,
+  hasAccess: boolean,
+  capaLinkedUserIds?: number[]
+): boolean {
   const { userId, role } = user;
   if (role === 'Director') return true;
   if (finding.reportedByUserId === userId) return true;
   if (finding.followUpTasks?.some((t) => t.assignedToUserId === userId)) return true;
+  if (capaLinkedUserIds?.includes(userId)) return true;
   if (role === 'Manager') return hasAccess;
   return false;
 }

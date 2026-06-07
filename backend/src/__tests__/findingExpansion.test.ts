@@ -591,11 +591,84 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
       expect(await prisma.findingLink.count({ where: { fromFindingId: aId } })).toBe(0);
     });
 
-    it('LR03: an uninvolved manager cannot see another division\'s finding in their list', async () => {
+    it('LR03: open visibility — all users can see findings from any division in the list', async () => {
       const a = await raiseFinding(staffToken);
       const res = await request(app).get('/api/findings').set('Authorization', `Bearer ${manager2Token}`);
+      expect(res.status).toBe(200);
       const ids = res.body.findings.map((f: any) => f.id);
-      expect(ids).not.toContain(a.body.id);
+      expect(ids).toContain(a.body.id);
+    });
+  });
+
+  // ── Group 16 — RBAC: open visibility + mutation scope guards ────────────────
+  describe('RBAC scope guards', () => {
+    it('C-SEC-1: staff in a different division can GET /findings/:id → 200', async () => {
+      // Finding targetDivisionId = divisionId (FEX); staff2Token is in division2Id (FEX2).
+      const a = await raiseFinding(staffToken);
+      const res = await request(app).get(`/api/findings/${a.body.id}`).set('Authorization', `Bearer ${staff2Token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(a.body.id);
+    });
+
+    it('C-SEC-2: Manager in wrong division cannot dismiss a foreign finding → 403', async () => {
+      const a = await raiseFinding(staffToken);
+      const res = await request(app)
+        .put(`/api/findings/${a.body.id}/dismiss`)
+        .set('Authorization', `Bearer ${manager2Token}`)
+        .send({ reason: 'Raised in error' });
+      expect(res.status).toBe(403);
+      const f = await prisma.finding.findUnique({ where: { id: a.body.id }, select: { status: true } });
+      expect(f?.status).toBe('Open');
+    });
+
+    it('C-SEC-3: Manager in correct division can dismiss their own division finding → 200', async () => {
+      const a = await raiseFinding(staffToken);
+      const res = await request(app)
+        .put(`/api/findings/${a.body.id}/dismiss`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ reason: 'Raised in error' });
+      expect(res.status).toBe(200);
+      const f = await prisma.finding.findUnique({ where: { id: a.body.id }, select: { status: true } });
+      expect(f?.status).toBe('Dismissed');
+    });
+
+    it('C-SEC-4: Director can dismiss a finding in any division → 200', async () => {
+      const a = await raiseFinding(staffToken);
+      const res = await request(app)
+        .put(`/api/findings/${a.body.id}/dismiss`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ reason: 'Director override' });
+      expect(res.status).toBe(200);
+    });
+
+    it('C-SEC-5a: Manager in wrong division cannot update severity → 403', async () => {
+      const a = await raiseFinding(staffToken);
+      await request(app).put(`/api/findings/${a.body.id}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+      const res = await request(app)
+        .put(`/api/findings/${a.body.id}/severity`)
+        .set('Authorization', `Bearer ${manager2Token}`)
+        .send({ severity: 'Level 2', reason: 'Reclassify' });
+      expect(res.status).toBe(403);
+    });
+
+    it('C-SEC-5b: Manager in correct division can update severity → 200', async () => {
+      const a = await raiseFinding(staffToken);
+      await request(app).put(`/api/findings/${a.body.id}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+      const res = await request(app)
+        .put(`/api/findings/${a.body.id}/severity`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ severity: 'Level 2', reason: 'Reclassify' });
+      expect(res.status).toBe(200);
+    });
+
+    it('C-SEC-5c: Director can update severity in any division → 200', async () => {
+      const a = await raiseFinding(staffToken);
+      await request(app).put(`/api/findings/${a.body.id}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+      const res = await request(app)
+        .put(`/api/findings/${a.body.id}/severity`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ severity: 'Observation', reason: 'Director override' });
+      expect(res.status).toBe(200);
     });
   });
 });

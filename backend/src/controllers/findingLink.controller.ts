@@ -20,10 +20,7 @@ export const getFindingLinks = async (req: Request, res: Response): Promise<void
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
-      return;
-    }
+    // Visibility is open to all authenticated users — no scope check needed.
 
     const relatedSelect = {
       id: true,
@@ -78,18 +75,29 @@ export const createFindingLink = async (req: Request, res: Response): Promise<vo
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
-      return;
+    // Director is global; Manager is division-scoped for link mutations.
+    if (role === 'Manager') {
+      const inScope = await prisma.finding.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          OR: [
+            { targetDivisionId: req.user!.divisionId },
+            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
+            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!inScope) {
+        res.status(403).json({ message: 'You do not have access to this finding' });
+        return;
+      }
     }
 
     const related = await prisma.finding.findUnique({ where: { id: relatedFindingId, deletedAt: null }, select: { id: true } });
     if (!related) {
       res.status(404).json({ message: 'Related finding not found' });
-      return;
-    }
-    if (!(await canAccessFinding(prisma, req.user!, relatedFindingId))) {
-      res.status(403).json({ message: 'You do not have access to the related finding' });
       return;
     }
 
@@ -136,11 +144,23 @@ export const deleteFindingLink = async (req: Request, res: Response): Promise<vo
       res.status(403).json({ message: 'Only a Manager or Director can remove a finding link' });
       return;
     }
-    // Same access gate as create/get — a reviewer may only manage links on a
-    // finding within their visibility scope.
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
-      return;
+    if (role === 'Manager') {
+      const inScope = await prisma.finding.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          OR: [
+            { targetDivisionId: req.user!.divisionId },
+            { followUpTasks: { some: { deletedAt: null, targetDivisionId: req.user!.divisionId } } },
+            { followUpTasks: { some: { deletedAt: null, assignedToUser: { is: { divisionId: req.user!.divisionId } } } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!inScope) {
+        res.status(403).json({ message: 'You do not have access to this finding' });
+        return;
+      }
     }
     const link = await prisma.findingLink.findFirst({ where: { id: linkId, fromFindingId: id } });
     if (!link) {

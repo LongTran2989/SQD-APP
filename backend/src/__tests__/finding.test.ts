@@ -215,30 +215,26 @@ describe('Findings Backend (Phase 6)', () => {
       expect(ids).toContain(findingByDirector);
     });
 
-    it('F12: Manager of another division sees none of these', async () => {
+    it('F12: open visibility — Manager of another division sees all findings', async () => {
       const res = await request(app).get('/api/findings').set('Authorization', `Bearer ${manager2Token}`);
-      const ids = res.body.findings.map((f: any) => f.id);
-      expect(ids).not.toContain(findingByStaff);
-      expect(ids).not.toContain(findingByDirector);
-    });
-
-    it('F13: Staff sees only findings they reported (not others)', async () => {
-      const res = await request(app).get('/api/findings').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
       const ids = res.body.findings.map((f: any) => f.id);
       expect(ids).toContain(findingByStaff);
-      expect(ids).not.toContain(findingByDirector);
+      expect(ids).toContain(findingByDirector);
     });
 
-    it('F14: Staff sees a finding where they are a follow-up Task assignee', async () => {
-      // Director reports; generate a follow-up task; assign it to staff.
-      await request(app).put(`/api/findings/${findingByDirector}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
-      const gen = await request(app).post(`/api/findings/${findingByDirector}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'Corrective Action' }] });
-      const followUpId = gen.body.createdTasks[0].id;
-      await prisma.task.update({ where: { id: followUpId }, data: { assignedToUserId: staffId, status: 'Assigned' } });
-
+    it('F13: open visibility — Staff sees all findings including those they did not report', async () => {
       const res = await request(app).get('/api/findings').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
       const ids = res.body.findings.map((f: any) => f.id);
+      expect(ids).toContain(findingByStaff);
       expect(ids).toContain(findingByDirector);
+    });
+
+    it('F14: Staff can GET /findings/:id for any finding (open visibility)', async () => {
+      const res = await request(app).get(`/api/findings/${findingByDirector}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(findingByDirector);
     });
 
     it('F15: status filter narrows results', async () => {
