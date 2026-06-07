@@ -21,7 +21,10 @@ Key source files:
 ## 1. Data Model Overview
 
 A **Finding** is raised against a source **Task** and lives through a 4-state
-lifecycle. Around it sit the expansion-pack entities:
+lifecycle. Around it sit the expansion-pack entities.
+
+Note: `sourceTaskId` is nullable — a Finding may exist without a source Task.
+When null, the task feed write is skipped.
 
 | Entity | Relation to Finding | Purpose |
 |---|---|---|
@@ -50,23 +53,22 @@ feed write is skipped. All queries filter `deletedAt: null`.
 
 ```
                   raise (reporter)
-   [ source Task ] ───────────────────► Open
+   [ source Task ] ───────────────────► Open ◄────────────────────┐
+                                         │                         │
+                    review (Mgr/Dir): severity + dueDate + taxonomy │
+                                         ▼                         │
+                                    In Progress                    │
+                                         │                         │
+            generateFollowUpTasks ───────┘                         │
+                                         │                 dismiss (Mgr/Dir)
+            all follow-up Tasks reach a FINAL state                │
+            (Closed / Rejected / Terminated)                       │
+            → checkAndTriggerPendingVerification (auto)            │
+                                         ▼                         │
+                              Pending Verification ────────────────┘
                                          │
-                    review (Mgr/Dir): severity + dueDate + taxonomy
-                                         ▼
-                                    In Progress ◄──┐
-                                         │         │ generate follow-up tasks
-            generateFollowUpTasks ───────┘         │ (also moves Open→In Progress)
-                                         │
-            all follow-up Tasks reach a FINAL state
-            (Closed / Rejected / Terminated)
-            → checkAndTriggerPendingVerification (auto)
-                                         ▼
-                              Pending Verification
-                                         │
-                    completeStage2 (rootCause, correctiveAction, …)
-                                         │
-                    close (Mgr/Dir) — passes legacy + close-gate checks
+                    close (Mgr/Dir) — passes close-gate checks
+                    (RCA Complete + all CORRECTIVE CAPAs Verified)
                                          ▼
                                       Closed
 ```
@@ -76,7 +78,8 @@ feed write is skipped. All queries filter `deletedAt: null`.
 **`Open` → `In Progress`** — two paths, both Manager/Director only:
 - `PUT /:id/review` — sets `severity` (required), optional `dueDate`, optional ATA
   chapter / hazard tags. Only valid while status is `Open` (rejects "already
-  reviewed"). Writes `REVIEWED` (+ `DUE_DATE_SET`, `TAXONOMY_SET` when applicable).
+  reviewed"). Advances status Open → In Progress. Writes `REVIEWED` (+ `DUE_DATE_SET`,
+  `TAXONOMY_SET` when applicable).
 - `POST /:id/tasks` — generating follow-up tasks also advances `Open` →
   `In Progress` if still Open.
 
@@ -89,19 +92,17 @@ rethrows) — if it fails the finding silently stays `In Progress`. Requires at
 least one follow-up task to exist; never re-triggers once Pending/Closed.
 
 **`Pending Verification` → `Closed`** — `PUT /:id/close` (Manager/Director).
-Enforces, in order:
+Enforces via `evaluateCloseGate()`:
 1. Status must be `Pending Verification`.
-2. **Legacy gate (always):** `rootCause` and `correctiveAction` must be non-null.
-3. **Conditional close-gate (`evaluateCloseGate`):** only constrains findings that
-   carry expansion data —
-   - If an RCA exists → it must be `Complete`.
-   - If any CAPA exists → every `CORRECTIVE` must be `Verified`; every
-     `PREVENTIVE` must be `Verified` or `Waived`.
-   - Legacy findings with no RCA/CAPA close exactly as before.
+2. If an RCA exists → it must be `Complete`.
+3. If any CAPA exists → every `CORRECTIVE` CAPA must be `Verified`. **PREVENTIVE
+   CAPAs do NOT block closure** — they may be left `Open`, `In Progress`, or
+   `Completed`.
+4. Legacy findings with no RCA/CAPA close without expansion gates.
 
-**Stage 2 data entry** — `PUT /:id/stage2` (reporter / any follow-up assignee /
-Manager / Director). Only valid in `Pending Verification`. Sets `errorCode`,
-`rootCause`, `correctiveAction`, `recurrence`, `violatorIds`, `category`.
+**`Open` → `Dismissed`** — `PUT /:id/dismiss` (Manager/Director only). For
+findings raised in error or no longer relevant. Requires a reason. Irreversible
+terminal status.
 
 **Due-date breach** — computed on read (`dueDate` passed and status ≠ `Closed`).
 The first observed breach writes a one-time `DUE_DATE_BREACHED` audit entry; the
@@ -112,16 +113,18 @@ API returns a `dueDateBreached` flag on list and detail responses.
 ## 3. CAPA Lifecycle
 
 CAPA actions sit **beside** the finding's follow-up tasks and never mutate Task
-fields. Each action is `CORRECTIVE` or `PREVENTIVE` and may link two ordinary
-follow-up tasks: an `executionTask` (does the work) and an `effectivenessTask`
-(proves it worked).
+fields. Each action is `CORRECTIVE` or `PREVENTIVE`. Via `CapaTaskLink`, each CAPA
+can link to one or more Tasks or Work Packages in three roles:
+  - **`EXECUTION`** — the Task doing the work
+  - **`EFFECTIVENESS`** — the Task verifying the fix worked
+  - **`SUPPORTING`** — auxiliary reference
 
 ```
    createCapa ──► Open ──(updateCapa)──► In Progress ──► Completed
                     │                                       │
                     │      CORRECTIVE: verifyCapa           │
-                    │      (Mgr/Dir; needs effectivenessTask│
-                    │       in final state Closed/Approved) │
+                    │      (Mgr/Dir; needs EFFECTIVENESS    │
+                    │       link in final state)            │
                     │                                       ▼
                     │                                   Verified
                     │
@@ -134,19 +137,24 @@ follow-up tasks: an `executionTask` (does the work) and an `effectivenessTask`
 - **Status set via `updateCapa`** is limited to `Open` / `In Progress` /
   `Completed`. Transitioning to `Verified` or `Waived` through the generic update
   is **blocked** (400) — must use the dedicated endpoints.
-- **Linked task validation** — any `executionTaskId` / `effectivenessTaskId` must
-  be a non-deleted task whose `parentFindingId` equals this finding.
+- **`CapaTaskLink` model** — many-to-many with Role. Replaces the old flat
+  `executionTaskId` / `effectivenessTaskId` FK columns. Any non-deleted Task or
+  Work Package can be linked.
 - **`verifyCapa`** (Manager/Director + access):
-  - Requires a linked `effectivenessTaskId`.
-  - That task must be in `Closed` or `Approved` (`EFFECTIVENESS_DONE_STATUSES`).
+  - Requires at least one linked item with role `EFFECTIVENESS`.
+  - All EFFECTIVENESS-role links must be in a completion state (Task `Closed` or
+    Work Package `Closed`).
   - Stamps `status=Verified`, `verifiedByUserId`, `verifiedAt`.
 - **`waiveCapa`** (Manager/Director + access): **PREVENTIVE only** — corrective
   actions can never be waived. Requires a non-empty `waivedReason`. Stamps
   `status=Waived`.
-- **`deleteCapa`** (Manager/Director + access): hard-deletes the CAPA row with a
-  `CAPA_DELETED` dual-write (acceptable in the current dev phase).
+- **`deleteCapa`** (Manager/Director + access): soft-delete (sets `deletedAt`)
+  with a `CAPA_DELETED` dual-write.
+- **`addCapaLink`** / **`removeCapaLink`** — add or remove individual
+  Task/Work Package links (Manager/Director + access).
 
-These statuses feed directly into the finding close-gate (Section 2).
+**PREVENTIVE CAPAs no longer block finding closure.** Only CORRECTIVE CAPAs must
+be Verified. See Section 2 for the updated close-gate rules.
 
 ---
 
@@ -261,30 +269,33 @@ division cannot edit its RCA/CAPA or manage its links even though the role match
    refines taxonomy. → `In Progress`, audit `REVIEWED` (+ `DUE_DATE_SET`, `TAXONOMY_SET`).
 3. **Manager** generates follow-up tasks (`POST /:id/tasks`) — created
    `Unassigned`, each with `parentFindingId` and a fresh `schemaSnapshot`; can
-   attach to an existing WP or spin up a new INVESTIGATION work package.
+   attach to an existing Work Package (WP) or spin up a new INVESTIGATION work package.
    Audit `FOLLOWUP_TASK_CREATED`.
 4. Investigators record the **RCA** (`PUT /:id/rca` + why-steps/factors), conclude
    with a **cause code**, mark it `Complete`.
-5. They define **CAPA** actions, linking execution and effectiveness follow-up tasks.
-6. As follow-up tasks close, the **effectiveness task** reaches `Closed`/`Approved`;
-   **Manager** verifies the corrective CAPA (`…/verify`), waives any preventive
-   ones as needed.
+5. They define **CAPA** actions (Corrective / Preventive), linking execution and
+   effectiveness follow-up tasks via `CapaTaskLink` (role-based many-to-many).
+6. As follow-up tasks close, **Manager** verifies the corrective CAPA (`…/verify`)
+   once its linked effectiveness task(s) reach `Closed`. Waive any preventive
+   ones as needed (no verification required for PREVENTIVE).
 7. When **all** follow-up tasks are final, the finding auto-advances to
    `Pending Verification` (audit `PENDING_VERIFICATION`).
-8. Reporter/assignee/Manager fills **Stage 2** (`PUT /:id/stage2`): root cause,
-   corrective action, recurrence, violators.
-9. **Manager** closes (`PUT /:id/close`): legacy fields present **and** RCA
-   Complete **and** all CAPA verified/waived → `Closed`, audit `CLOSED`.
-10. Throughout, `GET /:id` recomputes the **trend** flag; if 3+ findings share the
-    same dept+ATA+cause+hazard signature, the recurrence banner appears.
+8. **Manager** closes (`PUT /:id/close`): RCA must be `Complete` **and** all
+   CORRECTIVE CAPAs must be `Verified`. PREVENTIVE CAPAs do not block closure
+   → `Closed`, audit `CLOSED`.
+9. Throughout, `GET /:id` recomputes the **trend** flag; if 3+ findings share the
+    same dept+ATA+cause+hazard signature (strong signature), or just dept+ATA+cause
+    with no hazard tags (partial signature), the recurrence banner appears.
 
 ---
 
 ## Appendix — Audit `actionType` strings
 
 Lifecycle: `CREATED`, `REVIEWED`, `DUE_DATE_SET`, `FOLLOWUP_TASK_CREATED`,
-`PENDING_VERIFICATION`, `STAGE2_COMPLETED`, `CLOSED`, `DUE_DATE_BREACHED`.
+`PENDING_VERIFICATION`, `CLOSED`, `DUE_DATE_BREACHED`.
 
 Expansion (`FINDING_EXPANSION_ACTIONS`): `RCA_UPDATED`, `CAPA_CREATED`,
-`CAPA_UPDATED`, `CAPA_VERIFIED`, `CAPA_WAIVED`, `CAPA_DELETED`, `FINDING_LINKED`,
-`FINDING_UNLINKED`, `TAXONOMY_SET`.
+`CAPA_UPDATED`, `CAPA_VERIFIED`, `CAPA_WAIVED`, `CAPA_DELETED`, `CAPA_LINK_ADDED`,
+`CAPA_LINK_REMOVED`, `FINDING_LINKED`, `FINDING_UNLINKED`, `TAXONOMY_SET`,
+`SEVERITY_UPDATED`, `NO_FOLLOWUP_REQUIRED`, `MANUAL_ADVANCE`, `DISMISSED`,
+`TAXONOMY_UPDATED`.

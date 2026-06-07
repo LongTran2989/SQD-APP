@@ -6,11 +6,16 @@ import {
   getFindingById,
   reviewFinding,
   generateFollowUpTasks,
-  completeStage2,
-  closeFinding
+  closeFinding,
+  advanceFinding,
+  getStuckFindings,
+  forcePendingVerification,
+  updateSeverity,
+  dismissFinding,
+  updateTaxonomy
 } from '../controllers/finding.controller';
 import { getRca, upsertRca, saveWhySteps, saveFactors } from '../controllers/rca.controller';
-import { listCapa, createCapa, updateCapa, verifyCapa, waiveCapa, deleteCapa } from '../controllers/capa.controller';
+import { listCapa, createCapa, updateCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink } from '../controllers/capa.controller';
 import { getFindingLinks, createFindingLink, deleteFindingLink } from '../controllers/findingLink.controller';
 
 const router = Router();
@@ -22,6 +27,9 @@ router.use(authenticateJWT);
 router.get('/', listFindings);
 router.post('/', createFinding);
 
+// ─── Admin queries (must be before /:id to avoid Express treating "admin" as :id param)
+router.get('/admin/stuck', getStuckFindings);
+
 // ─── Single finding ─────────────────────────────────────────────────
 router.get('/:id', getFindingById);
 
@@ -29,8 +37,14 @@ router.get('/:id', getFindingById);
 router.put('/:id/review', reviewFinding);
 router.post('/:id/tasks', generateFollowUpTasks);
 
-// ─── Two-stage closure ───────────────────────────────────────────────
-router.put('/:id/stage2', completeStage2);
+// ─── Workflow escapes (F-2, F-7, F-8, F-11, F-12) ──────────────────
+router.put('/:id/advance', advanceFinding);
+router.put('/:id/force-pending-verification', forcePendingVerification);
+router.put('/:id/severity', updateSeverity);
+router.put('/:id/dismiss', dismissFinding);
+router.put('/:id/taxonomy', updateTaxonomy);
+
+// ─── Closure ─────────────────────────────────────────────────────────
 router.put('/:id/close', closeFinding);
 
 // ─── RCA (Root Cause Analysis) ───────────────────────────────────────
@@ -45,6 +59,8 @@ router.post('/:id/capa', createCapa);
 router.put('/:id/capa/:capaId', updateCapa);
 router.put('/:id/capa/:capaId/verify', verifyCapa);
 router.put('/:id/capa/:capaId/waive', waiveCapa);
+router.post('/:id/capa/:capaId/links', addCapaLink);
+router.delete('/:id/capa/:capaId/links/:linkId', removeCapaLink);
 router.delete('/:id/capa/:capaId', deleteCapa);
 
 // ─── Traceability (cross-finding links) ──────────────────────────────

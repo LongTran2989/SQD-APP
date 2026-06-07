@@ -215,30 +215,26 @@ describe('Findings Backend (Phase 6)', () => {
       expect(ids).toContain(findingByDirector);
     });
 
-    it('F12: Manager of another division sees none of these', async () => {
+    it('F12: open visibility — Manager of another division sees all findings', async () => {
       const res = await request(app).get('/api/findings').set('Authorization', `Bearer ${manager2Token}`);
-      const ids = res.body.findings.map((f: any) => f.id);
-      expect(ids).not.toContain(findingByStaff);
-      expect(ids).not.toContain(findingByDirector);
-    });
-
-    it('F13: Staff sees only findings they reported (not others)', async () => {
-      const res = await request(app).get('/api/findings').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
       const ids = res.body.findings.map((f: any) => f.id);
       expect(ids).toContain(findingByStaff);
-      expect(ids).not.toContain(findingByDirector);
+      expect(ids).toContain(findingByDirector);
     });
 
-    it('F14: Staff sees a finding where they are a follow-up Task assignee', async () => {
-      // Director reports; generate a follow-up task; assign it to staff.
-      await request(app).put(`/api/findings/${findingByDirector}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
-      const gen = await request(app).post(`/api/findings/${findingByDirector}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'Corrective Action' }] });
-      const followUpId = gen.body.createdTasks[0].id;
-      await prisma.task.update({ where: { id: followUpId }, data: { assignedToUserId: staffId, status: 'Assigned' } });
-
+    it('F13: open visibility — Staff sees all findings including those they did not report', async () => {
       const res = await request(app).get('/api/findings').set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
       const ids = res.body.findings.map((f: any) => f.id);
+      expect(ids).toContain(findingByStaff);
       expect(ids).toContain(findingByDirector);
+    });
+
+    it('F14: Staff can GET /findings/:id for any finding (open visibility)', async () => {
+      const res = await request(app).get(`/api/findings/${findingByDirector}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(findingByDirector);
     });
 
     it('F15: status filter narrows results', async () => {
@@ -387,71 +383,14 @@ describe('Findings Backend (Phase 6)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
-  // Group 6 — Stage 2
+  // Group 6 — Stage 2 (removed — superseded by RCA + CAPA workflows, F-6)
   // ────────────────────────────────────────────────────────────────────────
 
-  describe('Stage 2', () => {
-    // Helper: get a finding into Pending Verification with one closed follow-up task.
-    async function makePendingVerification(reporterToken: string): Promise<{ findingId: number; followUpId: number }> {
-      const r = await raiseFinding(reporterToken);
-      const findingId = r.body.id;
-      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
-      const gen = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: autoCloseTemplateId, title: 'CAR' }] });
-      const followUpId = gen.body.createdTasks[0].id;
-      // Assign to staff, then staff submits → auto-close (requiresApproval=false) → hook fires.
-      await prisma.task.update({ where: { id: followUpId }, data: { assignedToUserId: staffId, status: 'Assigned' } });
-      await request(app).put(`/api/tasks/${followUpId}/submit`).set('Authorization', `Bearer ${staffToken}`);
-      return { findingId, followUpId };
-    }
-
-    it('F50: wrong status (not Pending Verification) → 400', async () => {
+  describe('Stage 2 (removed)', () => {
+    it('F50: PUT /:id/stage2 is gone → 404', async () => {
       const r = await raiseFinding(staffToken);
       const res = await request(app).put(`/api/findings/${r.body.id}/stage2`).set('Authorization', `Bearer ${staffToken}`).send({ rootCause: 'x' });
-      expect(res.status).toBe(400);
-    });
-
-    it('F51: reporter can complete Stage 2', async () => {
-      const { findingId } = await makePendingVerification(staffToken);
-      const res = await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${staffToken}`).send({ errorCode: 'E1', rootCause: 'Process gap', correctiveAction: 'Retrain', recurrence: false });
-      expect(res.status).toBe(200);
-      expect(res.body.rootCause).toBe('Process gap');
-    });
-
-    it('F52: Manager can complete Stage 2', async () => {
-      const { findingId } = await makePendingVerification(staffToken);
-      const res = await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
-      expect(res.status).toBe(200);
-    });
-
-    it('F53: Director can complete Stage 2', async () => {
-      const { findingId } = await makePendingVerification(staffToken);
-      const res = await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${directorToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
-      expect(res.status).toBe(200);
-    });
-
-    it('F54: a follow-up Task assignee can complete Stage 2', async () => {
-      // Director reports so staff is NOT the reporter — staff qualifies only as assignee.
-      const { findingId } = await makePendingVerification(directorToken);
-      const res = await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${staffToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
-      expect(res.status).toBe(200);
-    });
-
-    it('F55: an unrelated user cannot complete Stage 2 → 403', async () => {
-      // Director reports; manager2 (other division) is neither reporter, assignee, nor Manager/Director of relevance...
-      // manager2 IS a Manager by role, which is permitted. Use a fresh unrelated Staff instead.
-      const outsider = await prisma.user.create({ data: { name: 'Outsider', email: 'fnd_outsider@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId, roleId: (await prisma.role.findUnique({ where: { name: 'Staff' } }))!.id } });
-      const outsiderToken = makeToken(outsider.id, 'Staff', divisionId);
-      const { findingId } = await makePendingVerification(staffToken);
-      const res = await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${outsiderToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
-      expect(res.status).toBe(403);
-      await prisma.user.delete({ where: { id: outsider.id } });
-    });
-
-    it('F56: category field is persisted when provided', async () => {
-      const { findingId } = await makePendingVerification(staffToken);
-      const res = await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${directorToken}`).send({ rootCause: 'rc', correctiveAction: 'ca', category: 'Training' });
-      expect(res.status).toBe(200);
-      expect(res.body.category).toBe('Training');
+      expect(res.status).toBe(404);
     });
   });
 
@@ -477,22 +416,21 @@ describe('Findings Backend (Phase 6)', () => {
       expect(res.status).toBe(400);
     });
 
-    it('F61: cannot close without Stage 2 fields → 400', async () => {
+    it('F61: Manager can close a Pending Verification finding directly (no Stage 2 gate)', async () => {
       const findingId = await makePendingVerification();
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Closed');
     });
 
     it('F62: Staff cannot close → 403', async () => {
       const findingId = await makePendingVerification();
-      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${staffToken}`);
       expect(res.status).toBe(403);
     });
 
-    it('F63: Manager closes after Stage 2 → status Closed, closedBy set', async () => {
+    it('F63: Manager closes → status Closed, closedBy set', async () => {
       const findingId = await makePendingVerification();
-      await request(app).put(`/api/findings/${findingId}/stage2`).set('Authorization', `Bearer ${managerToken}`).send({ rootCause: 'rc', correctiveAction: 'ca' });
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');

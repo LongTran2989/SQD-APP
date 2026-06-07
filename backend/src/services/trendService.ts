@@ -12,6 +12,7 @@ export interface TrendInfo {
   matchCount: number;       // includes the finding itself
   threshold: number;
   windowDays: number;
+  signatureStrength: 'strong' | 'partial' | 'none';
   signature: {
     departmentId: number | null;
     ataChapterId: number | null;
@@ -29,14 +30,14 @@ export interface TrendSignature {
 }
 
 /**
- * Compute-on-read recurrence detection from an already-known signature. A finding
- * is "recurring" when at least TREND_THRESHOLD non-deleted findings (inclusive of
- * itself) share the SAME Department + ATA Chapter + Cause Code AND at least one
- * common Hazard Tag. The subject finding is always counted regardless of the
- * rolling window, so a long-lived finding still reflects a recurring pattern.
+ * Computes whether a finding is part of a recurring pattern. Two-tier signature:
+ *   strong  — dept + ATA + causeCode + hazardTags all match (hazardTagIds non-empty)
+ *   partial — dept + ATA + causeCode match, no hazardTags supplied
+ *   none    — any core dimension (dept / ATA / causeCode) is null; returns immediately
  *
- * Cause Code lives on the finding's RcaInvestigation, so a finding without a
- * determined cause never participates in cause-based grouping. Pure read.
+ * The subject finding is always counted regardless of the rolling window.
+ * Cause code lives on the RcaInvestigation, so a finding without a determined
+ * cause never participates in cause-based grouping. Pure read.
  */
 export async function computeTrendForSignature(sig: TrendSignature): Promise<TrendInfo> {
   const { findingId, departmentId, ataChapterId, causeCodeId, hazardTagIds } = sig;
@@ -46,34 +47,48 @@ export async function computeTrendForSignature(sig: TrendSignature): Promise<Tre
     matchCount: 0,
     threshold: TREND_THRESHOLD,
     windowDays: TREND_WINDOW_DAYS,
+    signatureStrength: 'none',
     signature,
   };
 
-  // Every signature dimension must be present for a meaningful comparison.
-  if (departmentId === null || ataChapterId === null || causeCodeId === null || hazardTagIds.length === 0) {
+  // Core dimensions must all be resolved for any trend comparison.
+  if (departmentId === null || ataChapterId === null || causeCodeId === null) {
     return empty;
   }
 
   const cutoff = new Date(Date.now() - TREND_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
-  const matchCount = await prisma.finding.count({
-    where: {
-      deletedAt: null,
-      departmentId,
-      ataChapterId,
-      rca: { causeCodeId },
-      hazardTags: { some: { hazardTagId: { in: hazardTagIds } } },
-      // Count matches within the window, but always include the subject finding
-      // itself even if it was raised before the window opened.
-      OR: [{ createdAt: { gte: cutoff } }, { id: findingId }],
-    },
-  });
+  const baseWhere = {
+    deletedAt: null,
+    departmentId,
+    ataChapterId,
+    rca: { causeCodeId },
+    // Count matches within the window, but always include the subject finding
+    // itself even if it was raised before the window opened.
+    OR: [{ createdAt: { gte: cutoff } }, { id: findingId }],
+  };
+
+  let matchCount: number;
+  let signatureStrength: TrendInfo['signatureStrength'];
+
+  if (hazardTagIds.length > 0) {
+    // Strong signature: all four dimensions match.
+    matchCount = await prisma.finding.count({
+      where: { ...baseWhere, hazardTags: { some: { hazardTagId: { in: hazardTagIds } } } },
+    });
+    signatureStrength = 'strong';
+  } else {
+    // Partial signature: department + ATA + cause code only (no hazard tags to narrow).
+    matchCount = await prisma.finding.count({ where: baseWhere });
+    signatureStrength = 'partial';
+  }
 
   return {
     isRecurring: matchCount >= TREND_THRESHOLD,
     matchCount,
     threshold: TREND_THRESHOLD,
     windowDays: TREND_WINDOW_DAYS,
+    signatureStrength,
     signature,
   };
 }

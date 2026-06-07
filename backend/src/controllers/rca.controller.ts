@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
-import { canAccessFinding, canEditAnalysis } from '../utils/findingAccess';
+import { canEditAnalysis, extractCapaLinkedUserIds } from '../utils/findingAccess';
 import { RCA_METHODS, RCA_STATUSES, RCA_MEDA_CATEGORIES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -20,6 +20,14 @@ async function loadFindingForRca(id: number) {
       reportedByUserId: true,
       targetDivisionId: true,
       followUpTasks: { where: { deletedAt: null }, select: { assignedToUserId: true } },
+      capaActions: {
+        where: { deletedAt: null },
+        select: {
+          linkedItems: {
+            select: { task: { select: { assignedToUserId: true } } },
+          },
+        },
+      },
       rca: {
         include: {
           causeCode: true,
@@ -41,10 +49,7 @@ export const getRca = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!(await canAccessFinding(prisma, req.user!, id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
-      return;
-    }
+    // Visibility is open to all authenticated users — no scope check needed.
     res.json(finding.rca ?? null);
   } catch (error) {
     console.error('Error fetching RCA:', error);
@@ -66,7 +71,8 @@ export const upsertRca = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to edit this RCA' });
       return;
     }
@@ -152,7 +158,8 @@ export const saveWhySteps = async (req: Request, res: Response): Promise<void> =
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to edit this RCA' });
       return;
     }
@@ -221,7 +228,8 @@ export const saveFactors = async (req: Request, res: Response): Promise<void> =>
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
-    if (!canEditAnalysis(req.user!, finding, await canAccessFinding(prisma, req.user!, id))) {
+    const capaLinkedUserIds = extractCapaLinkedUserIds(finding.capaActions);
+    if (!canEditAnalysis(req.user!, finding, true, capaLinkedUserIds)) {
       res.status(403).json({ message: 'You do not have permission to edit this RCA' });
       return;
     }

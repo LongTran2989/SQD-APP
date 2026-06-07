@@ -238,8 +238,7 @@ model Task {
   timeBooking    TimeBooking?
 
   // CAPA reverse relations (virtual — no columns added, no behaviour change)
-  capaExecutionOf     CapaAction[] @relation("CapaExecutionTask")
-  capaEffectivenessOf CapaAction[] @relation("CapaEffectivenessTask")
+  capaLinks CapaTaskLink[] @relation("CapaLinkedTasks")
 
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
@@ -273,11 +272,16 @@ model Finding {
   eventType            String
   aircraftRegistration String?
   regulatoryReference  String?
-  errorCode            String?
-  rootCause            String?
-  correctiveAction     String?
-  recurrence           Boolean?
-  violatorIds          Json?
+  // @deprecated superseded by structured RCA + CAPA
+  errorCode        String?
+  // @deprecated superseded by structured RCA + CAPA
+  rootCause        String?
+  // @deprecated
+  correctiveAction String?
+  // @deprecated
+  recurrence       Boolean?
+  // @deprecated
+  violatorIds      Json?
 
   sourceTaskId Int?
   sourceTask   Task? @relation("FindingSourceTask", fields: [sourceTaskId], references: [id])
@@ -388,10 +392,7 @@ model CapaAction {
   deadline    DateTime?
   status      String    @default("Open") // Open | In Progress | Completed | Verified | Waived (CAPA_STATUSES)
 
-  executionTaskId     Int?
-  executionTask       Task? @relation("CapaExecutionTask", fields: [executionTaskId], references: [id])
-  effectivenessTaskId Int?
-  effectivenessTask   Task? @relation("CapaEffectivenessTask", fields: [effectivenessTaskId], references: [id])
+  linkedItems CapaTaskLink[] @relation("CapaTaskLinks")
 
   verifiedByUserId Int?
   verifiedByUser   User?     @relation("CapaVerifiedBy", fields: [verifiedByUserId], references: [id])
@@ -401,11 +402,29 @@ model CapaAction {
   createdByUserId Int
   createdByUser   User @relation("CapaCreatedBy", fields: [createdByUserId], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([findingId])
   @@index([type, status])
+}
+
+// Join table linking a CAPA item to one or more existing Tasks / Work Packages.
+// A CAPA may have many linked items; each link carries a role describing how the
+// task/WP relates to the action (EXECUTION | EFFECTIVENESS | SUPPORTING).
+model CapaTaskLink {
+  id        Int          @id @default(autoincrement())
+  capaId    Int
+  capa      CapaAction   @relation("CapaTaskLinks", fields: [capaId], references: [id], onDelete: Cascade)
+  taskId    Int?
+  task      Task?        @relation("CapaLinkedTasks", fields: [taskId], references: [id])
+  wpId      Int?
+  wp        WorkPackage? @relation("CapaLinkedWPs", fields: [wpId], references: [id])
+  role      String // EXECUTION | EFFECTIVENESS | SUPPORTING
+  createdAt DateTime     @default(now())
+
+  @@index([capaId])
 }
 
 // ATA 100 chapter reference lookup (admin-managed).
@@ -532,6 +551,7 @@ model WorkPackage {
 
   assignments WorkPackageAssignment[]
   tasks       Task[]
+  capaLinks   CapaTaskLink[]         @relation("CapaLinkedWPs")
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())

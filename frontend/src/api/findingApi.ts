@@ -13,6 +13,8 @@ import {
   CapaAction,
   CapaType,
   CapaStatus,
+  CapaLinkRole,
+  CapaTaskLink,
   FindingLinkType,
   FindingLinkRecord,
 } from '../types';
@@ -80,21 +82,28 @@ export const generateFollowUpTasks = (
 ): Promise<{ findingId: number; createdTasks: { id: number; taskId: string }[] }> =>
   apiClient.post(`/findings/${id}/tasks`, { tasks }).then((r) => r.data);
 
-// ─── Stage 2 + close ──────────────────────────────────────────────────────────
-
-export interface Stage2Payload {
-  errorCode?: string;
-  rootCause?: string;
-  correctiveAction?: string;
-  recurrence?: boolean;
-  violatorIds?: unknown;
-}
-
-export const completeStage2 = (id: number, payload: Stage2Payload): Promise<Finding> =>
-  apiClient.put(`/findings/${id}/stage2`, payload).then((r) => r.data);
+// ─── Close + workflow escapes ────────────────────────────────────────────────
 
 export const closeFinding = (id: number): Promise<Finding> =>
   apiClient.put(`/findings/${id}/close`).then((r) => r.data);
+
+export const advanceFinding = (id: number): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/advance`).then((r) => r.data);
+
+export const dismissFinding = (id: number, reason: string): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/dismiss`, { reason }).then((r) => r.data);
+
+export const updateFindingSeverity = (
+  id: number,
+  payload: { severity: FindingSeverity; reason: string }
+): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/severity`, payload).then((r) => r.data);
+
+export const updateFindingTaxonomy = (
+  id: number,
+  payload: { ataChapterId?: number | null; hazardTagIds?: number[] }
+): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/taxonomy`, payload).then((r) => r.data);
 
 // ─── RCA (Root Cause Analysis) ────────────────────────────────────────────────
 
@@ -126,8 +135,6 @@ export interface CapaPayload {
   description: string;
   ownerUserId?: number | null;
   deadline?: string | null;
-  executionTaskId?: number | null;
-  effectivenessTaskId?: number | null;
 }
 
 export const listCapa = (id: number): Promise<CapaAction[]> =>
@@ -151,6 +158,20 @@ export const waiveCapa = (id: number, capaId: number, waivedReason: string): Pro
 
 export const deleteCapa = (id: number, capaId: number): Promise<void> =>
   apiClient.delete(`/findings/${id}/capa/${capaId}`).then((r) => r.data);
+
+export const addCapaLink = (
+  findingId: number,
+  capaId: number,
+  payload: { role: CapaLinkRole; taskId?: number; wpId?: number }
+): Promise<CapaTaskLink> =>
+  apiClient.post(`/findings/${findingId}/capa/${capaId}/links`, payload).then((r) => r.data);
+
+export const removeCapaLink = (
+  findingId: number,
+  capaId: number,
+  linkId: number
+): Promise<void> =>
+  apiClient.delete(`/findings/${findingId}/capa/${capaId}/links/${linkId}`).then((r) => r.data);
 
 // ─── Traceability (cross-finding links) ──────────────────────────────────────
 

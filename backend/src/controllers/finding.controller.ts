@@ -4,7 +4,7 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity, evaluateCloseGate } from '../services/findingService';
 import { computeTrendForSignature } from '../services/trendService';
-import { buildFindingScope, canAccessFinding } from '../utils/findingAccess';
+import { buildFindingScope, assertManagerDivisionScope, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
 import { FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 import { HttpError, isHttpError } from '../utils/httpError';
 
@@ -17,9 +17,7 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const SEVERITIES = ['Observation', 'Level 1', 'Level 2'];
-const FINDING_STATUSES = ['Open', 'In Progress', 'Pending Verification', 'Closed'];
-// Manager (any division) or Director may review / generate tasks / sign off.
-const FINDING_REVIEWER_ROLES = ['Manager', 'Director'];
+const FINDING_STATUSES = ['Open', 'In Progress', 'Pending Verification', 'Closed', 'Dismissed'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -312,8 +310,12 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
           include: {
             ownerUser: { select: { id: true, name: true } },
             verifiedByUser: { select: { id: true, name: true } },
-            executionTask: { select: { id: true, taskId: true, status: true } },
-            effectivenessTask: { select: { id: true, taskId: true, status: true } }
+            linkedItems: {
+              include: {
+                task: { select: { id: true, taskId: true, title: true, status: true, template: { select: { title: true } } } },
+                wp: { select: { id: true, wpId: true, name: true, status: true } }
+              }
+            }
           }
         },
         linksFrom: { include: { relatedFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },
@@ -326,10 +328,7 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (!(await canAccessFinding(prisma, user, finding.id))) {
-      res.status(403).json({ message: 'You do not have access to this finding' });
-      return;
-    }
+    // Visibility is open to all authenticated users — no scope check needed.
 
     const dueDateBreached = await ensureDueDateBreachLogged(finding, user.userId);
     // Reuse the already-loaded signature (department + ATA + cause code + hazard
@@ -653,78 +652,6 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
   }
 };
 
-// ─── PUT /api/findings/:id/stage2 ─────────────────────────────────────────────
-
-export const completeStage2 = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const id = parseInt(req.params.id as string, 10);
-    const { userId, role } = req.user!;
-    const { errorCode, rootCause, correctiveAction, recurrence, violatorIds, category } = req.body;
-
-    const finding = await prisma.finding.findUnique({
-      where: { id, deletedAt: null },
-      select: {
-        id: true,
-        status: true,
-        sourceTaskId: true,
-        reportedByUserId: true,
-        followUpTasks: { where: { deletedAt: null }, select: { assignedToUserId: true } }
-      }
-    });
-    if (!finding) {
-      res.status(404).json({ message: 'Finding not found' });
-      return;
-    }
-
-    // Auth: reporter, any follow-up Task assignee, Manager, or Director.
-    const isReporter = finding.reportedByUserId === userId;
-    const isFollowUpAssignee = finding.followUpTasks.some((t) => t.assignedToUserId === userId);
-    const isManagerOrDirector = role === 'Manager' || role === 'Director';
-    if (!isReporter && !isFollowUpAssignee && !isManagerOrDirector) {
-      res.status(403).json({ message: 'You do not have permission to complete Stage 2 for this finding' });
-      return;
-    }
-
-    if (finding.status !== 'Pending Verification') {
-      res.status(400).json({ message: 'Finding is not yet pending verification' });
-      return;
-    }
-
-    const actorName = await getUserName(userId);
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const result = await tx.finding.update({
-        where: { id },
-        data: {
-          ...(errorCode !== undefined ? { errorCode } : {}),
-          ...(rootCause !== undefined ? { rootCause } : {}),
-          ...(correctiveAction !== undefined ? { correctiveAction } : {}),
-          recurrence: typeof recurrence === 'boolean' ? recurrence : null,
-          ...(violatorIds !== undefined ? { violatorIds: violatorIds as any } : {}),
-          ...(category !== undefined ? { category } : {})
-        }
-      });
-
-      await logFindingAuditAndActivity(
-        tx,
-        finding.id,
-        finding.sourceTaskId,
-        'STAGE2_COMPLETED',
-        userId,
-        `Stage 2 analytical fields completed by ${actorName}`,
-        { findingId: finding.id }
-      );
-
-      return result;
-    });
-
-    res.json(updated);
-  } catch (error) {
-    console.error('Error completing stage 2:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
 // ─── PUT /api/findings/:id/close ──────────────────────────────────────────────
 
 export const closeFinding = async (req: Request, res: Response): Promise<void> => {
@@ -739,7 +666,7 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, status: true, sourceTaskId: true, rootCause: true, correctiveAction: true }
+      select: { id: true, status: true, sourceTaskId: true }
     });
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
@@ -750,13 +677,8 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
       res.status(400).json({ message: 'Finding must be in Pending Verification to be closed' });
       return;
     }
-    if (!finding.rootCause || !finding.correctiveAction) {
-      res.status(400).json({ message: 'Stage 2 fields (rootCause and correctiveAction) must be completed before closing' });
-      return;
-    }
 
-    // Conditional expansion-pack gate: only constrains findings that actually
-    // carry RCA / CAPA data, so legacy findings close exactly as before.
+    // Close-gate: RCA must be Complete (if present); all CORRECTIVE CAPAs must be Verified.
     const gate = await evaluateCloseGate(finding.id);
     if (!gate.ok) {
       res.status(400).json({ message: gate.reason });
@@ -787,6 +709,377 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
     res.json(updated);
   } catch (error) {
     console.error('Error closing finding:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/findings/:id/advance ────────────────────────────────────────────
+
+export const advanceFinding = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+
+    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+      res.status(403).json({ message: 'Only a Manager or Director can manually advance findings' });
+      return;
+    }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        sourceTaskId: true,
+        followUpTasks: { where: { deletedAt: null }, select: { id: true } }
+      }
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status !== 'In Progress') {
+      res.status(400).json({ message: 'Finding must be In Progress to be manually advanced' });
+      return;
+    }
+    if (finding.followUpTasks.length > 0) {
+      res.status(400).json({ message: 'Cannot manually advance — this finding has active follow-up tasks.' });
+      return;
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id },
+        data: { status: 'Pending Verification' }
+      });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.NO_FOLLOWUP_REQUIRED,
+        userId,
+        `Finding #${id} manually advanced — no follow-up tasks required`,
+        { findingId: finding.id, fromStatus: 'In Progress', toStatus: 'Pending Verification' }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error advancing finding:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/findings/admin/stuck ────────────────────────────────────────────
+
+const TASK_FINAL_STATES = ['Closed', 'Rejected', 'Terminated'];
+
+export const getStuckFindings = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { role } = req.user!;
+
+    if (role !== 'Admin' && role !== 'Director') {
+      res.status(403).json({ message: 'Only an Admin or Director can view stuck findings' });
+      return;
+    }
+
+    const candidates = await prisma.finding.findMany({
+      where: {
+        deletedAt: null,
+        status: 'In Progress',
+        followUpTasks: { some: { deletedAt: null } }
+      },
+      include: {
+        followUpTasks: { where: { deletedAt: null }, select: { id: true, taskId: true, status: true } },
+        reportedByUser: { select: { id: true, name: true } },
+        targetDivision: { select: { id: true, name: true, code: true } },
+        department: { select: { id: true, name: true } }
+      }
+    });
+
+    const stuck = candidates.filter(
+      (f) =>
+        f.followUpTasks.length > 0 &&
+        f.followUpTasks.every((t) => TASK_FINAL_STATES.includes(t.status))
+    );
+
+    res.json(stuck);
+  } catch (error) {
+    console.error('Error fetching stuck findings:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/findings/:id/force-pending-verification ─────────────────────────
+
+export const forcePendingVerification = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+
+    if (role !== 'Admin' && role !== 'Director') {
+      res.status(403).json({ message: 'Only an Admin or Director can force-advance a finding' });
+      return;
+    }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        sourceTaskId: true,
+        followUpTasks: { where: { deletedAt: null }, select: { id: true, taskId: true, status: true } }
+      }
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status !== 'In Progress') {
+      res.status(400).json({ message: 'Finding must be In Progress to be force-advanced' });
+      return;
+    }
+    const nonFinal = finding.followUpTasks.filter((t) => !TASK_FINAL_STATES.includes(t.status));
+    if (nonFinal.length > 0) {
+      res.status(400).json({ message: 'Not all follow-up tasks are in a final state' });
+      return;
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id },
+        data: { status: 'Pending Verification' }
+      });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.MANUAL_ADVANCE,
+        userId,
+        `Finding #${id} force-advanced to Pending Verification by admin`,
+        { findingId: finding.id, reason: 'Admin force-advance' }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error force-advancing finding:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/findings/:id/severity ───────────────────────────────────────────
+
+export const updateSeverity = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+    const { severity, reason } = req.body;
+
+    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+      res.status(403).json({ message: 'Only a Manager or Director can update severity' });
+      return;
+    }
+
+    // Director is global; Manager is division-scoped for classification changes.
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
+    }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: { id: true, status: true, severity: true, sourceTaskId: true }
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status === 'Closed' || finding.status === 'Dismissed') {
+      res.status(400).json({ message: 'Cannot update severity on a Closed or Dismissed finding' });
+      return;
+    }
+    if (!severity || !SEVERITIES.includes(severity)) {
+      res.status(400).json({ message: `severity must be one of: ${SEVERITIES.join(', ')}` });
+      return;
+    }
+    if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+      res.status(400).json({ message: 'reason is required' });
+      return;
+    }
+
+    const oldSeverity = finding.severity;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id },
+        data: { severity }
+      });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.SEVERITY_UPDATED,
+        userId,
+        `Severity updated from ${oldSeverity} to ${severity}: ${reason}`,
+        { findingId: finding.id, fromSeverity: oldSeverity, toSeverity: severity, reason }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating severity:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/findings/:id/dismiss ────────────────────────────────────────────
+
+export const dismissFinding = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+    const { reason } = req.body;
+
+    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+      res.status(403).json({ message: 'Only a Manager or Director can dismiss findings' });
+      return;
+    }
+
+    // Director is global; Manager is division-scoped for irreversible mutations.
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
+    }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: { id: true, status: true, sourceTaskId: true }
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status !== 'Open') {
+      res.status(400).json({ message: 'Only Open findings can be dismissed' });
+      return;
+    }
+    if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+      res.status(400).json({ message: 'reason is required' });
+      return;
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id },
+        data: { status: 'Dismissed' }
+      });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.DISMISSED,
+        userId,
+        `Finding #${id} dismissed: ${reason}`,
+        { findingId: finding.id, reason }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error dismissing finding:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/findings/:id/taxonomy ───────────────────────────────────────────
+
+export const updateTaxonomy = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+    const { ataChapterId, hazardTagIds } = req.body;
+
+    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+      res.status(403).json({ message: 'Only a Manager or Director can update taxonomy' });
+      return;
+    }
+
+    // Director is global; Manager is division-scoped for classification changes.
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'You do not have access to this finding' });
+      return;
+    }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: { id: true, status: true, sourceTaskId: true, ataChapterId: true }
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status === 'Closed' || finding.status === 'Dismissed') {
+      res.status(400).json({ message: 'Cannot update taxonomy on a Closed or Dismissed finding' });
+      return;
+    }
+
+    if (ataChapterId !== undefined && ataChapterId !== null) {
+      const ata = await prisma.ataChapter.findFirst({ where: { id: ataChapterId, isActive: true }, select: { id: true } });
+      if (!ata) {
+        res.status(400).json({ message: 'ATA chapter not found or inactive' });
+        return;
+      }
+    }
+
+    const tagIds = Array.isArray(hazardTagIds) ? [...new Set(hazardTagIds as number[])] : null;
+    if (tagIds && tagIds.length > 0) {
+      const found = await prisma.hazardTag.count({ where: { id: { in: tagIds }, isActive: true } });
+      if (found !== tagIds.length) {
+        res.status(400).json({ message: 'One or more hazard tags not found or inactive' });
+        return;
+      }
+    }
+
+    const fromAtaChapterId = finding.ataChapterId;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (tagIds !== null) {
+        await tx.findingHazardTag.deleteMany({ where: { findingId: id } });
+        for (const hazardTagId of tagIds) {
+          await tx.findingHazardTag.create({ data: { findingId: id, hazardTagId } });
+        }
+      }
+      const result = await tx.finding.update({
+        where: { id },
+        data: {
+          ...(ataChapterId !== undefined ? { ataChapterId } : {})
+        }
+      });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.TAXONOMY_UPDATED,
+        userId,
+        `Taxonomy updated on Finding #${id}`,
+        {
+          findingId: finding.id,
+          fromAtaChapterId,
+          toAtaChapterId: ataChapterId !== undefined ? ataChapterId : fromAtaChapterId,
+          hazardTagIds: tagIds
+        }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating taxonomy:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

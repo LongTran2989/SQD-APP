@@ -38,7 +38,7 @@ export async function logFindingAuditAndActivity(
       entityId: String(findingId),
       performedByUserId,
       comment: auditComment ?? null,
-      details: (details as any) ?? Prisma.DbNull
+      details: (details as Prisma.InputJsonValue) ?? Prisma.DbNull
     }
   });
 
@@ -54,18 +54,6 @@ export async function logFindingAuditAndActivity(
   }
 }
 
-/**
- * Conditional close-gate for the expansion pack. Additive and backward-compatible:
- * the legacy rootCause/correctiveAction checks stay in the controller and ALWAYS
- * apply. This helper only adds constraints WHEN RCA / CAPA data exists, so legacy
- * findings (no RCA, no CAPA) close exactly as before.
- *
- *  - If an RcaInvestigation exists, it must be status 'Complete'.
- *  - If any CapaAction exists, every CORRECTIVE must be 'Verified' and every
- *    PREVENTIVE must be 'Verified' or 'Waived'.
- *
- * Returns { ok } or { ok:false, reason } for the caller to map to a 400.
- */
 export async function evaluateCloseGate(
   findingId: number
 ): Promise<{ ok: boolean; reason?: string }> {
@@ -73,21 +61,29 @@ export async function evaluateCloseGate(
     where: { id: findingId, deletedAt: null },
     select: {
       rca: { select: { status: true } },
-      capaActions: { select: { type: true, status: true } },
+      capaActions: {
+        where: { deletedAt: null },
+        select: { id: true, type: true, status: true },
+      },
     },
   });
   if (!finding) return { ok: false, reason: 'Finding not found' };
 
+  // Gate 1: RCA must be Complete (if one exists)
   if (finding.rca && finding.rca.status !== 'Complete') {
-    return { ok: false, reason: 'The Root Cause Analysis must be marked Complete before closing' };
+    return { ok: false, reason: 'RCA must be marked Complete before closing' };
   }
 
-  for (const capa of finding.capaActions) {
-    if (capa.type === 'CORRECTIVE' && capa.status !== 'Verified') {
-      return { ok: false, reason: 'All corrective actions must be verified effective before closing' };
-    }
-    if (capa.type === 'PREVENTIVE' && capa.status !== 'Verified' && capa.status !== 'Waived') {
-      return { ok: false, reason: 'All preventive actions must be verified or waived before closing' };
+  // Gate 2: All CORRECTIVE CAPAs must be Verified.
+  // PREVENTIVE CAPAs do NOT block closure — long-term effectiveness
+  // is monitored post-closure.
+  const corrective = finding.capaActions.filter((c) => c.type === 'CORRECTIVE');
+  for (const capa of corrective) {
+    if (capa.status !== 'Verified') {
+      return {
+        ok: false,
+        reason: `Corrective action #${capa.id} must be Verified before closing`,
+      };
     }
   }
 
@@ -149,7 +145,7 @@ export async function checkAndTriggerPendingVerification(
         finding.sourceTaskId,
         'PENDING_VERIFICATION',
         performedByUserId,
-        `All follow-up Tasks complete — Finding #${finding.id} is pending verification. Stage 2 fields required.`,
+        `All follow-up Tasks complete — Finding #${finding.id} is ready for verification and closure.`,
         { findingId: finding.id, fromStatus: finding.status, toStatus: 'Pending Verification' }
       );
     });
