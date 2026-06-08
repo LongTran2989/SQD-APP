@@ -168,7 +168,7 @@ export default function AnalyticsPage() {
                     <td className="px-5 py-3 text-slate-700">{t.title}</td>
                     <td className="px-5 py-3 text-right text-slate-700">{t.taskCount}</td>
                     <td className="px-5 py-3 text-right text-slate-700">{formatHours(t.avgActualHours)}</td>
-                    <td className="px-5 py-3 text-right text-slate-700">{formatHours(t.avgEstimatedHours)}</td>
+                    <td className="px-5 py-3 text-right text-slate-700">{formatHours(t.estimatedHours)}</td>
                     <td className="px-5 py-3 text-center">
                       <EfficiencyBadge ratio={t.efficiencyRatio} />
                     </td>

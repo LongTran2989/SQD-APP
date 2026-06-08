@@ -626,29 +626,63 @@ These are two separate systems that serve different purposes. **Both** are writt
 
 ### OBJECT E: TIME BOOKING
 
-**Purpose:** Log actual hours spent on a Task after it reaches a final state.
+**Purpose:** Log actual hours spent on a Task after it reaches a final state. Full traceability from individual entries to summary analytics.
 
-**Model implemented in Phase 5.0 schema migration. Backend + frontend completed in Phase 5.6.**
+**Model:** `TimeBooking` — one-to-one with Task (uniqueness enforced at DB level).
+**Sub-model:** `TimeEntry` — append-only individual log entries linked to a `TimeBooking`.
 
 **Available only when Task status is:** `Closed`, `Rejected`, or `Terminated`
 
-**Attributes:**
+#### TimeBooking attributes:
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | Int | |
 | `taskId` | Int | Unique — one booking per Task |
-| `assigneeEntry` | Json | `{ userId, hoursLogged, notes }` |
+| `assigneeEntry` | Json | `{ userId, hoursLogged, notes }` — snapshot of assignee's hours |
 | `collaborators` | Json | Array of `{ userId, hoursLogged, notes }` |
 | `totalHours` | Float | Computed sum of all entries |
-| `estimatedHours` | Float? | Snapshot from `Task.estimatedHours` at time of booking |
+| `estimatedHours` | Float? | Snapshot from `Task.estimatedHours` at booking creation time |
+| `overBudgetReason` | String? | Required when `totalHours > estimatedHours × 1.2`; enum: `COMPLEX_TASK`, `WAIT_TIME`, `ADDITIONAL_WORK`, `OTHER` |
+| `overBudgetNote` | String? | Required when `overBudgetReason = 'OTHER'`; free text |
 | `createdAt` | DateTime | |
 | `updatedAt` | DateTime | |
 
+#### TimeEntry attributes (append-only audit log):
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | Int | |
+| `timeBookingId` | Int | FK to `TimeBooking` |
+| `taskId` | Int | FK to `Task` — denormalised for query convenience |
+| `userId` | Int | User who submitted this entry |
+| `hoursLogged` | Float | Hours for this entry |
+| `notes` | String? | Optional notes |
+| `collaboratorEntries` | Json | JSONB array `[{ userId, hoursLogged, notes }]` — multi-user single submission |
+| `createdAt` | DateTime | Immutable — no `updatedAt` (append-only; never mutate) |
+
 **Rules:**
 - Only the assignee can create the Time Booking and add collaborators
-- Collaborators cannot add themselves
-- `estimatedHours` stored as a snapshot now — budget-vs-actual comparison UI deferred to a future phase
+- Assignee cannot appear in `collaborators` (separate guard in `createTimeEntry`)
+- Collaborator `userId` values must exist (DB-verified) and must not be duplicated within one entry
+- `estimatedHours` on the booking is a snapshot of `Task.estimatedHours` at creation time — not retroactively updated if the Template changes its estimate later
+- **Three-layer booking completeness enforcement:**
+  1. **API gate:** `rateTask` returns `400` when the task has no `TimeBooking` record
+  2. **UI banner:** Task detail page shows an amber warning on final-state tasks missing a booking
+  3. **Analytics:** `incompleteBookings` count in `GET /api/analytics/time-booking` flags the gap
+- **Over-budget threshold:** 120% (`totalHours > estimatedHours × 1.2` triggers mandatory reason)
+- `overBudgetReason` validation is unconditional — invalid enum values are rejected even when the task is not over budget
+- `overBudgetReason = 'OTHER'` requires a non-empty `overBudgetNote`
+
+**Analytics endpoint:** `GET /api/analytics/time-booking` (`analytics.controller.ts`)
+- RBAC: Manager sees own division only; Director/Admin see system-wide (optional `?divisionId` filter)
+- Optional query params: `templateId`, `divisionId`, `from`, `to` (ISO dates — filter on `completedAt`)
+- Returns three aggregates:
+  - `templates[]` — per-template efficiency (avg actual hours, canonical `estimatedHours`, efficiency ratio, over-budget count, top reason)
+  - `staff[]` — per-staff performance (avg rating, rated task count, avg efficiency ratio)
+  - `incompleteBookings` — count of `Closed` tasks with no time booking (division-scoped; **not** filtered by `templateId`)
+- `estimatedHours` in the template rows is the **canonical live template value** — not an average of per-booking snapshots (which could be mixed vintage)
+- All aggregation is in JavaScript (no `$queryRaw`); DB-level indexes on Task mitigate large result sets
 
 ---
 
@@ -954,6 +988,18 @@ All changes needed before Phase 5 development begins:
 - [ ] `violatorIds` search integration — deferred (external personnel DB, 5000+ records, Phase 7+)
 - [ ] Findings analytics dashboard with charts/filters — deferred (Phase 7+)
 
+### Time Booking Enhancement (COMPLETED 2026-06-08)
+
+Extends Phase 5.6 Time Booking with deeper audit trail, mandatory enforcement, over-budget tracking, per-entry history, and management analytics.
+
+- [x] **`TimeEntry` model** — append-only per-entry audit log; `collaboratorEntries` JSONB; no `updatedAt` (immutable after creation)
+- [x] **`overBudgetReason` / `overBudgetNote` fields** on `TimeBooking` — required when `totalHours > estimatedHours × 1.2`; enum-validated unconditionally
+- [x] **`createTimeEntry` hardening** (`timebooking.controller.ts`): duplicate `userId` guard in `collaboratorEntries`, DB existence check for all collaborator IDs, unconditional `overBudgetReason` enum validation
+- [x] **Efficiency ratio display** in `TaskActionBar.tsx` — actual vs estimated hours + over/under badge shown above the star-rating widget on final-state tasks
+- [x] **Analytics backend** (`GET /api/analytics/time-booking`) — Manager/Director/Admin RBAC, templateId/divisionId/date filters; single-pass JS aggregation for template efficiency + staff performance; separate `incompleteBookings` count (not filtered by templateId); canonical template `estimatedHours` (not averaged snapshots); DB indexes added to Task model
+- [x] **Analytics frontend** (`/dashboard/analytics`) — Template Efficiency table, Staff Performance table, incomplete-bookings amber banner; Manager/Director/Admin sidebar nav item
+- [x] **DB indexes** on `Task`: `[status, deletedAt]`, `[targetDivisionId, status, deletedAt]`, `[templateId, status, deletedAt]`, `[completedAt]`
+
 ### Phase 7 — User Management & Settings
 - [ ] `/dashboard/users` — Admin only: manage users, roles, divisions
 - [ ] `/dashboard/settings` — personal preferences, password change
@@ -999,6 +1045,16 @@ All changes needed before Phase 5 development begins:
 23. **Rich Text in read-only renders a Tiptap editor instance:** The disabled `RichTextEditor` still mounts a full Tiptap editor (with `editable: false`). For pages that show many task fields at once (e.g. a task list with inline previews), this could mount dozens of editor instances. If performance becomes an issue, replace the read-only path with a simple `dangerouslySetInnerHTML` guarded by DOMPurify (install `dompurify` + `@types/dompurify`).
 
 24. **`npx prisma db push` required for `issuanceNote`:** The `issuanceNote String?` column was added to `schema.prisma` and the Prisma client was regenerated, but `db push` could not run in the CI environment (no DB server). Run `cd backend && npx prisma db push` against both `sqd_qa_db` and `sqd_qa_test_db` on first deployment of branch `claude/sleepy-bell-MTJwM`. The migration is non-destructive (nullable column, no default required).
+
+25. **`npx prisma db push` required for Time Booking Enhancement:** Four `@@index` decorators were added to the `Task` model plus `overBudgetReason`/`overBudgetNote` columns on `TimeBooking`. Run `cd backend && npx prisma db push` against both `sqd_qa_db` and `sqd_qa_test_db` on first deployment of branch `claude/trusting-knuth-oshBn`. Migration is non-destructive (nullable columns; additive indexes).
+
+26. **`incompleteBookings` must use a separate query, not a filter on the main result set:** In `analytics.controller.ts`, the incomplete-bookings count is computed via `prisma.task.count()` *before* the `templateId` filter is applied. If you ever merge them into one query, the count will be silently wrong when a `?templateId` param is supplied — it will count only tasks for that template rather than the full division.
+
+27. **`estimatedHours` in analytics is the canonical template value, not an average of booking snapshots:** `TimeBookingAnalytics.templates[n].estimatedHours` comes from `t.template.estimatedHours` (the live `Template` record). Using the average of `TimeBooking.estimatedHours` snapshots would silently mix vintages (some tasks booked against an old estimate, others against a new one). If a template's estimate is updated, historical efficiency ratios in the analytics page will shift to reflect the new baseline — that is intentional.
+
+28. **Manager RBAC for analytics is enforced in the DB `WHERE` clause, not post-fetch JS:** `getTimeBookingAnalytics` sets `targetDivisionId` in the Prisma `where` object before the query runs. Never add a post-fetch JS filter instead — it will silently expose data if the DB result is ever paginated or partially loaded.
+
+29. **`TimeEntry` has no `updatedAt` and must never be mutated:** The model is intentionally append-only (immutable audit trail). Adding `updatedAt` or writing an update endpoint would break the compliance intent. If a time entry contains an error, a corrective entry should be added and the discrepancy noted in `notes`.
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 

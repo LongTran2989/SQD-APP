@@ -160,7 +160,7 @@ export interface TemplateEfficiencyRow {
   title: string;
   taskCount: number;
   avgActualHours: number | null;
-  avgEstimatedHours: number | null;
+  estimatedHours: number | null;
   efficiencyRatio: number | null;
   overBudgetCount: number;
   topOverBudgetReason: string | null;
