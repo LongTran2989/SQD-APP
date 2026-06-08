@@ -315,6 +315,28 @@ export const createTimeEntry = async (req: Request, res: Response): Promise<void
       return;
     }
 
+    // No duplicate userIds within the collaborator list
+    const seenCollaboratorIds = new Set<number>();
+    for (const c of collaboratorEntries as BookingEntry[]) {
+      if (seenCollaboratorIds.has(c.userId)) {
+        res.status(400).json({ message: 'Duplicate userId in collaboratorEntries.' });
+        return;
+      }
+      seenCollaboratorIds.add(c.userId);
+    }
+
+    // All collaborator userIds must correspond to real, non-deleted users
+    if (seenCollaboratorIds.size > 0) {
+      const validUsers = await prisma.user.findMany({
+        where: { id: { in: Array.from(seenCollaboratorIds) }, deletedAt: null },
+        select: { id: true }
+      });
+      if (validUsers.length !== seenCollaboratorIds.size) {
+        res.status(400).json({ message: 'One or more collaborator userIds do not exist.' });
+        return;
+      }
+    }
+
     // Fetch existing entries to compute running total (needed for feed message and over-budget check)
     const existingEntries = await prisma.timeEntry.findMany({
       where: { taskId: id, loggedByUserId: userId }
@@ -328,12 +350,12 @@ export const createTimeEntry = async (req: Request, res: Response): Promise<void
     const newCollabHours = (collaboratorEntries as BookingEntry[]).reduce((sum, c) => sum + c.hoursLogged, 0);
     const runningTotal = existingAssigneeHours + existingCollabHours + sessionHours + newCollabHours;
 
-    if (task.estimatedHours !== null && runningTotal > task.estimatedHours * 1.2) {
-      const validReasons = ['COMPLEX_TASK', 'WAIT_TIME', 'ADDITIONAL_WORK', 'OTHER'];
-      if (!overBudgetReason || !validReasons.includes(overBudgetReason as string)) {
-        res.status(400).json({
-          message: 'An over-budget reason is required when total logged hours exceed 120% of the estimate.'
-        });
+    // Validate overBudgetReason format whenever it is supplied — regardless of budget status.
+    // This prevents arbitrary strings from being persisted even on under-budget entries.
+    const VALID_OVER_BUDGET_REASONS = ['COMPLEX_TASK', 'WAIT_TIME', 'ADDITIONAL_WORK', 'OTHER'];
+    if (overBudgetReason !== undefined && overBudgetReason !== null) {
+      if (!VALID_OVER_BUDGET_REASONS.includes(overBudgetReason as string)) {
+        res.status(400).json({ message: 'Invalid overBudgetReason value.' });
         return;
       }
       if (overBudgetReason === 'OTHER') {
@@ -341,6 +363,16 @@ export const createTimeEntry = async (req: Request, res: Response): Promise<void
           res.status(400).json({ message: 'Please describe the reason in the notes field.' });
           return;
         }
+      }
+    }
+
+    // Require a reason when total logged hours exceed 120% of the estimate
+    if (task.estimatedHours !== null && runningTotal > task.estimatedHours * 1.2) {
+      if (!overBudgetReason) {
+        res.status(400).json({
+          message: 'An over-budget reason is required when total logged hours exceed 120% of the estimate.'
+        });
+        return;
       }
     }
 
