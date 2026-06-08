@@ -187,8 +187,21 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 4** — Flag lifecycle actions: `POST /api/escalations/:id/action {action, payload}`. Six actions — `ACKNOWLEDGE`, `DISMISS`, `RAISE_FINDING`, `CREATE_TASK`, `REASSIGN_TASK`, `DISSEMINATE` — gated by the shared `canActionFlag()` predicate. **Reuse, not re-implement:** the existing `createFinding`/`createTask`/`reassignTask` handlers were each split into an exported `…Service(client, actor, params)` core (running every write on the passed tx client + throwing a typed `HttpError` from `utils/httpError.ts`); the action endpoint opens ONE `$transaction` and calls those cores so the whole action is atomic. `DISSEMINATE` reuses the **same** flag (no second flag). Every action dual-writes `AuditLog('ESCALATION_ACTIONED')` + a target-feed SYSTEM_EVENT. Frontend: card-local `EscalationActionModal`; `getFeed` marks each card with a server-computed `canAction` so cross-division Managers see no buttons.
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
+- **Time Booking Enhancement** (COMPLETED 2026-06-08 — branch `claude/trusting-knuth-oshBn`)
+
+  Extends Phase 5.6 Time Booking with a deeper audit trail, mandatory enforcement, over-budget tracking, per-entry history, and management analytics. End-user and developer manuals: `TIME_BOOKING_USER_GUIDE.md` + `TIME_BOOKING_DEV_GUIDE.md`.
+
+  - **`TimeEntry` model** — append-only per-entry audit log; `collaboratorEntries` JSONB; no `updatedAt` (immutable after creation, compliance mandate)
+  - **`overBudgetReason` / `overBudgetNote` fields on `TimeBooking`** — required when `totalHours > estimatedHours × 1.2`; valid values: `COMPLEX_TASK`, `WAIT_TIME`, `ADDITIONAL_WORK`, `OTHER`; enum-validated unconditionally (even when under budget)
+  - **`createTimeEntry` hardening** (`timebooking.controller.ts`): duplicate `userId` guard in `collaboratorEntries`; DB existence check for all collaborator IDs; `overBudgetNote` required when reason is `OTHER`
+  - **Efficiency ratio display** in `TaskActionBar.tsx` — actual vs estimated hours + coloured over/under badge shown above the star-rating widget on final-state tasks
+  - **Three-layer booking enforcement:** (1) API gate — `rateTask` returns 400 with no booking; (2) UI banner on task detail for unbooked final-state tasks; (3) `incompleteBookings` count in analytics
+  - **Analytics backend** (`GET /api/analytics/time-booking`, `analytics.controller.ts` + `analytics.routes.ts`): Manager/Director/Admin RBAC pushed to DB `WHERE`; optional `templateId`/`divisionId`/`from`/`to` filters; single-pass JS aggregation; `incompleteBookings` as a separate query (not narrowed by templateId); canonical template `estimatedHours` (not averaged booking snapshots); `select` not `include` (avoids large JSON columns)
+  - **Analytics frontend** (`/dashboard/analytics`): Template Efficiency table, Staff Performance table, incomplete-bookings amber banner; Manager/Director/Admin sidebar nav item (`BarChart2`)
+  - **DB indexes on `Task`**: `[status, deletedAt]`, `[targetDivisionId, status, deletedAt]`, `[templateId, status, deletedAt]`, `[completedAt]`
+
 ### Test Suite
-- **262 integration tests passing** on branch `claude/eloquent-feynman-G4thG` (Feed & Escalation full history page, 2026-06-05). **260** on `claude/sqd-feed-escalation-plan-4dYZa` (Phases 1–5). `main` is at **211** (Feed Phases 1–2). Pre-feed baseline was **187** (Phase 6, 2026-06-01). Frontend lint at baseline **70 errors / 23 warnings (zero new)**; `tsc --noEmit` clean (except legacy `clean.ts`); `next build` exit 0.
+- **262 integration tests passing** on branch `claude/eloquent-feynman-G4thG` (Feed & Escalation full history page, 2026-06-05). **260** on `claude/sqd-feed-escalation-plan-4dYZa` (Phases 1–5). `main` is at **211** (Feed Phases 1–2). Pre-feed baseline was **187** (Phase 6, 2026-06-01). The Time Booking Enhancement branch (`claude/trusting-knuth-oshBn`) does not add new tests — all 187 tests on that branch pass (no DB available in CI to run `db push` for new indexes). Frontend lint at baseline **70 errors / 23 warnings (zero new)**; `tsc --noEmit` clean (except legacy `clean.ts`); `next build` exit 0.
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -987,18 +1000,6 @@ All changes needed before Phase 5 development begins:
 - [x] `finding.test.ts` — 37 tests, 8 groups; 187 / 187 total passing
 - [ ] `violatorIds` search integration — deferred (external personnel DB, 5000+ records, Phase 7+)
 - [ ] Findings analytics dashboard with charts/filters — deferred (Phase 7+)
-
-### Time Booking Enhancement (COMPLETED 2026-06-08)
-
-Extends Phase 5.6 Time Booking with deeper audit trail, mandatory enforcement, over-budget tracking, per-entry history, and management analytics.
-
-- [x] **`TimeEntry` model** — append-only per-entry audit log; `collaboratorEntries` JSONB; no `updatedAt` (immutable after creation)
-- [x] **`overBudgetReason` / `overBudgetNote` fields** on `TimeBooking` — required when `totalHours > estimatedHours × 1.2`; enum-validated unconditionally
-- [x] **`createTimeEntry` hardening** (`timebooking.controller.ts`): duplicate `userId` guard in `collaboratorEntries`, DB existence check for all collaborator IDs, unconditional `overBudgetReason` enum validation
-- [x] **Efficiency ratio display** in `TaskActionBar.tsx` — actual vs estimated hours + over/under badge shown above the star-rating widget on final-state tasks
-- [x] **Analytics backend** (`GET /api/analytics/time-booking`) — Manager/Director/Admin RBAC, templateId/divisionId/date filters; single-pass JS aggregation for template efficiency + staff performance; separate `incompleteBookings` count (not filtered by templateId); canonical template `estimatedHours` (not averaged snapshots); DB indexes added to Task model
-- [x] **Analytics frontend** (`/dashboard/analytics`) — Template Efficiency table, Staff Performance table, incomplete-bookings amber banner; Manager/Director/Admin sidebar nav item
-- [x] **DB indexes** on `Task`: `[status, deletedAt]`, `[targetDivisionId, status, deletedAt]`, `[templateId, status, deletedAt]`, `[completedAt]`
 
 ### Phase 7 — User Management & Settings
 - [ ] `/dashboard/users` — Admin only: manage users, roles, divisions
