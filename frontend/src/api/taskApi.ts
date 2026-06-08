@@ -26,6 +26,7 @@ export interface CreateTaskPayload {
   deadline?: string;
   estimatedHours?: number;
   wpId?: number;
+  issuanceNote?: string;
 }
 
 export const createTask = (payload: CreateTaskPayload): Promise<TaskEnriched> =>
@@ -145,7 +146,7 @@ export const updateTimeBooking = (
 export const getDivisions = (): Promise<{ value: string; label: string }[]> =>
   apiClient.get('/datasources/divisions').then((r) => r.data);
 
-export const getUsers = (): Promise<{ value: string; label: string }[]> =>
+export const getUsers = (): Promise<{ value: string; label: string; divisionId: number | null }[]> =>
   apiClient.get('/datasources/users').then((r) => r.data);
 
 export const getDatasource = (

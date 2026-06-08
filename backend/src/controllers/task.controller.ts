@@ -313,6 +313,7 @@ export interface CreateTaskParams {
   assignedToUserId?: number | null;
   deadline?: string | Date | null;
   estimatedHours?: number | null;
+  issuanceNote?: string | null;
 }
 
 /**
@@ -328,7 +329,7 @@ export async function createTaskService(
   params: CreateTaskParams
 ) {
   const { userId, role, divisionId } = actor;
-  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours } = params;
+  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote } = params;
 
   // RBAC: Manager, Director, Admin can create tasks.
   // Regular users assigned to a WP can create tasks inside that WP for their own division.
@@ -412,6 +413,7 @@ export async function createTaskService(
       schemaSnapshot: template.formSchema as any,
       deadline: deadline ? new Date(deadline) : null,
       estimatedHours: estimatedHours ?? template.estimatedHours ?? null,
+      issuanceNote: issuanceNote ?? null,
       assignmentType: 'INDIVIDUAL'
     },
     include: taskInclude()
@@ -457,10 +459,10 @@ export async function createTaskService(
 export const createTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId, role, divisionId } = req.user!;
-    const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours } = req.body;
+    const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote } = req.body;
 
     const task = await prisma.$transaction((tx) =>
-      createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours })
+      createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote })
     );
 
     res.status(201).json({ ...task, isOverdue: computeIsOverdue(task) });

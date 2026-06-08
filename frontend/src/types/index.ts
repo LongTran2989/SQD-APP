@@ -104,6 +104,7 @@ export interface Task {
   rejectionReason: string | null;
   rating: number | null;
   estimatedHours: number | null;
+  issuanceNote: string | null;
   assignmentType: string;
   schemaSnapshot: FormField[];
   targetDivisionId: number | null;
