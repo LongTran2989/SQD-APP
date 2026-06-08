@@ -7,6 +7,7 @@ import { Template, WorkPackageEnriched } from '../../../../types';
 import { createTask, getDivisions, getUsers } from '../../../../api/taskApi';
 import { getWorkPackages } from '../../../../api/wpApi';
 import { getPublishedTemplates } from '../../../../api/templateApi';
+import SearchableSelect from '../../../../components/ui/SearchableSelect';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft,
@@ -21,7 +22,6 @@ import Link from 'next/link';
 
 const ELEVATED_ROLES = ['Manager', 'Director', 'Admin'];
 // Staff/Group Leader may reach this page ONLY when arriving from a WP (wpId pre-filled).
-// Backend still enforces WP membership — the frontend just removes the hard redirect.
 function canAccessNewTaskPage(role: string, prefilledWpId: number | null): boolean {
   return ELEVATED_ROLES.includes(role) || prefilledWpId !== null;
 }
@@ -31,6 +31,10 @@ function canAccessNewTaskPage(role: string, prefilledWpId: number | null): boole
 interface SelectOption {
   value: string;
   label: string;
+}
+
+interface UserOption extends SelectOption {
+  divisionId: number | null;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -62,7 +66,7 @@ export default function NewTaskPage() {
   // ── Data ──
   const [templates, setTemplates] = useState<Template[]>([]);
   const [divisions, setDivisions] = useState<SelectOption[]>([]);
-  const [users, setUsers] = useState<SelectOption[]>([]);
+  const [allUsers, setAllUsers] = useState<UserOption[]>([]);
   const [workPackages, setWorkPackages] = useState<WorkPackageEnriched[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
@@ -87,7 +91,7 @@ export default function NewTaskPage() {
 
         setTemplates(published);
         setDivisions(divRes);
-        setUsers(usersRes);
+        setAllUsers(usersRes);
         // Only active (non-Closed, non-Inactive) WPs
         setWorkPackages(wpsRes.filter((w) => w.computedStatus !== 'Closed' && w.computedStatus !== 'Inactive'));
       } catch {
@@ -99,15 +103,28 @@ export default function NewTaskPage() {
     fetchAll();
   }, [user]);
 
-  // Filter user picker to same division for Manager
-  const filteredUsers =
-    user?.role === 'Manager'
-      ? users.filter((u) => {
-          // datasources/users returns value = userId; we can't filter by division
-          // here without extra data — show all and let backend enforce the rule
-          return true;
-        })
-      : users;
+  // Template options for SearchableSelect
+  const templateOptions = templates.map((t) => ({
+    value: String(t.id),
+    label: `${t.templateId} — ${t.title}`,
+  }));
+
+  // Users filtered by the selected target division
+  const assigneeOptions = targetDivisionId
+    ? allUsers.filter((u) => u.divisionId === targetDivisionId)
+    : allUsers;
+
+  // When division changes, clear assignee if they are no longer in the new division
+  const handleDivisionChange = (val: string) => {
+    const newDivId = val ? Number(val) : '';
+    setTargetDivisionId(newDivId);
+    if (assignedToUserId) {
+      const still = allUsers.find(
+        (u) => u.value === String(assignedToUserId) && u.divisionId === newDivId
+      );
+      if (!still) setAssignedToUserId('');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,6 +164,8 @@ export default function NewTaskPage() {
 
   if (!user || !canAccessNewTaskPage(user.role, prefilledWpId)) return null;
 
+  const isElevated = ELEVATED_ROLES.includes(user?.role ?? '');
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Header */}
@@ -177,20 +196,13 @@ export default function NewTaskPage() {
             </h2>
 
             <div>
-              <select
+              <SearchableSelect
                 id="template-select"
-                value={templateId}
-                onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : '')}
-                required
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-              >
-                <option value="">Select a published template...</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.templateId} — {t.title}
-                  </option>
-                ))}
-              </select>
+                options={templateOptions}
+                value={templateId ? String(templateId) : ''}
+                onChange={(val) => setTemplateId(val ? Number(val) : '')}
+                placeholder="Select a published template…"
+              />
               {templates.length === 0 && (
                 <p className="mt-2 text-sm text-amber-600 flex items-center gap-1.5">
                   <Info className="w-4 h-4 flex-shrink-0" />
@@ -230,44 +242,52 @@ export default function NewTaskPage() {
 
             {/* Target Division */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="division-select">
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                 Target Division *
               </label>
-              <select
-                id="division-select"
-                value={targetDivisionId}
-                onChange={(e) => setTargetDivisionId(e.target.value ? Number(e.target.value) : '')}
-                required
-                disabled={!ELEVATED_ROLES.includes(user?.role ?? '')}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm disabled:bg-slate-50 disabled:text-slate-500"
-              >
-                <option value="">Select division...</option>
-                {divisions.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
+              {isElevated ? (
+                <SearchableSelect
+                  id="division-select"
+                  options={divisions}
+                  value={targetDivisionId ? String(targetDivisionId) : ''}
+                  onChange={handleDivisionChange}
+                  placeholder="Select division…"
+                />
+              ) : (
+                <div className="w-full px-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-sm text-slate-500">
+                  {divisions.find((d) => d.value === String(targetDivisionId))?.label ?? '—'}
+                </div>
+              )}
             </div>
 
             {/* Assignee (optional) */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="assignee-select">
-                Assignee <span className="font-normal text-slate-400">(optional — leave blank to create as Unassigned)</span>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                Assignee{' '}
+                <span className="font-normal text-slate-400">
+                  (optional — leave blank to create as Unassigned)
+                </span>
               </label>
-              <select
+              <SearchableSelect
                 id="assignee-select"
-                value={assignedToUserId}
-                onChange={(e) => setAssignedToUserId(e.target.value ? Number(e.target.value) : '')}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-              >
-                <option value="">No assignee (Unassigned)</option>
-                {filteredUsers.map((u) => (
-                  <option key={u.value} value={u.value}>
-                    {u.label}
-                  </option>
-                ))}
-              </select>
+                options={assigneeOptions}
+                value={assignedToUserId ? String(assignedToUserId) : ''}
+                onChange={(val) => setAssignedToUserId(val ? Number(val) : '')}
+                placeholder={
+                  targetDivisionId
+                    ? assigneeOptions.length === 0
+                      ? 'No users in this division'
+                      : 'Search for assignee…'
+                    : 'Select a division first'
+                }
+                clearable
+                clearLabel="No assignee (Unassigned)"
+              />
+              {targetDivisionId && assigneeOptions.length === 0 && (
+                <p className="mt-1.5 text-xs text-amber-600 flex items-center gap-1">
+                  <Info className="w-3.5 h-3.5" /> No users found in the selected division.
+                </p>
+              )}
             </div>
 
             {/* Deadline (optional) */}
@@ -288,30 +308,33 @@ export default function NewTaskPage() {
 
             {/* Work Package */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-select">
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                 <span className="flex items-center gap-1.5">
                   <FolderOpen className="w-4 h-4 text-slate-400" />
                   Work Package <span className="font-normal text-slate-400">(optional)</span>
                 </span>
               </label>
-              <select
-                id="wp-select"
-                value={wpId}
-                onChange={(e) => setWpId(e.target.value ? Number(e.target.value) : '')}
-                disabled={!!prefilledWpId}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm disabled:bg-slate-50 disabled:text-slate-500"
-              >
-                <option value="">No work package</option>
-                {workPackages.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.wpId} — {w.name}
-                  </option>
-                ))}
-              </select>
-              {prefilledWpId && (
-                <p className="mt-1.5 text-xs text-blue-600 flex items-center gap-1">
-                  <Info className="w-3.5 h-3.5" /> Work package pre-selected from the work package page.
-                </p>
+              {prefilledWpId ? (
+                <>
+                  <div className="w-full px-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-sm text-slate-500">
+                    {workPackages.find((w) => w.id === prefilledWpId)
+                      ? `${workPackages.find((w) => w.id === prefilledWpId)!.wpId} — ${workPackages.find((w) => w.id === prefilledWpId)!.name}`
+                      : `WP #${prefilledWpId}`}
+                  </div>
+                  <p className="mt-1.5 text-xs text-blue-600 flex items-center gap-1">
+                    <Info className="w-3.5 h-3.5" /> Work package pre-selected from the work package page.
+                  </p>
+                </>
+              ) : (
+                <SearchableSelect
+                  id="wp-select"
+                  options={workPackages.map((w) => ({ value: String(w.id), label: `${w.wpId} — ${w.name}` }))}
+                  value={wpId ? String(wpId) : ''}
+                  onChange={(val) => setWpId(val ? Number(val) : '')}
+                  placeholder="No work package"
+                  clearable
+                  clearLabel="No work package"
+                />
               )}
             </div>
 
@@ -325,7 +348,7 @@ export default function NewTaskPage() {
                 rows={3}
                 value={issuanceNote}
                 onChange={(e) => setIssuanceNote(e.target.value)}
-                placeholder="Add context or specific guidance for this task instance..."
+                placeholder="Add context or specific guidance for this task instance…"
                 className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm resize-none"
               />
             </div>
