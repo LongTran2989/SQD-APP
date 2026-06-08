@@ -78,6 +78,10 @@ function getPendingExtensionIndex(task: TaskEnriched): number {
   return (task.deadlineExtensions as any[]).findIndex((e) => !e.decision);
 }
 
+function formatHours(h: number): string {
+  return h % 1 === 0 ? `${h}h` : `${h.toFixed(1)}h`;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function InlineInput({
@@ -892,6 +896,18 @@ export default function TaskActionBar({
               <Star className="w-3.5 h-3.5" />
               Rate this task (1–5)
             </p>
+            {task.timeBooking && task.timeBooking.estimatedHours != null && (
+              <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500 mb-2">
+                <span>Actual:{' '}<strong className="text-slate-700">{formatHours(task.timeBooking.totalHours)}</strong></span>
+                <span className="text-slate-300">vs</span>
+                <span>Estimated:{' '}<strong className="text-slate-700">{formatHours(task.timeBooking.estimatedHours)}</strong></span>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${task.timeBooking.totalHours > task.timeBooking.estimatedHours ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-green-50 text-green-600 border border-green-200'}`}>
+                  {task.timeBooking.totalHours > task.timeBooking.estimatedHours
+                    ? `+${formatHours(task.timeBooking.totalHours - task.timeBooking.estimatedHours)} over`
+                    : `−${formatHours(task.timeBooking.estimatedHours - task.timeBooking.totalHours)} under`}
+                </span>
+              </div>
+            )}
             <div className="flex items-center gap-3">
               <StarRating
                 value={ratingValue}
