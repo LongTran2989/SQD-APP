@@ -155,6 +155,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   **Tests:** All 307 backend tests passing. Frontend migrated to CapaTaskLink model (types, API, CapaPanel components).
 
 - **Feed & Escalation System** (Phases 1–5 + post-ship UX — ✅ **COMPLETE**, 2026-06-05) — `FEED_ESCALATION_PLAN.md` is the living source of truth for this feature; OBJECT H documents the schema. Branch `claude/sqd-feed-escalation-plan-4dYZa` (NOT yet merged to `main`). End-user + developer manuals: `FEED_ESCALATION_USER_GUIDE.md` + `FEED_ESCALATION_DEV_GUIDE.md`; manual test checklist: `FEED_ESCALATION_TEST_CHECKLIST.md`.
+  - **⚠️ NUMBERING CLARIFICATION — the "Phase 1–5" above are FEATURE-INTERNAL sub-phases of Feed & Escalation, NOT the project-wide roadmap phases (§7).** This is a standalone feature, **not** project Phase 7. Project **Phase 7 = "User Management & Settings" (DB-driven RBAC / `PrivilegeConfig`)** and remains **pending** (see §7). Do not conflate the two: the Escalation feature's internal sequence (schema migration → feed API → escalation core → flag lifecycle → polish/docs) is unrelated to the global Phase 1–7 roadmap.
   - **Phase 1–5** — see previous entries (schema migration, feed API, escalation core, flag lifecycle, badges/polish/docs). 260 backend tests on that branch.
   - **Post-ship UX (branch `claude/eloquent-feynman-G4thG`)** — The Escalations page (`/dashboard/escalations`) now **retains the full escalation history** (PENDING + ACTIONED + DISMISSED), not just the live pending queue:
     - **Backend (`escalation.controller.ts` `getEscalations`):** The `?status=` param was already optional; added `action`, `actionedAt`, and `reviewedBy` to the list response (reviewer name resolved in the existing user name batch — no extra query).
@@ -937,6 +938,8 @@ All changes needed before Phase 5 development begins:
 - [ ] Findings analytics dashboard with charts/filters — deferred (Phase 7+)
 
 ### Phase 7 — User Management & Settings
+> **⚠️ Not to be confused with the Feed & Escalation System.** That feature carries its own internal "Phase 1–5" numbering (see §6 / OBJECT H) and is already complete; it is **not** this roadmap phase. **Project Phase 7 is the DB-driven RBAC / User Management work below and is still pending.**
+
 - [ ] `/dashboard/users` — Admin only: manage users, roles, divisions
 - [ ] `/dashboard/settings` — personal preferences, password change
 - [ ] Admin: manage `WpType` values
