@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-01 (rev 7). Supersedes all previous versions.*
+*Last updated: 2026-06-08 (rev 8). Supersedes all previous versions.*
 
 ---
 
@@ -114,6 +114,20 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **`task.controller.ts` addition:** `allowsFindings` added to `taskInclude()` so the template flag is available in task detail responses.
   - **`seed-verification.test.ts` fix:** hardcoded `ts-node.cmd` (Windows binary) replaced with platform-aware `process.platform === 'win32' ? 'ts-node.cmd' : 'ts-node'`.
   - **Deferred (not in Phase 6):** `violatorIds` multi-select search against external personnel DB; Findings analytics/charts dashboard.
+
+- **Task Issuance UX Improvements** (COMPLETED 2026-06-08 — branch `claude/sleepy-bell-MTJwM`)
+  - **Task Instruction field (`issuanceNote`):** Optional free-text field added to task creation. Issuers can provide context or guidance specific to the task instance (e.g. scope, location, special conditions). Write-once at creation — any follow-up discussion goes through the task activity feed. Displayed prominently in `TaskDetailPanel` immediately after the Template row (hidden when null).
+    - Schema: `issuanceNote String?` added to `Task` model — nullable, non-destructive.
+    - Backend: `CreateTaskParams` interface + `createTaskService` + HTTP handler updated. No audit log entry (it is static context, not a status event).
+    - Frontend: `Task` type, `CreateTaskPayload`, new `issuanceNote` state + textarea on `/dashboard/tasks/new`, `DetailRow` in `TaskDetailPanel`.
+  - **Searchable dropdowns (`SearchableSelect` component):** New reusable combobox at `frontend/src/components/ui/SearchableSelect.tsx`. Replaces plain `<select>` elements in the task creation form for Template, Target Division (elevated roles), Assignee, and Work Package pickers. Features live text filter, highlighted active selection, "no results" state, clearable entries, closes on outside click.
+  - **Division-scoped assignee list:** Assignee picker now shows **only users from the selected target division**. Changing the division auto-clears any stale assignee selection. Backend `datasource/users` endpoint updated to include `divisionId` in each returned user entry (was previously absent). `getUsers()` return type updated accordingly.
+  - **Rich Text field type in Template Builder** (COMPLETED 2026-06-08):
+    - New `rich_text` field type added alongside existing 8 types. Template designers add it from the "+ Rich Text" button in the field palette.
+    - Editor component: `frontend/src/components/ui/RichTextEditor.tsx` — Tiptap + StarterKit. Toolbar: Bold, Italic, Bullet List, Numbered List. Read-only mode uses Tiptap's `editable: false` (no `dangerouslySetInnerHTML`).
+    - Wired in: `FormFieldType` union, `TemplateBuilder` (button + live preview), `TaskFormPanel` FieldRenderer (`rich_text` case), template detail page preview, `RevisionHistoryPanel` field type label map (also completed the full label map for all existing types).
+    - Stored value: HTML string produced by Tiptap, saved in `TaskData.data` like any other field value. Zero backend changes.
+    - Dependency added: `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit` in `frontend/package.json`.
 
 - **Phase 6.x — Finding Workflow Expansion** (COMPLETED 2026-06-07)
   > [!NOTE]
@@ -387,8 +401,9 @@ These are two separate systems that serve different purposes. **Both** are writt
 | `Checkbox Single` | One true/false toggle | e.g. Completed? |
 | `Date` | Date picker | e.g. Inspection date |
 | `File Upload` | Upload documents/images | **Deferred to Phase 5.4** — MinIO infrastructure required first |
+| `Rich Text` | Formatted text with Bold, Italic, Bullet/Numbered lists | Editor powered by Tiptap/StarterKit. Stored as HTML string in `TaskData.data`. Read-only mode uses `editable: false` — no XSS surface. Added 2026-06-08 |
 
-> **Field type history:** The original single "Checkbox" field type has been split into `Checkbox Single` (boolean toggle) and `Checkbox Group` (multi-option picker). `Radio` added for single-choice from visible options. `File Upload` deferred until MinIO is configured in Phase 5.0.
+> **Field type history:** The original single "Checkbox" field type has been split into `Checkbox Single` (boolean toggle) and `Checkbox Group` (multi-option picker). `Radio` added for single-choice from visible options. `File Upload` deferred until MinIO is configured in Phase 5.0. `Rich Text` added 2026-06-08 using Tiptap.
 
 > **One-off Template behaviour:** When `isOneOff = true`, the Template is automatically hard-deleted from the database immediately after its first Task is assigned (not just created — assigned). The generated Task is unaffected because it stores its own immutable `schemaSnapshot` (JSON) at the moment of Task creation. This snapshot is the source of truth for rendering the Task form, regardless of whether the source Template still exists.
 
@@ -472,6 +487,8 @@ These are two separate systems that serve different purposes. **Both** are writt
 | `estimatedHours` | Float? | **ADD** — inherited from Template at Task creation |
 | `assignmentType` | String | **ADD** — `INDIVIDUAL` default; `GROUP`/`SCHEDULE` future |
 | `schemaSnapshot` | Json | **ADD** — immutable copy of `formSchema` at the moment of Task creation. This is the form definition used to render the Task, independent of the source Template. Required to support One-off Templates and Template edits without breaking in-flight Tasks |
+
+| `issuanceNote` | String? | **ADDED 2026-06-08** — Optional free-text context written by the issuer at creation time. Write-once. Displayed on task detail panel below the Template row. Not logged to AuditLog (static context, not a status event) |
 
 **Keep existing:** `templateId`, `assignedToUserId`, `targetDivisionId`, `parentFindingId`, `taskData`, `sourceFindings`, `createdAt`, `completedAt`, `updatedAt`
 
@@ -822,6 +839,7 @@ All changes needed before Phase 5 development begins:
 | `Finding` | ADD field | `departmentId Int` — required FK to Department; separate from `targetDivisionId` (RBAC) |
 | `Finding` | CHANGE field | `category String?` — made nullable (was required; raise payload does not include it) |
 | `Task` | ADD field | `title String?` — nullable; used for editable follow-up task titles |
+| `Task` | ADD field | `issuanceNote String?` — nullable; optional free-text context written at issuance. Added 2026-06-08 |
 | `AuditLog` | CHANGE | `entityId Int` → `entityId String` |
 | `User`, `Task`, `Finding` | ADD field | `deletedAt DateTime?` (soft delete) |
 | **NEW** | CREATE model | `WorkPackage` |
@@ -969,6 +987,18 @@ All changes needed before Phase 5 development begins:
 16. **`decideDeadlineExtension` requires `extensionIndex`**: The backend requires the index of the pending extension within the `deadlineExtensions` JSON array. The frontend uses `getPendingExtensionIndex()` to find the first entry where `decision` is null/undefined. If an extension was already decided, it won't be found and the call is blocked client-side.
 17. **`task.assignedToUser.role` is a flat string**: The user object returned in task responses has `role` as a plain string (e.g. `'Manager'`), not a nested Role object. Do not access `.role.name` — it will always be `undefined`.
 18. **Event Type in Findings is hardcoded until Phase 7**: `RaiseFindingPanel` uses a 9-item hardcoded list. Phase 7 will replace this with an admin-managed `EventType` table. The "Other" option writes a free-text value directly to `Finding.eventType`.
+
+19. **`issuanceNote` is write-once by convention, not by enforcement:** The backend does not block updates to `issuanceNote` after creation — the write-once rule is enforced by the UI only (no edit control is exposed). If a future endpoint or admin tool allows Task updates, explicitly exclude `issuanceNote` from the updatable fields to preserve this intent.
+
+20. **`datasource/users` now returns `divisionId`:** The `/datasources/users` endpoint was updated to include `divisionId` in each user entry. Any other page that calls `getUsers()` and relies on the shape `{ value, label }` is unaffected (extra field is additive). However, if a future call passes the result directly to a typed interface that rejects unknown keys, update the type. Current `getUsers()` return type in `taskApi.ts` is `{ value: string; label: string; divisionId: number | null }[]`.
+
+21. **`SearchableSelect` has no keyboard navigation:** The current implementation (mouse/touch only) is sufficient for desktop internal tooling, but fails WCAG keyboard-only requirements. If the app is ever audited for accessibility, replace with a library that provides `aria-activedescendant` and arrow-key support (e.g. Headless UI Combobox or Radix Combobox).
+
+22. **Rich Text stored as raw HTML:** `TaskData.data` for a `rich_text` field contains an HTML string (e.g. `<p><strong>bold</strong></p>`). Tiptap's StarterKit constrains what nodes can be produced (no `<script>`, no event handlers), so the stored HTML is safe — but only if it was written by the Tiptap editor. If data is ever imported, seeded, or written directly (migrations, scripts, CSV import), sanitise with DOMPurify or a server-side HTML sanitiser before storing, and again before rendering outside of Tiptap's `EditorContent`. Do not use `dangerouslySetInnerHTML` to display rich text values — always use `RichTextEditor` in `disabled` mode.
+
+23. **Rich Text in read-only renders a Tiptap editor instance:** The disabled `RichTextEditor` still mounts a full Tiptap editor (with `editable: false`). For pages that show many task fields at once (e.g. a task list with inline previews), this could mount dozens of editor instances. If performance becomes an issue, replace the read-only path with a simple `dangerouslySetInnerHTML` guarded by DOMPurify (install `dompurify` + `@types/dompurify`).
+
+24. **`npx prisma db push` required for `issuanceNote`:** The `issuanceNote String?` column was added to `schema.prisma` and the Prisma client was regenerated, but `db push` could not run in the CI environment (no DB server). Run `cd backend && npx prisma db push` against both `sqd_qa_db` and `sqd_qa_test_db` on first deployment of branch `claude/sleepy-bell-MTJwM`. The migration is non-destructive (nullable column, no default required).
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 
