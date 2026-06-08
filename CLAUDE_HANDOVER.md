@@ -939,6 +939,8 @@ All changes needed before Phase 5 development begins:
 
 ### Phase 7 — User Management & Settings
 > **⚠️ Not to be confused with the Feed & Escalation System.** That feature carries its own internal "Phase 1–5" numbering (see §6 / OBJECT H) and is already complete; it is **not** this roadmap phase. **Project Phase 7 is the DB-driven RBAC / User Management work below and is still pending.**
+>
+> **📋 See `PHASE_7_PLAN.md` (root) for the detailed staged implementation plan** — includes schema, controller/route changes, tests, and open decisions.
 
 - [ ] `/dashboard/users` — Admin only: manage users, roles, divisions
 - [ ] `/dashboard/settings` — personal preferences, password change
