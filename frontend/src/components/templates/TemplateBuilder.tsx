@@ -16,6 +16,7 @@ import {
   ArrowDown,
   Info
 } from 'lucide-react';
+import RichTextEditor from '../ui/RichTextEditor';
 
 interface DataSourceOption {
   value: string;
@@ -324,6 +325,7 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                 <button onClick={() => addField('radio')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Radio</button>
                 <button onClick={() => addField('checkbox_group')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Checkboxes</button>
                 <button onClick={() => addField('checkbox_single')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Toggle</button>
+                <button onClick={() => addField('rich_text')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Rich Text</button>
               </div>
             </div>
           </div>
@@ -476,6 +478,11 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                         <label className="flex items-center gap-2 text-sm text-slate-700 pt-1">
                           <input type="checkbox" disabled className="w-4 h-4 rounded" /> Yes/No
                         </label>
+                      )}
+                      {f.type === 'rich_text' && (
+                        <div className="pointer-events-none mt-1">
+                          <RichTextEditor value="" disabled />
+                        </div>
                       )}
                     </div>
                   ))}

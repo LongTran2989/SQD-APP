@@ -9,6 +9,7 @@ import { useAuthStore } from '../../../../store/authStore';
 import toast from 'react-hot-toast';
 import RevisionHistoryPanel from '../../../../components/templates/RevisionHistoryPanel';
 import TransferOwnershipModal from '../../../../components/templates/TransferOwnershipModal';
+import RichTextEditor from '../../../../components/ui/RichTextEditor';
 import { 
   ArrowLeft, Edit, Copy, CheckCircle2, Clock, Archive, 
   Settings, User, ChevronRight, History, Trash2, Repeat, RotateCcw
@@ -334,6 +335,11 @@ export default function TemplateDetailPage({ params }: { params: Promise<{ id: s
                     <label className="flex items-center gap-2 text-sm text-slate-700 mt-2">
                       <input type="checkbox" disabled className="w-4 h-4 rounded" /> Yes/No
                     </label>
+                  )}
+                  {f.type === 'rich_text' && (
+                    <div className="pointer-events-none mt-1">
+                      <RichTextEditor value="" disabled />
+                    </div>
                   )}
                 </div>
               ))}

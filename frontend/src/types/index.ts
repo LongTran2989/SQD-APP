@@ -29,16 +29,17 @@ export type TaskStatus =
   | 'Terminated'
   | 'Inactive';
 
-export type FormFieldType = 
-  | 'text' 
-  | 'textarea' 
-  | 'number' 
-  | 'select' 
-  | 'radio' 
-  | 'checkbox_group' 
-  | 'checkbox_single' 
+export type FormFieldType =
+  | 'text'
+  | 'textarea'
+  | 'number'
+  | 'select'
+  | 'radio'
+  | 'checkbox_group'
+  | 'checkbox_single'
   | 'date'
-  | 'file_upload';
+  | 'file_upload'
+  | 'rich_text';
 
 export interface FormField {
   fieldId: string;
