@@ -145,7 +145,8 @@ function taskInclude() {
     assignedToUser: { select: { id: true, name: true, role: { select: { name: true } } } },
     targetDivision: { select: { id: true, name: true, code: true } },
     wp: { select: { id: true, wpId: true, name: true } },
-    timeBooking: true
+    timeBooking: true,
+    parentFinding: { select: { id: true } }
   };
 }
 

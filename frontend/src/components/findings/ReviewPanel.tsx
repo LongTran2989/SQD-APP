@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { FindingDetail, FindingSeverity } from '../../types';
-import { reviewFinding } from '../../api/findingApi';
+import { reviewFinding, dismissFinding, updateFindingSeverity } from '../../api/findingApi';
 import { SeverityBadge } from './FindingBadges';
+import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 import { ShieldCheck } from 'lucide-react';
 
@@ -21,9 +22,23 @@ function formatDate(d: string | null): string {
 }
 
 export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
+  const { user } = useAuthStore();
+  const isMgrDir = user ? ['Manager', 'Director', 'Admin'].includes(user.role) : false;
+
   const [severity, setSeverity] = useState<FindingSeverity | ''>('');
   const [dueDate, setDueDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Dismiss states
+  const [showDismissModal, setShowDismissModal] = useState(false);
+  const [dismissReason, setDismissReason] = useState('');
+  const [dismissing, setDismissing] = useState(false);
+
+  // Correct severity states
+  const [showCorrectModal, setShowCorrectModal] = useState(false);
+  const [correctSeverity, setCorrectSeverity] = useState<FindingSeverity | ''>('');
+  const [correctReason, setCorrectReason] = useState('');
+  const [correcting, setCorrecting] = useState(false);
 
   const handleSubmit = async () => {
     if (!severity) {
@@ -42,6 +57,48 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
     }
   };
 
+  const handleDismiss = async () => {
+    if (!dismissReason.trim()) {
+      toast.error('Please enter a reason for dismissal');
+      return;
+    }
+    setDismissing(true);
+    try {
+      await dismissFinding(finding.id, dismissReason);
+      toast.success('Finding dismissed');
+      setShowDismissModal(false);
+      onReviewed();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to dismiss finding');
+    } finally {
+      setDismissing(false);
+    }
+  };
+
+  const handleCorrect = async () => {
+    if (!correctSeverity) {
+      toast.error('Please select a severity');
+      return;
+    }
+    if (!correctReason.trim()) {
+      toast.error('Please enter a reason for correction');
+      return;
+    }
+    setCorrecting(true);
+    try {
+      await updateFindingSeverity(finding.id, { severity: correctSeverity, reason: correctReason });
+      toast.success('Severity corrected');
+      setShowCorrectModal(false);
+      onReviewed();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to correct severity');
+    } finally {
+      setCorrecting(false);
+    }
+  };
+
+  const showCorrectBtn = isMgrDir && finding.status !== 'Closed' && finding.status !== 'Dismissed';
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
       <div className="flex items-center gap-2 mb-4">
@@ -52,9 +109,23 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
       {!canReview ? (
         // Already reviewed (or viewer cannot act): show set values read-only.
         <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide w-28">Severity</span>
-            <SeverityBadge severity={finding.severity} />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide w-28">Severity</span>
+              <SeverityBadge severity={finding.severity} />
+            </div>
+            {showCorrectBtn && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCorrectSeverity(finding.severity);
+                  setShowCorrectModal(true);
+                }}
+                className="text-xs text-blue-600 hover:text-blue-700 font-semibold transition-colors"
+              >
+                Correct Severity
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide w-28">Due Date</span>
@@ -92,14 +163,116 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
-          >
-            {submitting ? 'Submitting…' : 'Submit Review'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+            >
+              {submitting ? 'Submitting…' : 'Submit Review'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDismissModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Dismiss Modal */}
+      {showDismissModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <h3 className="text-base font-bold text-slate-800 mb-3">Dismiss Finding #{finding.id}?</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Please enter the reason for dismissing this finding. This action cannot be undone.
+            </p>
+            <textarea
+              required
+              rows={3}
+              value={dismissReason}
+              onChange={(e) => setDismissReason(e.target.value)}
+              placeholder="e.g. Duplicate of Finding #12..."
+              className="w-full text-sm border border-slate-200 rounded-lg p-2.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDismissModal(false)}
+                className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDismiss}
+                disabled={dismissing}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+              >
+                {dismissing ? 'Dismissing…' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Correct Severity Modal */}
+      {showCorrectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <h3 className="text-base font-bold text-slate-800 mb-3">Correct Severity for Finding #{finding.id}</h3>
+            <div className="space-y-4 mb-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                  New Severity <span className="text-red-400">*</span>
+                </label>
+                <select
+                  value={correctSeverity}
+                  onChange={(e) => setCorrectSeverity(e.target.value as FindingSeverity)}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select severity…</option>
+                  {SEVERITIES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                  Reason <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={correctReason}
+                  onChange={(e) => setCorrectReason(e.target.value)}
+                  placeholder="Reason for correction..."
+                  className="w-full text-sm border border-slate-200 rounded-lg p-2.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCorrectModal(false)}
+                className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCorrect}
+                disabled={correcting}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+              >
+                {correcting ? 'Saving…' : 'Correct'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

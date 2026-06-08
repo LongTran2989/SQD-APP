@@ -176,6 +176,7 @@ async function main() {
     { employeeId: 'VAE02578', name: 'Đỗ Hoàng Tuấn',          role: 'Staff',    division: 'QCS', password: 'Abc@123' },
 
     // ── QA ──────────────────────────────────────────────────────────────────
+    { employeeId: 'VAE99999', name: 'Eve Admin',               role: 'Admin',    division: 'QA',  password: 'Abc@123' },
     { employeeId: 'VAE02566', name: 'Trần Thị Kim Tú',         role: 'Staff',    division: 'QA',  password: 'Abc@123' },
     { employeeId: 'VAE00061', name: 'Trần Quốc Hải',           role: 'Manager',  division: 'QA',  password: 'Abc@123' },
     { employeeId: 'VAE00548', name: 'Trần Quang Anh',          role: 'Staff',    division: 'QA',  password: 'Abc@123' },

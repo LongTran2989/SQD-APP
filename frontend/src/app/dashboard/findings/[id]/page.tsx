@@ -107,7 +107,7 @@ export default function FindingDetailPage() {
     );
   }
 
-  const isMgrDir = MGR_DIR.includes(user.role);
+  const isMgrDir = ['Director', 'Admin'].includes(user.role) || (user.role === 'Manager' && user.divisionId === finding.targetDivisionId);
   const canReview = isMgrDir && finding.status === 'Open';
   const canGenerate = isMgrDir && (finding.status === 'Open' || finding.status === 'In Progress');
   const isReporter = finding.reportedByUserId === user.id;

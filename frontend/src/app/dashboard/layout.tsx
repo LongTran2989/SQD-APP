@@ -17,25 +17,39 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const [mounted, setMounted] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  useEffect(() => {
+    if (useAuthStore.persist.hasHydrated()) {
+      setHasHydrated(true);
+    } else {
+      const unsub = useAuthStore.persist.onFinishHydration(() => {
+        setHasHydrated(true);
+      });
+      return unsub;
+    }
+  }, []);
 
   useEffect(() => {
     setMounted(true);
-    if (!isAuthenticated) {
-      router.push('/login');
-    } else {
-      const user = useAuthStore.getState().user;
-      if (user?.employeeId) {
-        // Delay setting the title to ensure it overrides Next.js static metadata upon hydration/navigation
-        const timeout = setTimeout(() => {
-          document.title = `${user.employeeId} - SQD APP`;
-        }, 50);
-        return () => clearTimeout(timeout);
+    if (hasHydrated) {
+      if (!isAuthenticated) {
+        router.push('/login');
+      } else {
+        const user = useAuthStore.getState().user;
+        if (user?.employeeId) {
+          // Delay setting the title to ensure it overrides Next.js static metadata upon hydration/navigation
+          const timeout = setTimeout(() => {
+            document.title = `${user.employeeId} - SQD APP`;
+          }, 50);
+          return () => clearTimeout(timeout);
+        }
       }
     }
-  }, [isAuthenticated, router, pathname]);
+  }, [hasHydrated, isAuthenticated, router, pathname]);
 
   // Prevent hydration mismatch and hide content until auth check completes
-  if (!mounted || !isAuthenticated) {
+  if (!mounted || !hasHydrated || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>

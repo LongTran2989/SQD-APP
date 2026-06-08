@@ -179,6 +179,19 @@ export default function TaskDetailPanel({ task, currentUser }: TaskDetailPanelPr
           })()
         )}
 
+        {/* Parent Finding link */}
+        {task.parentFinding && (
+          <DetailRow label="Raised by Finding">
+            <Link
+              href={`/dashboard/findings/${task.parentFinding.id}`}
+              className="inline-flex items-center gap-1.5 text-blue-600 hover:underline font-semibold"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+              Finding #{task.parentFinding.id}
+            </Link>
+          </DetailRow>
+        )}
+
         {/* Timestamps */}
         <DetailRow label="Created">
           {formatDate(task.createdAt)}

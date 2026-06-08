@@ -23,6 +23,7 @@ export const FINDING_STATUS_CONFIG: Record<FindingStatus, { label: string; color
   'In Progress': { label: 'In Progress', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
   'Pending Verification': { label: 'Pending Verification', color: 'bg-amber-50 text-amber-700 border-amber-200' },
   'Closed': { label: 'Closed', color: 'bg-green-50 text-green-700 border-green-200' },
+  'Dismissed': { label: 'Dismissed', color: 'bg-rose-50 text-rose-700 border-rose-200' },
 };
 
 export function FindingStatusBadge({ status }: { status: FindingStatus }) {
