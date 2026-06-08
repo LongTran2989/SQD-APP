@@ -13,6 +13,7 @@ import TaskFormPanel from '../../../../components/tasks/TaskFormPanel';
 import TaskActivityFeed from '../../../../components/tasks/TaskActivityFeed';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
 import TimeBookingPanel from '../../../../components/tasks/TimeBookingPanel';
+import TimeEntryPanel from '../../../../components/tasks/TimeEntryPanel';
 import RaiseFindingPanel from '../../../../components/findings/RaiseFindingPanel';
 import { SeverityBadge, FindingStatusBadge } from '../../../../components/findings/FindingBadges';
 import toast from 'react-hot-toast';
@@ -277,6 +278,15 @@ export default function TaskDetailPage() {
               taskStatus={task.status}
               formData={formData}
               onDataChange={handleDataChange}
+            />
+          )}
+
+          {/* Work Log — incremental time entries during active task lifecycle */}
+          {['Assigned', 'In Progress', 'Follow-up Required', 'In Review'].includes(task.status) && (
+            <TimeEntryPanel
+              task={task}
+              currentUser={user}
+              onEntryAdded={loadTask}
             />
           )}
 
