@@ -26,6 +26,7 @@ export interface CreateTaskPayload {
   deadline?: string;
   estimatedHours?: number;
   wpId?: number;
+  issuanceNote?: string;
 }
 
 export const createTask = (payload: CreateTaskPayload): Promise<TaskEnriched> =>

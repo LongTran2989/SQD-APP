@@ -56,6 +56,7 @@ export default function NewTaskPage() {
   const [assignedToUserId, setAssignedToUserId] = useState<number | ''>('');
   const [deadline, setDeadline] = useState('');
   const [wpId, setWpId] = useState<number | ''>(prefilledWpId ?? '');
+  const [issuanceNote, setIssuanceNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // ── Data ──
@@ -134,6 +135,7 @@ export default function NewTaskPage() {
         assignedToUserId: assignedToUserId ? Number(assignedToUserId) : undefined,
         deadline: deadline || undefined,
         wpId: wpId ? Number(wpId) : undefined,
+        issuanceNote: issuanceNote.trim() || undefined,
       });
       toast.success(`Task ${task.taskId} created`);
       router.push(`/dashboard/tasks/${task.id}`);
@@ -311,6 +313,21 @@ export default function NewTaskPage() {
                   <Info className="w-3.5 h-3.5" /> Work package pre-selected from the work package page.
                 </p>
               )}
+            </div>
+
+            {/* Task Instruction (optional) */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="instruction-input">
+                Task Instruction <span className="font-normal text-slate-400">(optional)</span>
+              </label>
+              <textarea
+                id="instruction-input"
+                rows={3}
+                value={issuanceNote}
+                onChange={(e) => setIssuanceNote(e.target.value)}
+                placeholder="Add context or specific guidance for this task instance..."
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm resize-none"
+              />
             </div>
           </div>
 

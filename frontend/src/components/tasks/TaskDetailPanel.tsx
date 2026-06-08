@@ -71,6 +71,13 @@ export default function TaskDetailPanel({ task, currentUser }: TaskDetailPanelPr
           ) : '—'}
         </DetailRow>
 
+        {/* Task Instruction */}
+        {task.issuanceNote && (
+          <DetailRow label="Instruction">
+            <p className="whitespace-pre-wrap text-slate-700">{task.issuanceNote}</p>
+          </DetailRow>
+        )}
+
         {/* Issuer */}
         <DetailRow label="Issuer">
           <span className="flex items-center gap-1.5">

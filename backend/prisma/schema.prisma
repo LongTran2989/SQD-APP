@@ -222,6 +222,7 @@ model Task {
   rejectionReason    String?
   rating             Int?
   estimatedHours     Float?
+  issuanceNote       String?
   assignmentType     String    @default("INDIVIDUAL")
   schemaSnapshot     Json
 
