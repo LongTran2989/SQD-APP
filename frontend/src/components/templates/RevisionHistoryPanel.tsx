@@ -25,7 +25,12 @@ const fieldTypeLabels: Record<string, string> = {
   textarea: 'Text Area',
   number: 'Number',
   select: 'Dropdown',
-  checkbox: 'Checkbox',
+  radio: 'Radio',
+  checkbox_group: 'Checkboxes',
+  checkbox_single: 'Toggle',
+  date: 'Date',
+  file_upload: 'File Upload',
+  rich_text: 'Rich Text',
 };
 
 // ── Snapshot Preview Modal ─────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { FormField, TaskStatus } from '../../types';
 import { getDatasource } from '../../api/taskApi';
 import { Lock } from 'lucide-react';
+import RichTextEditor from '../ui/RichTextEditor';
 
 // ─── Statuses where the form is read-only ─────────────────────────────────────
 
@@ -237,6 +238,15 @@ function FieldRenderer({
           />
           <span className="text-sm text-slate-700">Yes</span>
         </label>
+      );
+
+    case 'rich_text':
+      return (
+        <RichTextEditor
+          value={(value as string) ?? ''}
+          onChange={disabled ? undefined : (html) => onChange(html)}
+          disabled={disabled}
+        />
       );
 
     case 'file_upload':
