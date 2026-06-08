@@ -152,6 +152,42 @@ export const getTimeEntries = (taskId: number): Promise<TimeEntry[]> =>
 export const getTimeEntrySummary = (taskId: number): Promise<TimeEntrySummary> =>
   apiClient.get(`/tasks/${taskId}/time-entries/summary`).then((r) => r.data);
 
+// ─── Analytics (Phase 7) ───────────────────────────────────────────────────────
+
+export interface TemplateEfficiencyRow {
+  templateId: number;
+  templateCode: string;
+  title: string;
+  taskCount: number;
+  avgActualHours: number | null;
+  avgEstimatedHours: number | null;
+  efficiencyRatio: number | null;
+  overBudgetCount: number;
+  topOverBudgetReason: string | null;
+}
+
+export interface StaffPerformanceRow {
+  userId: number;
+  name: string;
+  avgRating: number | null;
+  ratedTaskCount: number;
+  avgEfficiencyRatio: number | null;
+}
+
+export interface TimeBookingAnalytics {
+  templates: TemplateEfficiencyRow[];
+  staff: StaffPerformanceRow[];
+  incompleteBookings: number;
+}
+
+export const getTimeBookingAnalytics = async (params?: {
+  templateId?: number;
+  divisionId?: number;
+  from?: string;
+  to?: string;
+}): Promise<TimeBookingAnalytics> =>
+  apiClient.get('/analytics/time-booking', { params }).then((r) => r.data);
+
 // ─── Datasources (used in create form) ────────────────────────────────────────
 
 export const getDivisions = (): Promise<{ value: string; label: string }[]> =>
