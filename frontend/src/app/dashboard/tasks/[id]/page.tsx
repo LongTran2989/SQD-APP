@@ -17,7 +17,7 @@ import TimeEntryPanel from '../../../../components/tasks/TimeEntryPanel';
 import RaiseFindingPanel from '../../../../components/findings/RaiseFindingPanel';
 import { SeverityBadge, FindingStatusBadge } from '../../../../components/findings/FindingBadges';
 import toast from 'react-hot-toast';
-import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Clock } from 'lucide-react';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -250,6 +250,14 @@ export default function TaskDetailPage() {
         <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           You have unsaved changes. Click "Save Progress" to save your work.
+        </div>
+      )}
+
+      {/* Time booking required banner — Closed tasks with no booking block manager rating */}
+      {task.status === 'Closed' && !task.timeBooking && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+          <Clock className="w-4 h-4 flex-shrink-0" />
+          Time booking required — your manager cannot rate this task until you log your time.
         </div>
       )}
 
