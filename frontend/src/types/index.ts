@@ -502,3 +502,29 @@ export interface FindingDetail extends Finding {
   linksTo: FindingLinkRecord[];
   trend: TrendInfo;
 }
+
+export interface TimeEntryCollaborator {
+  userId: number;
+  hoursLogged: number;
+  notes: string;
+}
+
+export interface TimeEntry {
+  id: number;
+  taskId: number;
+  loggedByUserId: number;
+  loggedBy?: { id: number; name: string } | null;
+  sessionHours: number;
+  sessionNotes: string;
+  collaboratorEntries: TimeEntryCollaborator[];
+  overBudgetReason: string | null;
+  overBudgetNote: string | null;
+  loggedAt: string;
+}
+
+export interface TimeEntrySummary {
+  assigneeEntry: TimeBookingEntry;
+  collaborators: TimeBookingEntry[];
+  entryCount: number;
+  runningTotal: number;
+}

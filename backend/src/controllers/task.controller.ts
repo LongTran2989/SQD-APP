@@ -1505,7 +1505,8 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
         id: true,
         status: true,
         assignedToUserId: true,
-        rating: true
+        rating: true,
+        timeBooking: { select: { id: true } }
       }
     });
 
@@ -1522,6 +1523,13 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
 
     if (!task.assignedToUserId) {
       res.status(400).json({ message: 'Cannot rate an unassigned task' });
+      return;
+    }
+
+    if (task.status === 'Closed' && !task.timeBooking) {
+      res.status(400).json({
+        message: 'A time booking must be submitted before this task can be rated.'
+      });
       return;
     }
 

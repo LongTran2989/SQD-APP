@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { TaskEnriched, User, TimeBookingEntry } from '../../types';
-import { createTimeBooking, updateTimeBooking, getUsers } from '../../api/taskApi';
-import { Clock, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
+import { createTimeBooking, updateTimeBooking, getUsers, getTimeEntrySummary } from '../../api/taskApi';
+import { Clock, Plus, Trash2, Edit2, Check, X, Info } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -221,6 +221,9 @@ export default function TimeBookingPanel({ task, currentUser, onBookingChange }:
   const [myHours, setMyHours] = useState<number>(0);
   const [myNotes, setMyNotes] = useState('');
   const [collaborators, setCollaborators] = useState<CollaboratorDraft[]>([]);
+  const [entryCount, setEntryCount] = useState(0);
+  const [overBudgetReason, setOverBudgetReason] = useState('');
+  const [overBudgetNote, setOverBudgetNote] = useState('');
 
   const booking = task.timeBooking;
   const isAssignee = task.assignedToUserId === currentUser.id;
@@ -241,10 +244,22 @@ export default function TimeBookingPanel({ task, currentUser, onBookingChange }:
       setCollaborators(
         booking.collaborators.map((c) => ({ ...c, _key: nextKey() }))
       );
+      setOverBudgetReason('');
+      setOverBudgetNote('');
     } else if (!booking) {
       setMyHours(0);
       setMyNotes('');
       setCollaborators([]);
+      // Pre-fill from accumulated time entries (create mode only)
+      getTimeEntrySummary(task.id)
+        .then((summary) => {
+          if (summary.entryCount > 0) {
+            setMyHours(summary.assigneeEntry.hoursLogged);
+            setCollaborators(summary.collaborators.map((c) => ({ ...c, _key: nextKey() })));
+            setEntryCount(summary.entryCount);
+          }
+        })
+        .catch(() => {});
     }
   }, [isEditing, booking]);
 
@@ -271,6 +286,11 @@ export default function TimeBookingPanel({ task, currentUser, onBookingChange }:
       return;
     }
 
+    // Zero-hours soft warning
+    if (myHours === 0 && collaborators.every((c) => c.hoursLogged === 0)) {
+      if (!window.confirm('You are logging 0 hours. Continue?')) return;
+    }
+
     const assigneeUserId = isCreateMode
       ? currentUser.id
       : (task.assignedToUserId ?? currentUser.id);
@@ -286,6 +306,8 @@ export default function TimeBookingPanel({ task, currentUser, onBookingChange }:
         hoursLogged,
         notes,
       })),
+      overBudgetReason: overBudgetReason || null,
+      overBudgetNote: overBudgetNote || null,
     };
 
     setSubmitting(true);
@@ -343,6 +365,10 @@ export default function TimeBookingPanel({ task, currentUser, onBookingChange }:
   // Form UI
   const collaboratorUserIds = collaborators.map((c) => c.userId);
 
+  const totalFormHours = myHours + collaborators.reduce((sum, c) => sum + c.hoursLogged, 0);
+  const estimatedForBudget = isCreateMode ? task.estimatedHours : (booking?.estimatedHours ?? null);
+  const showOverBudget = estimatedForBudget !== null && totalFormHours > estimatedForBudget * 1.2;
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
@@ -364,6 +390,16 @@ export default function TimeBookingPanel({ task, currentUser, onBookingChange }:
       </div>
 
       <div className="space-y-4">
+        {/* Pre-fill banner — shown only in create mode when sessions exist */}
+        {isCreateMode && entryCount > 0 && (
+          <div className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-2">
+            <Info className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+            <span className="text-xs text-slate-500">
+              Pre-filled from {entryCount} logged session{entryCount !== 1 ? 's' : ''}. Adjust as needed.
+            </span>
+          </div>
+        )}
+
         {/* Own hours */}
         <div>
           <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
@@ -442,12 +478,41 @@ export default function TimeBookingPanel({ task, currentUser, onBookingChange }:
           </div>
         )}
 
+        {/* Over-budget reason — shown when total exceeds 120% of estimate */}
+        {showOverBudget && (
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Reason for exceeding estimate <span className="text-red-400">*</span>
+            </label>
+            <select
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={overBudgetReason}
+              onChange={(e) => setOverBudgetReason(e.target.value)}
+            >
+              <option value="">Select reason…</option>
+              <option value="COMPLEX_TASK">Complex task</option>
+              <option value="WAIT_TIME">Wait time needed</option>
+              <option value="ADDITIONAL_WORK">Additional work found</option>
+              <option value="OTHER">Other</option>
+            </select>
+            {overBudgetReason === 'OTHER' && (
+              <input
+                type="text"
+                placeholder="Describe the reason…"
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={overBudgetNote}
+                onChange={(e) => setOverBudgetNote(e.target.value)}
+              />
+            )}
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex items-center gap-2 pt-1">
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting || myHours < 0}
+            disabled={submitting || myHours < 0 || (showOverBudget && !overBudgetReason)}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors"
           >
             <Check className="w-4 h-4" />

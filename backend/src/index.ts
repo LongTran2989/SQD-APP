@@ -18,6 +18,7 @@ import findingRoutes from './routes/finding.routes';
 import taxonomyRoutes from './routes/taxonomy.routes';
 import feedRoutes from './routes/feed.routes';
 import escalationRoutes from './routes/escalation.routes';
+import analyticsRoutes from './routes/analytics.routes';
 
 dotenv.config();
 
@@ -42,6 +43,7 @@ app.use('/api/findings', findingRoutes);
 app.use('/api/taxonomy', taxonomyRoutes);
 app.use('/api/feeds', feedRoutes);
 app.use('/api/escalations', escalationRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {

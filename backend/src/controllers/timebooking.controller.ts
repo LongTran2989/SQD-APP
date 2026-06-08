@@ -267,3 +267,247 @@ export const updateTimeBooking = async (req: Request, res: Response): Promise<vo
     res.status(500).json({ message: 'Internal server error.' });
   }
 };
+
+// ─── POST /api/tasks/:id/time-entries ────────────────────────────────────────
+
+export const createTimeEntry = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId } = req.user!;
+
+    const task = await prisma.task.findUnique({ where: { id, deletedAt: null } });
+    if (!task) {
+      res.status(404).json({ message: 'Task not found.' });
+      return;
+    }
+
+    if (FINAL_TASK_STATUSES.includes(task.status) || task.status === 'Unassigned' || task.status === 'Inactive') {
+      res.status(400).json({ message: 'Time entries can only be logged on active tasks.' });
+      return;
+    }
+
+    if (task.assignedToUserId !== userId) {
+      res.status(403).json({ message: 'Only the task assignee can log time entries.' });
+      return;
+    }
+
+    const { sessionHours, sessionNotes, collaboratorEntries = [], overBudgetReason, overBudgetNote } = req.body;
+
+    if (typeof sessionHours !== 'number' || sessionHours < 0) {
+      res.status(400).json({ message: 'sessionHours must be a number >= 0.' });
+      return;
+    }
+
+    if (typeof sessionNotes !== 'string' || sessionNotes.trim() === '') {
+      res.status(400).json({ message: 'sessionNotes must be a non-empty string.' });
+      return;
+    }
+
+    if (!validateCollaborators(collaboratorEntries)) {
+      res.status(400).json({
+        message: 'collaboratorEntries must be an array where each item has userId (number), hoursLogged (number >= 0), and notes (string).'
+      });
+      return;
+    }
+
+    if (collaboratorEntries.find((c: BookingEntry) => c.userId === task.assignedToUserId)) {
+      res.status(400).json({ message: 'The assignee cannot also appear as a collaborator.' });
+      return;
+    }
+
+    // No duplicate userIds within the collaborator list
+    const seenCollaboratorIds = new Set<number>();
+    for (const c of collaboratorEntries as BookingEntry[]) {
+      if (seenCollaboratorIds.has(c.userId)) {
+        res.status(400).json({ message: 'Duplicate userId in collaboratorEntries.' });
+        return;
+      }
+      seenCollaboratorIds.add(c.userId);
+    }
+
+    // All collaborator userIds must correspond to real, non-deleted users
+    if (seenCollaboratorIds.size > 0) {
+      const validUsers = await prisma.user.findMany({
+        where: { id: { in: Array.from(seenCollaboratorIds) }, deletedAt: null },
+        select: { id: true }
+      });
+      if (validUsers.length !== seenCollaboratorIds.size) {
+        res.status(400).json({ message: 'One or more collaborator userIds do not exist.' });
+        return;
+      }
+    }
+
+    // Fetch existing entries to compute running total (needed for feed message and over-budget check)
+    const existingEntries = await prisma.timeEntry.findMany({
+      where: { taskId: id, loggedByUserId: userId }
+    });
+
+    const existingAssigneeHours = existingEntries.reduce((sum, e) => sum + e.sessionHours, 0);
+    const existingCollabHours = existingEntries.reduce((sum, e) => {
+      const collabs = Array.isArray(e.collaboratorEntries) ? (e.collaboratorEntries as unknown as BookingEntry[]) : [];
+      return sum + collabs.reduce((s, c) => s + c.hoursLogged, 0);
+    }, 0);
+    const newCollabHours = (collaboratorEntries as BookingEntry[]).reduce((sum, c) => sum + c.hoursLogged, 0);
+    const runningTotal = existingAssigneeHours + existingCollabHours + sessionHours + newCollabHours;
+
+    // Validate overBudgetReason format whenever it is supplied — regardless of budget status.
+    // This prevents arbitrary strings from being persisted even on under-budget entries.
+    const VALID_OVER_BUDGET_REASONS = ['COMPLEX_TASK', 'WAIT_TIME', 'ADDITIONAL_WORK', 'OTHER'];
+    if (overBudgetReason !== undefined && overBudgetReason !== null) {
+      if (!VALID_OVER_BUDGET_REASONS.includes(overBudgetReason as string)) {
+        res.status(400).json({ message: 'Invalid overBudgetReason value.' });
+        return;
+      }
+      if (overBudgetReason === 'OTHER') {
+        if (typeof overBudgetNote !== 'string' || overBudgetNote.trim() === '') {
+          res.status(400).json({ message: 'Please describe the reason in the notes field.' });
+          return;
+        }
+      }
+    }
+
+    // Require a reason when total logged hours exceed 120% of the estimate
+    if (task.estimatedHours !== null && runningTotal > task.estimatedHours * 1.2) {
+      if (!overBudgetReason) {
+        res.status(400).json({
+          message: 'An over-budget reason is required when total logged hours exceed 120% of the estimate.'
+        });
+        return;
+      }
+    }
+
+    const entry = await prisma.timeEntry.create({
+      data: {
+        taskId: id,
+        loggedByUserId: userId,
+        sessionHours,
+        sessionNotes,
+        collaboratorEntries: collaboratorEntries as any,
+        overBudgetReason: overBudgetReason ?? null,
+        overBudgetNote: overBudgetNote ?? null
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actionType: 'TIME_ENTRY_CREATE',
+        entityType: 'TimeEntry',
+        entityId: String(entry.id),
+        performedByUserId: userId,
+        comment: null,
+        details: {
+          sessionHours,
+          collaboratorCount: (collaboratorEntries as BookingEntry[]).length,
+          runningTotal
+        } as any
+      }
+    });
+
+    const collabCount = (collaboratorEntries as BookingEntry[]).length;
+    const feedContent =
+      `Session logged: ${sessionHours.toFixed(1)}h` +
+      (collabCount > 0 ? ` (+ ${collabCount} collaborator${collabCount !== 1 ? 's' : ''})` : '') +
+      `. Running total: ${runningTotal.toFixed(1)}h.`;
+
+    try {
+      await createFeedPost(prisma, {
+        type: 'SYSTEM_EVENT',
+        scope: 'TASK',
+        scopeId: id,
+        content: feedContent,
+        metadata: { sessionHours, collaboratorCount: collabCount, runningTotal },
+        authorId: null
+      });
+    } catch (err) {
+      console.error(`[createTimeEntry] feed post failed for taskId=${id}:`, err);
+    }
+
+    res.status(201).json(entry);
+  } catch (error) {
+    console.error('[createTimeEntry]', error);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+};
+
+// ─── GET /api/tasks/:id/time-entries ─────────────────────────────────────────
+
+export const getTimeEntries = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+
+    const task = await prisma.task.findUnique({ where: { id, deletedAt: null } });
+    if (!task) {
+      res.status(404).json({ message: 'Task not found.' });
+      return;
+    }
+
+    const entries = await prisma.timeEntry.findMany({
+      where: { taskId: id },
+      include: { loggedBy: { select: { id: true, name: true } } },
+      orderBy: { loggedAt: 'asc' }
+    });
+
+    res.status(200).json(entries);
+  } catch (error) {
+    console.error('[getTimeEntries]', error);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+};
+
+// ─── GET /api/tasks/:id/time-entries/summary ─────────────────────────────────
+
+export const getTimeEntrySummary = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+
+    const task = await prisma.task.findUnique({ where: { id, deletedAt: null } });
+    if (!task) {
+      res.status(404).json({ message: 'Task not found.' });
+      return;
+    }
+
+    if (task.assignedToUserId === null) {
+      res.status(200).json({
+        assigneeEntry: { userId: null, hoursLogged: 0, notes: '' },
+        collaborators: [],
+        entryCount: 0,
+        runningTotal: 0
+      });
+      return;
+    }
+
+    const entries = await prisma.timeEntry.findMany({
+      where: { taskId: id, loggedByUserId: task.assignedToUserId }
+    });
+
+    const assigneeHours = entries.reduce((sum, e) => sum + e.sessionHours, 0);
+
+    const collaboratorsMap = new Map<number, number>();
+    for (const entry of entries) {
+      const collabs = Array.isArray(entry.collaboratorEntries)
+        ? (entry.collaboratorEntries as unknown as BookingEntry[])
+        : [];
+      for (const c of collabs) {
+        collaboratorsMap.set(c.userId, (collaboratorsMap.get(c.userId) ?? 0) + c.hoursLogged);
+      }
+    }
+
+    const collaborators = Array.from(collaboratorsMap.entries()).map(([userId, hoursLogged]) => ({
+      userId,
+      hoursLogged,
+      notes: ''
+    }));
+
+    const runningTotal = assigneeHours + collaborators.reduce((sum, c) => sum + c.hoursLogged, 0);
+
+    res.status(200).json({
+      assigneeEntry: { userId: task.assignedToUserId, hoursLogged: assigneeHours, notes: '' },
+      collaborators,
+      entryCount: entries.length,
+      runningTotal
+    });
+  } catch (error) {
+    console.error('[getTimeEntrySummary]', error);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+};

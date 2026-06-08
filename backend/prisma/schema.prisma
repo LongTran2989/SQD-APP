@@ -79,6 +79,7 @@ model User {
   workPackageAssignments WorkPackageAssignment[]
   createdWorkPackages    WorkPackage[]           @relation("WorkPackageCreator")
   feedPosts              FeedPost[]
+  timeEntries            TimeEntry[] @relation("UserTimeEntries")
 
   // Findings expansion reverse relations (virtual — no columns added)
   rcaInvestigations   RcaInvestigation[] @relation("RcaConductedBy")
@@ -237,6 +238,7 @@ model Task {
   taskData       TaskData?
   sourceFindings Finding[]    @relation("FindingSourceTask")
   timeBooking    TimeBooking?
+  timeEntries    TimeEntry[]  @relation("TaskTimeEntries")
 
   // CAPA reverse relations (virtual — no columns added, no behaviour change)
   capaLinks CapaTaskLink[] @relation("CapaLinkedTasks")
@@ -245,6 +247,11 @@ model Task {
   createdAt   DateTime  @default(now())
   completedAt DateTime?
   updatedAt   DateTime  @updatedAt
+
+  @@index([status, deletedAt])
+  @@index([targetDivisionId, status, deletedAt])
+  @@index([templateId, status, deletedAt])
+  @@index([completedAt])
 }
 
 model TaskData {
@@ -636,15 +643,35 @@ model EscalationFlag {
 }
 
 model TimeBooking {
+  id               Int      @id @default(autoincrement())
+  taskId           Int      @unique
+  task             Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  assigneeEntry    Json
+  collaborators    Json
+  totalHours       Float
+  estimatedHours   Float?
+  overBudgetReason String?
+  overBudgetNote   String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model TimeEntry {
   id             Int      @id @default(autoincrement())
-  taskId         Int      @unique
-  task           Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  assigneeEntry  Json
-  collaborators  Json
-  totalHours     Float
-  estimatedHours Float?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  taskId         Int
+  task           Task     @relation("TaskTimeEntries", fields: [taskId], references: [id], onDelete: Cascade)
+  loggedByUserId Int
+  loggedBy       User     @relation("UserTimeEntries", fields: [loggedByUserId], references: [id])
+
+  sessionHours        Float
+  sessionNotes        String
+  collaboratorEntries Json
+  overBudgetReason    String?
+  overBudgetNote      String?
+  loggedAt            DateTime @default(now())
+
+  @@index([taskId, loggedAt])
+  @@index([loggedByUserId])
 }
 
 // -----------------------------------------------------------------------

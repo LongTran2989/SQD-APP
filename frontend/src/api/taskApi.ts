@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry } from '../types';
+import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry, TimeEntry, TimeEntrySummary } from '../types';
 
 // ─── List endpoints ────────────────────────────────────────────────────────────
 
@@ -140,6 +140,53 @@ export const updateTimeBooking = (
   payload: TimeBookingPayload
 ): Promise<TimeBooking> =>
   apiClient.put(`/tasks/${id}/time-booking`, payload).then((r) => r.data);
+
+// ─── Time Entries (Phase 6.1) ──────────────────────────────────────────────────
+
+export const createTimeEntry = (taskId: number, payload: object): Promise<TimeEntry> =>
+  apiClient.post(`/tasks/${taskId}/time-entries`, payload).then((r) => r.data);
+
+export const getTimeEntries = (taskId: number): Promise<TimeEntry[]> =>
+  apiClient.get(`/tasks/${taskId}/time-entries`).then((r) => r.data);
+
+export const getTimeEntrySummary = (taskId: number): Promise<TimeEntrySummary> =>
+  apiClient.get(`/tasks/${taskId}/time-entries/summary`).then((r) => r.data);
+
+// ─── Analytics (Phase 7) ───────────────────────────────────────────────────────
+
+export interface TemplateEfficiencyRow {
+  templateId: number;
+  templateCode: string;
+  title: string;
+  taskCount: number;
+  avgActualHours: number | null;
+  estimatedHours: number | null;
+  efficiencyRatio: number | null;
+  overBudgetCount: number;
+  topOverBudgetReason: string | null;
+}
+
+export interface StaffPerformanceRow {
+  userId: number;
+  name: string;
+  avgRating: number | null;
+  ratedTaskCount: number;
+  avgEfficiencyRatio: number | null;
+}
+
+export interface TimeBookingAnalytics {
+  templates: TemplateEfficiencyRow[];
+  staff: StaffPerformanceRow[];
+  incompleteBookings: number;
+}
+
+export const getTimeBookingAnalytics = async (params?: {
+  templateId?: number;
+  divisionId?: number;
+  from?: string;
+  to?: string;
+}): Promise<TimeBookingAnalytics> =>
+  apiClient.get('/analytics/time-booking', { params }).then((r) => r.data);
 
 // ─── Datasources (used in create form) ────────────────────────────────────────
 

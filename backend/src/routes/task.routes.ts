@@ -23,7 +23,7 @@ import {
   getTaskActivity,
   postTaskComment
 } from '../controllers/task.controller';
-import { createTimeBooking, updateTimeBooking } from '../controllers/timebooking.controller';
+import { createTimeBooking, updateTimeBooking, createTimeEntry, getTimeEntries, getTimeEntrySummary } from '../controllers/timebooking.controller';
 
 const router = Router();
 
@@ -72,5 +72,10 @@ router.post('/:id/activity', postTaskComment);
 // ─── Time Booking (Phase 5.6) ─────────────────────────────────────────
 router.post('/:id/time-booking', createTimeBooking);
 router.put('/:id/time-booking', updateTimeBooking);
+
+// ─── Time Entries (Phase 6.1) ─────────────────────────────────────────
+router.post('/:id/time-entries', createTimeEntry);
+router.get('/:id/time-entries', getTimeEntries);
+router.get('/:id/time-entries/summary', getTimeEntrySummary);
 
 export default router;
