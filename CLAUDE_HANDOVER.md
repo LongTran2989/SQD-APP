@@ -168,6 +168,34 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   
   **Tests:** All 307 backend tests passing. Frontend migrated to CapaTaskLink model (types, API, CapaPanel components).
 
+- **Finding Response Actions + Standalone Findings** (✅ **COMPLETE**, 2026-06-09 — branch `claude/compassionate-gauss-335xa3`)
+  > **Phases 1–8 complete. 322 backend tests passing.**
+
+  **Backend changes:**
+  - **New model `FindingResponseAction`** — created atomically with each response-action follow-up task. Stores `type` (CAR | NCR | QN | QR | IR | Dissemination), `taskId`, `targetDepartmentIds` (JSON int-array, all six types require ≥1 dept), optional `procedureRef` + `note`, `createdByUserId`, `findingId`, soft-delete `deletedAt`. Dual-writes `RESPONSE_ACTION_CREATED` to AuditLog + FeedPost.
+  - **`Task` model additions** — `responseActionType String?` and `requiresDirectorApproval Boolean @default(false)`. Populated server-side when a follow-up task is generated as a response action. `requiresDirectorApproval` derived from `responseActionType ∈ DIRECTOR_APPROVAL_TYPES` — **never trusted from client**.
+  - **`findingExpansion.ts` constants** — `RESPONSE_ACTION_TYPES`, `MULTI_DEPT_SINGLE_TASK_TYPES`, `DIRECTOR_APPROVAL_TYPES`, `ResponseActionType` union type, `RESPONSE_ACTION_CREATED` audit string.
+  - **`finding.controller.ts` changes:**
+    - `createFinding` / `createFindingService` — `taskId` now optional; standalone path requires `targetDivisionId` (division verified in DB). Same `POST /api/findings` endpoint — no new route.
+    - `generateFollowUpTasks` — extended per-row validation for `responseActionType` (type check, ≥1 dept, single-dept-per-row enforcement for CAR/NCR/QR/IR), dept existence check, `FindingResponseAction` row creation, dual-write audit.
+    - `getFindingById` — `followUpTasks` select extended with `responseActionType` + `requiresDirectorApproval`; `responseActions` relation included with dept-name resolution (batch `findMany` → `Record<id,name>` map).
+  - **`task.controller.ts` — Director-only gate in `reviewTask`:** After status check, before self-approval check: `if (task.requiresDirectorApproval && role !== 'Director') → 403`. QN tasks are blocked for all non-Directors including the Issuer. The Issuer exception does NOT apply.
+  - **15 new tests (RAC-01 → RAC-15)** in `finding.test.ts`: IR/CAR/QN creation, multi-dept, Director-only gate, error paths, response action serialisation, backward-compat (no type = standard task). Baseline 307 → **322 passing**.
+
+  **Frontend changes (Phases 5–8):**
+  - `types/index.ts` — `ResponseActionType` union, `ResolvedDepartment`, `FindingResponseAction` interfaces; `Task` + `FindingFollowUpTask` extended with `responseActionType` + `requiresDirectorApproval`; `FindingDetail.responseActions` array.
+  - `api/findingApi.ts` — `RaiseFindingPayload.taskId` now optional + `targetDivisionId` added; `FollowUpTaskInput` extended with `responseActionType`, `targetDepartmentIds`, `note`, `procedureRef`.
+  - `RaiseFindingPanel.tsx` — `taskId` prop optional; division picker (from `getDivisionsApi`) shown when no `taskId`; conditional spread in `raiseFinding` call.
+  - `findings/page.tsx` — amber "Raise Finding" button in page header; standalone `RaiseFindingPanel` (no `taskId`); refreshes list on success.
+  - `GenerateFollowUpModal.tsx` — Response Action Type select per row; dept picker (single for CAR/NCR/QR/IR, multi-checkbox for QN/Dissemination); template list filtered to matching `t.type`; client-side validation; payload includes response action fields.
+  - `FindingBadges.tsx` — `ResponseActionBadge` component (colour-coded per type).
+  - `findings/[id]/page.tsx` — follow-up task rows show `ResponseActionBadge`, "Director approval required" text, and resolved target department names.
+  - `TaskDetailPanel.tsx` — "Response Action" `DetailRow` after Instruction row; purple Director-approval banner with `ShieldCheck` icon.
+
+  **Design decisions locked:**
+  - `Template.type String?` repurposed for response-action template categorisation (Admin sets `type = 'CAR'` etc.). Modal filters templates by `t.type === responseActionType` when a type is selected.
+  - Per-dept QN tracking deferred to Change Management phase.
+
 - **Feed & Escalation System** (Phases 1–5 + post-ship UX — ✅ **COMPLETE**, 2026-06-05) — `FEED_ESCALATION_PLAN.md` is the living source of truth for this feature; OBJECT H documents the schema. Branch `claude/sqd-feed-escalation-plan-4dYZa` (NOT yet merged to `main`). End-user + developer manuals: `FEED_ESCALATION_USER_GUIDE.md` + `FEED_ESCALATION_DEV_GUIDE.md`; manual test checklist: `FEED_ESCALATION_TEST_CHECKLIST.md`.
   - **Phase 1–5** — see previous entries (schema migration, feed API, escalation core, flag lifecycle, badges/polish/docs). 260 backend tests on that branch.
   - **Post-ship UX (branch `claude/eloquent-feynman-G4thG`)** — The Escalations page (`/dashboard/escalations`) now **retains the full escalation history** (PENDING + ACTIONED + DISMISSED), not just the live pending queue:
@@ -188,7 +216,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
 ### Test Suite
-- **262 integration tests passing** on branch `claude/eloquent-feynman-G4thG` (Feed & Escalation full history page, 2026-06-05). **260** on `claude/sqd-feed-escalation-plan-4dYZa` (Phases 1–5). `main` is at **211** (Feed Phases 1–2). Pre-feed baseline was **187** (Phase 6, 2026-06-01). Frontend lint at baseline **70 errors / 23 warnings (zero new)**; `tsc --noEmit` clean (except legacy `clean.ts`); `next build` exit 0.
+- **322 integration tests passing** on branch `claude/compassionate-gauss-335xa3` (Finding Response Actions, 2026-06-09). **262** on `claude/eloquent-feynman-G4thG` (Feed & Escalation full history page, 2026-06-05). **260** on `claude/sqd-feed-escalation-plan-4dYZa` (Phases 1–5). `main` is at **211** (Feed Phases 1–2). Pre-feed baseline was **187** (Phase 6, 2026-06-01). Frontend lint at baseline **70 errors / 23 warnings (zero new)**; `tsc --noEmit` clean (except legacy `clean.ts`); `next build` exit 0.
 - Run via `npm run test` inside `/backend`
 - Always runs against `sqd_qa_test_db` — never the dev DB
 - Test setup globally disables `ENFORCE_SINGLE_SESSION` to allow test JWTs without `activeSessionId`
@@ -218,6 +246,8 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 Roles in order of privilege: `Director` > `Admin` > `Manager` > `Group Leader` > `Staff`
 
 Admin can reconfigure which roles hold which privileges via the Global Privilege Management panel (see Section 3.4).
+
+**Director-only gate for `requiresDirectorApproval` tasks (added 2026-06-09):** In `task.controller.ts → reviewTask`, before any other review logic, the handler checks `task.requiresDirectorApproval`. If `true` and the reviewer's `role !== 'Director'`, the request is rejected with **403 Forbidden**. This gate applies to all non-Directors — including the Issuer (the normal Issuer exception does **not** apply). Currently only QN response-action tasks set this flag. `requiresDirectorApproval` is **always derived server-side** from `responseActionType ∈ DIRECTOR_APPROVAL_TYPES` — never trusted from the client.
 
 ### 3.4 Global Privilege Management
 
@@ -489,6 +519,8 @@ These are two separate systems that serve different purposes. **Both** are writt
 | `schemaSnapshot` | Json | **ADD** — immutable copy of `formSchema` at the moment of Task creation. This is the form definition used to render the Task, independent of the source Template. Required to support One-off Templates and Template edits without breaking in-flight Tasks |
 
 | `issuanceNote` | String? | **ADDED 2026-06-08** — Optional free-text context written by the issuer at creation time. Write-once. Displayed on task detail panel below the Template row. Not logged to AuditLog (static context, not a status event) |
+| `responseActionType` | String? | **ADDED 2026-06-09** — one of `CAR \| NCR \| QN \| QR \| IR \| Dissemination`. Populated when the Task is generated as a formal response action from a Finding. Null for standard follow-up tasks |
+| `requiresDirectorApproval` | Boolean | **ADDED 2026-06-09** — default `false`. Derived server-side from `responseActionType ∈ DIRECTOR_APPROVAL_TYPES` (currently: `QN` only). When `true`, only `role === 'Director'` may review the task. **Never trusted from the client.** The Issuer exception does NOT apply |
 
 **Keep existing:** `templateId`, `assignedToUserId`, `targetDivisionId`, `parentFindingId`, `taskData`, `sourceFindings`, `createdAt`, `completedAt`, `updatedAt`
 
@@ -724,10 +756,31 @@ These are two separate systems that serve different purposes. **Both** are writt
 |---|---|---|
 | `status` | Enum | See below |
 | `dueDate` | DateTime? | SLA deadline for resolution |
-| `sourceTaskId` | Int | Task the finding was raised on |
+| `sourceTaskId` | Int? | Task the finding was raised on. **NULLABLE** — standalone findings (raised via the Findings page without a task) have `null` here; `targetDivisionId` is required instead |
+| `targetDivisionId` | Int | Division used for RBAC scoping. Required on all findings — inferred from the source task's division when `sourceTaskId` is set; explicitly supplied for standalone findings |
 | `reportedByUserId` | Int | User who raised the finding |
 | `closedByUserId` | Int? | |
 | `createdAt` / `closedAt` | DateTime | |
+
+**Standalone finding raise path (added 2026-06-09):** `POST /api/findings` now accepts findings with no `taskId`. When `taskId` is omitted, `targetDivisionId` must be supplied and is verified to exist in the DB. The Findings list page has an amber "Raise Finding" button that opens the panel in this mode. The `RaiseFindingPanel` component renders a division picker when no `taskId` prop is passed.
+
+**`FindingResponseAction` model (added 2026-06-09):** Links a `Finding` to one of its follow-up `Task`s and carries the formal response-action metadata. Created atomically when a follow-up task is generated as a response action (from `POST /api/findings/:id/tasks`).
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | Int | |
+| `findingId` | Int | FK to `Finding` |
+| `type` | String | One of `CAR \| NCR \| QN \| QR \| IR \| Dissemination` |
+| `taskId` | Int? | FK to the generated Task (null only in error state) |
+| `targetDepartmentIds` | Json | Int array — all six types require ≥1 dept |
+| `targetDepartments` | Computed | Resolved `{ id, name }` objects (batch-fetched in `getFindingById`) |
+| `procedureRef` | String? | Optional reference to a procedure/regulation |
+| `note` | String? | Optional free-text note |
+| `createdByUserId` | Int | User who triggered generation |
+| `deletedAt` | DateTime? | Soft-delete (compliance mandate) |
+| `createdAt` / `updatedAt` | DateTime | |
+
+Response action constants live in `backend/src/services/findingExpansion.ts`: `RESPONSE_ACTION_TYPES`, `MULTI_DEPT_SINGLE_TASK_TYPES` (QN, Dissemination — one task for all depts), `DIRECTOR_APPROVAL_TYPES` (QN only — blocks non-Directors from reviewing the task).
 
 **Severity definitions (set by Manager/Director, not the reporter):**
 
@@ -874,6 +927,10 @@ All changes needed before Phase 5 development begins:
 | `Finding` | CHANGE field | `category String?` — made nullable (was required; raise payload does not include it) |
 | `Task` | ADD field | `title String?` — nullable; used for editable follow-up task titles |
 | `Task` | ADD field | `issuanceNote String?` — nullable; optional free-text context written at issuance. Added 2026-06-08 |
+| `Task` | ADD field | `responseActionType String?` — one of `CAR \| NCR \| QN \| QR \| IR \| Dissemination`. Populated server-side when task is generated as a response action. Added 2026-06-09 |
+| `Task` | ADD field | `requiresDirectorApproval Boolean @default(false)` — derived server-side from `responseActionType ∈ DIRECTOR_APPROVAL_TYPES`. When `true`, only Directors may review. Added 2026-06-09 |
+| `Finding` | CHANGE field | `sourceTaskId Int` → `sourceTaskId Int?` (nullable) — standalone findings have no source task. Added 2026-06-09 |
+| **NEW (2026-06-09)** | CREATE model | `FindingResponseAction` — links a Finding to a response-action follow-up Task; stores `type`, `taskId`, `targetDepartmentIds` (Json), `procedureRef`, `note`, `createdByUserId`, `deletedAt` |
 | `AuditLog` | CHANGE | `entityId Int` → `entityId String` |
 | `User`, `Task`, `Finding` | ADD field | `deletedAt DateTime?` (soft delete) |
 | **NEW** | CREATE model | `WorkPackage` |
@@ -1055,6 +1112,12 @@ Extends Phase 5.6 Time Booking with deeper audit trail, mandatory enforcement, o
 28. **Manager RBAC for analytics is enforced in the DB `WHERE` clause, not post-fetch JS:** `getTimeBookingAnalytics` sets `targetDivisionId` in the Prisma `where` object before the query runs. Never add a post-fetch JS filter instead — it will silently expose data if the DB result is ever paginated or partially loaded.
 
 29. **`TimeEntry` has no `updatedAt` and must never be mutated:** The model is intentionally append-only (immutable audit trail). Adding `updatedAt` or writing an update endpoint would break the compliance intent. If a time entry contains an error, a corrective entry should be added and the discrepancy noted in `notes`.
+
+30. **`Template.type` is repurposed for response-action template categorisation (2026-06-09):** The `type String?` field on `Template` was originally noted as "reserved for future classification." It is now actively used to associate templates with response action types: Admin sets `type = 'CAR'`, `type = 'NCR'`, etc. `GenerateFollowUpModal` filters the template dropdown to `t.type === responseActionType` when a type is selected. Untyped templates (`type = null`) appear in the list only when no response action type is selected.
+
+31. **`requiresDirectorApproval` is always server-derived — never trust the client:** The flag is set by `generateFollowUpTasks` based on `responseActionType ∈ DIRECTOR_APPROVAL_TYPES`. The client-side `Task` interface includes it for display purposes only (purple banner in `TaskDetailPanel`, text label in finding follow-up list). If a client somehow sends `requiresDirectorApproval: false` in a request body, the server ignores it and re-derives from `responseActionType`.
+
+32. **Per-department QN task tracking deferred to Change Management phase:** QN (Quality Notice) tasks currently set `requiresDirectorApproval = true` and record all target departments in `FindingResponseAction.targetDepartmentIds`. Per-department completion tracking (one task per dept, tracked individually) is deferred to the Change Management phase. The current implementation creates a single task regardless of how many departments are selected for QN/Dissemination types.
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 

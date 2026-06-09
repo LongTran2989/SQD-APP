@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { TaskEnriched, User } from '../../types';
 import TaskStatusBadge from './TaskStatusBadge';
 import StarRating from './StarRating';
-import { AlertTriangle, Calendar, Clock, User as UserIcon, Link as LinkIcon, Briefcase } from 'lucide-react';
+import { AlertTriangle, Calendar, Clock, User as UserIcon, Link as LinkIcon, Briefcase, ShieldCheck } from 'lucide-react';
+import { ResponseActionBadge } from '../findings/FindingBadges';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,19 @@ export default function TaskDetailPanel({ task, currentUser }: TaskDetailPanelPr
           <DetailRow label="Instruction">
             <p className="whitespace-pre-wrap text-slate-700">{task.issuanceNote}</p>
           </DetailRow>
+        )}
+
+        {/* Response Action */}
+        {task.responseActionType && (
+          <DetailRow label="Response Action">
+            <ResponseActionBadge type={task.responseActionType} />
+          </DetailRow>
+        )}
+        {task.requiresDirectorApproval && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg bg-purple-50 border border-purple-200 px-3 py-2 text-sm text-purple-700">
+            <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+            This task requires Director approval before it can be closed.
+          </div>
         )}
 
         {/* Issuer */}

@@ -68,3 +68,22 @@ export function LinkTypeBadge({ linkType }: { linkType: FindingLinkType }) {
   const cfg = LINK_TYPE_CONFIG[linkType];
   return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${cfg.color}`}>{cfg.label}</span>;
 }
+
+// ─── Response Action ──────────────────────────────────────────────────────────
+
+const RESPONSE_ACTION_STYLES: Record<string, string> = {
+  IR:            'bg-blue-100 text-blue-700',
+  CAR:           'bg-amber-100 text-amber-700',
+  NCR:           'bg-amber-100 text-amber-700',
+  QR:            'bg-orange-100 text-orange-700',
+  QN:            'bg-purple-100 text-purple-700',
+  Dissemination: 'bg-green-100 text-green-700',
+};
+
+export function ResponseActionBadge({ type }: { type: string }) {
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${RESPONSE_ACTION_STYLES[type] ?? 'bg-slate-100 text-slate-600'}`}>
+      {type}
+    </span>
+  );
+}

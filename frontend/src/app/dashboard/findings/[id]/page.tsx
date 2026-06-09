@@ -7,7 +7,7 @@ import { useAuthStore } from '../../../../store/authStore';
 import { FindingDetail, TaskEnriched, TaskActivityEnriched } from '../../../../types';
 import { getFindingById, closeFinding } from '../../../../api/findingApi';
 import { getTaskById, getTaskActivity } from '../../../../api/taskApi';
-import { SeverityBadge, FindingStatusBadge } from '../../../../components/findings/FindingBadges';
+import { SeverityBadge, FindingStatusBadge, ResponseActionBadge } from '../../../../components/findings/FindingBadges';
 import ReviewPanel from '../../../../components/findings/ReviewPanel';
 import GenerateFollowUpModal from '../../../../components/findings/GenerateFollowUpModal';
 import RcaPanel from '../../../../components/findings/RcaPanel';
@@ -205,9 +205,28 @@ export default function FindingDetailPage() {
                     href={`/dashboard/tasks/${t.id}`}
                     className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-xs font-mono font-semibold text-blue-600 flex-shrink-0">{t.taskId}</span>
-                      <span className="text-sm text-slate-700 truncate">{t.title ?? '—'}</span>
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-mono font-semibold text-blue-600 flex-shrink-0">{t.taskId}</span>
+                        <span className="text-sm text-slate-700 truncate">{t.title ?? '—'}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {t.responseActionType && (
+                          <ResponseActionBadge type={t.responseActionType} />
+                        )}
+                        {t.requiresDirectorApproval && (
+                          <span className="text-xs text-purple-600 font-medium">Director approval required</span>
+                        )}
+                        {(() => {
+                          const ra = finding.responseActions?.find((a) => a.taskId === t.id);
+                          if (!ra?.targetDepartments?.length) return null;
+                          return (
+                            <span className="text-xs text-slate-500">
+                              → {ra.targetDepartments.map((d) => d.name).join(', ')}
+                            </span>
+                          );
+                        })()}
+                      </div>
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       <span className="text-xs text-slate-400">{t.assignedToUser?.name ?? 'Unassigned'}</span>

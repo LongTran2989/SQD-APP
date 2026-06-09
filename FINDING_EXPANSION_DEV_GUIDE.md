@@ -98,6 +98,26 @@ A **Finding** starts as a bare compliance record (Phase 6 core). The expansion p
 - `HazardTag` — `name`, `isActive`
 - `FindingHazardTag` — join table, hard deleted on taxonomy update (replaced wholesale)
 
+### `FindingResponseAction` (added 2026-06-09 — Response Actions feature)
+
+Links a `Finding` to one of its follow-up `Task`s and carries the formal response-action metadata. Created atomically in `generateFollowUpTasks` when a row has a `responseActionType`. One record per (finding, task) pair.
+
+- `findingId`, `type`: one of `'CAR' | 'NCR' | 'QN' | 'QR' | 'IR' | 'Dissemination'`
+- `taskId Int?` — the generated follow-up task (null only in error state)
+- `targetDepartmentIds Json` — int array; all six types require ≥1 dept
+- `procedureRef String?`, `note String?`
+- `createdByUserId` — user who triggered generation
+- `deletedAt DateTime?` — soft-delete (compliance mandate)
+
+Response action constants live in `backend/src/services/findingExpansion.ts` (same file as other constants):
+- `RESPONSE_ACTION_TYPES` — full list of six types
+- `MULTI_DEPT_SINGLE_TASK_TYPES` — `['QN', 'Dissemination']` — one task covers all depts
+- `DIRECTOR_APPROVAL_TYPES` — `['QN']` — sets `requiresDirectorApproval = true` on the task
+
+When a follow-up task is generated as a response action, two task fields are also populated server-side:
+- `Task.responseActionType String?` — copied from the row's `responseActionType`
+- `Task.requiresDirectorApproval Boolean` — `true` when `type ∈ DIRECTOR_APPROVAL_TYPES`
+
 ---
 
 ## 4. RBAC — one file, three predicates
@@ -320,6 +340,30 @@ Called from `task.controller.ts` after any task reaches a final status (`Closed 
 | `types/index.ts` | `RcaInvestigation`, `CapaAction`, `CapaTaskLink`, `FindingLink`, `TrendInfo`, `FindingDetail` interfaces added; `FindingStatus` includes `'Dismissed'` |
 | `app/dashboard/findings/[id]/page.tsx` | Integrates all four new panels; passes `trendInfo` to `TrendBanner` |
 
+### Response Actions feature additions (2026-06-09, branch `claude/compassionate-gauss-335xa3`)
+
+**Backend — modified files:**
+
+| File | Change |
+|---|---|
+| `services/findingExpansion.ts` | Added `RESPONSE_ACTION_TYPES`, `MULTI_DEPT_SINGLE_TASK_TYPES`, `DIRECTOR_APPROVAL_TYPES`, `ResponseActionType`, `RESPONSE_ACTION_CREATED` audit string |
+| `controllers/finding.controller.ts` | `createFinding` / `createFindingService` — `taskId` optional; standalone path requires `targetDivisionId`. `generateFollowUpTasks` — response action validation + `FindingResponseAction` creation + `Task.responseActionType` / `requiresDirectorApproval` population. `getFindingById` — `responseActions` relation included |
+| `controllers/task.controller.ts` | `reviewTask` — Director-only gate: checks `task.requiresDirectorApproval` before any other review logic → 403 for non-Directors |
+| `prisma/schema.prisma` | Added `FindingResponseAction` model; added `responseActionType String?` + `requiresDirectorApproval Boolean @default(false)` to `Task`; made `Finding.sourceTaskId` nullable |
+
+**Frontend — modified files:**
+
+| File | Change |
+|---|---|
+| `types/index.ts` | `ResponseActionType` union; `ResolvedDepartment`, `FindingResponseAction` interfaces; `Task` + `FindingFollowUpTask` extended with `responseActionType` + `requiresDirectorApproval`; `FindingDetail.responseActions` array |
+| `api/findingApi.ts` | `RaiseFindingPayload.taskId` optional + `targetDivisionId` added; `FollowUpTaskInput` extended with response action fields |
+| `components/findings/RaiseFindingPanel.tsx` | `taskId` prop optional; division picker shown when no `taskId`; conditional spread in `raiseFinding` call |
+| `app/dashboard/findings/page.tsx` | Amber "Raise Finding" button; standalone `RaiseFindingPanel` (no `taskId`) |
+| `components/findings/GenerateFollowUpModal.tsx` | Response Action Type select per row; dept picker (single for CAR/NCR/QR/IR, multi-checkbox for QN/Dissemination); template list filtered by `t.type`; payload includes response action fields |
+| `components/findings/FindingBadges.tsx` | `ResponseActionBadge` component added |
+| `app/dashboard/findings/[id]/page.tsx` | Follow-up task rows show `ResponseActionBadge`, "Director approval required" text, resolved target dept names |
+| `components/tasks/TaskDetailPanel.tsx` | "Response Action" `DetailRow`; purple Director-approval banner with `ShieldCheck` icon |
+
 ---
 
 ## 10. Naming and code conventions
@@ -356,6 +400,12 @@ Called from `task.controller.ts` after any task reaches a final status (`Closed 
 
 9. **Run `npx prisma generate` after any schema change (Rule 9).** The expansion models are all new — a stale client will treat `prisma.rcaInvestigation` as `undefined`.
 
+10. **`Template.type` is repurposed for response-action categorisation (2026-06-09).** Admin sets `type = 'CAR'`, `type = 'NCR'`, etc. on a template. `GenerateFollowUpModal` filters the dropdown to `t.type === responseActionType` when a type is selected; untyped templates appear only when no response action type is selected. Do not add a separate field for this — the existing `type String?` column is the correct place.
+
+11. **`requiresDirectorApproval` is always derived server-side — never set it from the client.** The flag is computed from `responseActionType ∈ DIRECTOR_APPROVAL_TYPES` in `generateFollowUpTasks`. The client receives it read-only for display (purple banner, "Director approval required" label). If you add a new response action type that should block non-Directors from reviewing, add it to `DIRECTOR_APPROVAL_TYPES` in `findingExpansion.ts` — nothing else needs to change.
+
+12. **Per-department QN task tracking is deferred.** QN tasks currently create one task regardless of how many target departments are selected; all dept IDs are stored in `FindingResponseAction.targetDepartmentIds` for future reference. Individual-per-dept task creation is deferred to the Change Management phase.
+
 ---
 
 ## 12. How to run and test
@@ -367,10 +417,10 @@ cd backend && npm run dev
 REM Frontend (port 3000)
 cd frontend && npm run dev
 
-REM Backend tests — ALWAYS sqd_qa_test_db (Rule 8); 307 must pass
+REM Backend tests — ALWAYS sqd_qa_test_db (Rule 8); 322 must pass
 cd backend && npm run test:setup && npm run test
 cd backend && npm run test -- findingExpansion.test.ts   REM expansion suite only
-cd backend && npm run test -- finding.test.ts            REM core finding suite
+cd backend && npm run test -- finding.test.ts            REM core finding suite (includes RAC-01–RAC-15 response action tests)
 
 REM Frontend type-check
 cd frontend && npx tsc --noEmit 2>&1 | head -20
@@ -380,7 +430,7 @@ cd frontend && npx tsc --noEmit 2>&1 | head -20
 
 | Suite | Groups | Tests |
 |---|---|---|
-| `finding.test.ts` | 14 groups (F01–F14, Admin) | Core lifecycle: raise, review, tasks, advance, close, dismiss, severity, taxonomy, visibility |
+| `finding.test.ts` | 14 groups (F01–F14, Admin) + RAC-01–RAC-15 response action group | Core lifecycle: raise, review, tasks, advance, close, dismiss, severity, taxonomy, visibility; + response actions (IR/CAR/QN creation, multi-dept, Director-only gate, error paths, backward-compat) |
 | `findingExpansion.test.ts` | 16 groups (R01–R08, C01–C14, LR01–LR04, TR01–TR02, C-SEC-1–C-SEC-5c) | RCA, CAPA (including verify/waive/links/close-gate), finding links, trend, Manager scope guards |
 
 The expansion suite uses shared helpers defined at the top of the file (`createFinding`, `reviewFinding`, `loginAs`, `linkTwoFindings`, etc.) to avoid test-setup boilerplate. Read those helpers before writing new tests.
@@ -395,7 +445,7 @@ All routes are under `/api/findings/:id` and require a valid JWT (`Bearer <token
 | Method | Path | Who | Notes |
 |---|---|---|---|
 | `GET` | `/api/findings` | All | `?status=`, `?severity=`, `?divisionId=`, `?reportedBy=`, `?taskId=` query params |
-| `POST` | `/api/findings` | All | `allowsFindings` gate on source task's template |
+| `POST` | `/api/findings` | All | `allowsFindings` gate on source task's template. **Standalone path (2026-06-09):** when `taskId` is omitted, `targetDivisionId` is required and must exist in the DB. `sourceTaskId` will be null. |
 | `GET` | `/api/findings/admin/stuck` | Manager / Director | Findings stuck `In Progress` with all follow-ups final |
 | `GET` | `/api/findings/:id` | All | Returns `trendInfo` embedded |
 | `PUT` | `/api/findings/:id/review` | Manager / Director | Sets severity, dueDate, optional ATA + hazard tags |
