@@ -196,6 +196,16 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - `Template.type String?` repurposed for response-action template categorisation (Admin sets `type = 'CAR'` etc.). Modal filters templates by `t.type === responseActionType` when a type is selected.
   - Per-dept QN tracking deferred to Change Management phase.
 
+  **Post-ship security review + code review (2026-06-09, same branch):** a `/security-review` and high-effort `/code-review` were run against the feature. Fixes applied (all 322 tests still green):
+  - **RBAC (H-1):** `reviewFinding`, `generateFollowUpTasks`, `closeFinding`, `advanceFinding` now call `assertManagerDivisionScope` — previously they checked only the reviewer role, letting a Manager mutate a finding in another division.
+  - **State machine (H-2):** `generateFollowUpTasks` rejects findings that are not `Open`/`In Progress` (a direct API call could otherwise attach tasks to a `Closed`/`Dismissed` finding).
+  - **DoS (H-3):** follow-up generation capped at 20 rows per call (backend 400 + frontend toast).
+  - **Input validation (M-1, L-2, L-3):** `targetDepartmentIds` sanitised to positive de-duplicated ints; `issuanceNote` ≤ 2000, `note` ≤ 1000, `procedureRef` ≤ 200 chars; whitespace-only task titles rejected.
+  - **Audit accuracy (L-1):** `reviewFinding`'s `taxonomyChanged` no longer fires a spurious `TAXONOMY_SET` entry for an empty `hazardTagIds: []`.
+  - **Efficiency:** template `formSchema`/`estimatedHours` fetched once in pre-validation (was an N+1 re-fetch per row inside the tx); validation builds a typed `prepared[]` array instead of mutating `req.body`.
+  - **Reuse/cleanup:** extracted `requireReviewerRole`, `validateTaxonomyFields`, `replaceHazardTags`, `validateResponseActionEntry` helpers (see `FINDING_EXPANSION_DEV_GUIDE.md` §4).
+  - **Confirmed intentional (not changed):** open finding read-visibility for all authenticated users (`buildFindingScope → {}`); any authenticated user may raise a standalone finding.
+
 - **Feed & Escalation System** (Phases 1–5 + post-ship UX — ✅ **COMPLETE**, 2026-06-05) — `FEED_ESCALATION_PLAN.md` is the living source of truth for this feature; OBJECT H documents the schema. Branch `claude/sqd-feed-escalation-plan-4dYZa` (NOT yet merged to `main`). End-user + developer manuals: `FEED_ESCALATION_USER_GUIDE.md` + `FEED_ESCALATION_DEV_GUIDE.md`; manual test checklist: `FEED_ESCALATION_TEST_CHECKLIST.md`.
   - **Phase 1–5** — see previous entries (schema migration, feed API, escalation core, flag lifecycle, badges/polish/docs). 260 backend tests on that branch.
   - **Post-ship UX (branch `claude/eloquent-feynman-G4thG`)** — The Escalations page (`/dashboard/escalations`) now **retains the full escalation history** (PENDING + ACTIONED + DISMISSED), not just the live pending queue:

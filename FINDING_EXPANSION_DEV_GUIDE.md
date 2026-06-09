@@ -146,7 +146,9 @@ OR: [
 ]
 ```
 
-Used in: `dismissFinding`, `updateSeverity`, `updateTaxonomy` (finding.controller), `createFindingLink`, `deleteFindingLink` (findingLink.controller).
+Used in: `reviewFinding`, `generateFollowUpTasks`, `closeFinding`, `advanceFinding`, `updateSeverity`, `dismissFinding`, `updateTaxonomy` (finding.controller), `createFindingLink`, `deleteFindingLink` (findingLink.controller).
+
+> **Security hardening (2026-06-09):** `reviewFinding`, `generateFollowUpTasks`, `closeFinding`, and `advanceFinding` previously checked only the reviewer **role** and not division scope — a Manager could mutate a finding in another division. All four now call `assertManagerDivisionScope` immediately after `requireReviewerRole`. Treat "role check + division gate" as the mandatory pair for every Manager mutation; never ship one without the other.
 
 ### `canEditAnalysis(user, finding, managerMayEdit, capaLinkedUserIds?)` → `boolean`
 
@@ -166,6 +168,19 @@ Shared utility: flattens `capaActions → linkedItems → task → assignedToUse
 ### `FINDING_REVIEWER_ROLES`
 
 `['Manager', 'Director']` — the roles that may take high-stakes mutations (dismiss, severity, links, verify, waive). Imported by all four controllers.
+
+### Shared validation helpers (finding.controller.ts)
+
+These collapse logic that was previously copy-pasted across endpoints. All throw `HttpError(400)` on failure, so callers wrap in `try/catch` that maps `isHttpError(error)` → `res.status(error.status)`.
+
+| Helper | Returns | Used by |
+|---|---|---|
+| `requireReviewerRole(res, role, action)` | `boolean` (writes 403 + `false` when not Manager/Director). `action` is folded into the message so each endpoint keeps a specific error string. | all seven reviewer-gated handlers |
+| `validateTaxonomyFields(client, ataChapterId, hazardTagIds)` | de-duplicated `tagIds`, or `null` when `hazardTagIds` was not supplied (caller leaves tags untouched) | `createFindingService`, `reviewFinding`, `updateTaxonomy` |
+| `replaceHazardTags(tx, findingId, tagIds)` | `void` — `deleteMany` then re-create the tag set inside the open tx | `reviewFinding`, `updateTaxonomy` |
+| `validateResponseActionEntry(client, entry)` | sanitized `targetDepartmentIds` (positive ints, de-duplicated), or `null` when the entry has no response action | `generateFollowUpTasks` |
+
+> **Why `null` vs `[]` matters for `validateTaxonomyFields`:** `null` means "the caller omitted `hazardTagIds`, do not touch existing tags"; an empty array means "clear all tags". `createFindingService` coalesces `?? []` because a brand-new finding has no tags to preserve.
 
 ---
 
@@ -405,6 +420,12 @@ Called from `task.controller.ts` after any task reaches a final status (`Closed 
 11. **`requiresDirectorApproval` is always derived server-side — never set it from the client.** The flag is computed from `responseActionType ∈ DIRECTOR_APPROVAL_TYPES` in `generateFollowUpTasks`. The client receives it read-only for display (purple banner, "Director approval required" label). If you add a new response action type that should block non-Directors from reviewing, add it to `DIRECTOR_APPROVAL_TYPES` in `findingExpansion.ts` — nothing else needs to change.
 
 12. **Per-department QN task tracking is deferred.** QN tasks currently create one task regardless of how many target departments are selected; all dept IDs are stored in `FindingResponseAction.targetDepartmentIds` for future reference. Individual-per-dept task creation is deferred to the Change Management phase.
+
+13. **`generateFollowUpTasks` validates into a `prepared[]` array — it never mutates `req.body`.** The pre-validation loop builds a typed `PreparedTask[]` carrying the sanitized title (trimmed), the template `formSchema`/`estimatedHours` (fetched **once** here, not re-queried inside the transaction — this was an N+1), and the sanitized `targetDepartmentIds`. The `$transaction` iterates `prepared`, never the raw `tasks`. Do not reintroduce reads of `entry.<field>` from the request body inside the tx, and do not write sanitized values back onto `req.body` entries (a prior version did `entry.targetDepartmentIds = deptIds`, which silently rewrote the request payload).
+
+14. **Follow-up task titles are trimmed and must be non-empty after trim.** `!entry.title` alone passes a whitespace-only string (`"   "` is truthy); the check is `typeof title === 'string' ? title.trim() : ''` then `!title`. A blank-after-trim title returns 400.
+
+15. **`generateFollowUpTasks` caps the batch at 20 rows.** Both the backend (400) and `GenerateFollowUpModal` (toast) enforce this. Raise both limits together if the cap ever changes.
 
 ---
 

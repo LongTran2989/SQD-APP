@@ -69,6 +69,9 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
 
   const handleGenerate = async () => {
     // Validate
+    if (rows.length > 20) {
+      return toast.error('A maximum of 20 follow-up tasks may be generated at once');
+    }
     for (const r of rows) {
       if (!r.templateId) return toast.error('Select a template for each task');
       if (!r.title.trim()) return toast.error('Each task needs a title');

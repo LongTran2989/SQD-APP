@@ -14,9 +14,15 @@ export interface Actor {
 export const FINDING_REVIEWER_ROLES = ['Manager', 'Director'];
 
 /**
- * Prisma WHERE fragment scoping a Finding query to a user's visibility.
- * All authenticated users may view all findings — read access is open.
- * Mutation access is enforced separately per endpoint.
+ * Prisma WHERE fragment scoping a Finding *read* query to a user's visibility.
+ *
+ * INTENTIONALLY returns `{}` (no filter): read access to findings is open to
+ * every authenticated user by deliberate policy — see CLAUDE_HANDOVER.md
+ * (Finding Response Actions) and FINDING_WORKFLOW.md §RBAC. This is NOT a stub.
+ * Do NOT assume this enforces role/division scoping — it does not. Mutation
+ * access is gated per endpoint via `assertManagerDivisionScope`. If a future
+ * policy narrows read visibility, encode the rule here so list and detail
+ * endpoints stay in lockstep.
  */
 export function buildFindingScope(_user: Actor): Prisma.FindingWhereInput {
   return {};
