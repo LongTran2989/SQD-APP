@@ -106,6 +106,8 @@ export interface Task {
   rating: number | null;
   estimatedHours: number | null;
   issuanceNote: string | null;
+  responseActionType: ResponseActionType | null;
+  requiresDirectorApproval: boolean;
   assignmentType: string;
   schemaSnapshot: FormField[];
   targetDivisionId: number | null;
@@ -372,6 +374,7 @@ export type CapaType = 'CORRECTIVE' | 'PREVENTIVE';
 export type CapaStatus = 'Open' | 'In Progress' | 'Completed' | 'Verified' | 'Waived';
 export type CapaLinkRole = 'EXECUTION' | 'EFFECTIVENESS' | 'SUPPORTING';
 export type FindingLinkType = 'DUPLICATE' | 'RELATED' | 'CAUSED_BY';
+export type ResponseActionType = 'CAR' | 'NCR' | 'QN' | 'QR' | 'IR' | 'Dissemination';
 
 export interface CapaWpRef { id: number; wpId: string; name: string; status: string; }
 
@@ -445,6 +448,24 @@ export interface FindingLinkRecord {
   createdByUser?: { id: number; name: string };
 }
 
+export interface ResolvedDepartment { id: number; name: string; }
+
+export interface FindingResponseAction {
+  id: number;
+  findingId: number;
+  type: ResponseActionType;
+  taskId: number | null;
+  task: { id: number; taskId: string; status: TaskStatus } | null;
+  targetDepartmentIds: number[];
+  targetDepartments: ResolvedDepartment[];
+  procedureRef: string | null;
+  note: string | null;
+  createdByUserId: number;
+  createdByUser: { id: number; name: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Shared nested shapes returned by the findings API
 export interface FindingSourceTask {
   id: number;
@@ -460,6 +481,8 @@ export interface FindingFollowUpTask {
   status: TaskStatus;
   assignedToUserId: number | null;
   assignedToUser: { id: number; name: string } | null;
+  responseActionType: ResponseActionType | null;
+  requiresDirectorApproval: boolean;
 }
 
 export interface FindingUserRef {
@@ -500,6 +523,7 @@ export interface FindingDetail extends Finding {
   capaActions: CapaAction[];
   linksFrom: FindingLinkRecord[];
   linksTo: FindingLinkRecord[];
+  responseActions: FindingResponseAction[];
   trend: TrendInfo;
 }
 
