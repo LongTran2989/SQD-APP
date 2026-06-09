@@ -178,7 +178,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **`finding.controller.ts` changes:**
     - `createFinding` / `createFindingService` — `taskId` now optional; standalone path requires `targetDivisionId` (division verified in DB). Same `POST /api/findings` endpoint — no new route.
     - `generateFollowUpTasks` — extended per-row validation for `responseActionType` (type check, ≥1 dept, single-dept-per-row enforcement for CAR/NCR/QR/IR), dept existence check, `FindingResponseAction` row creation, dual-write audit.
-    - `getFindingById` — `followUpTasks` select extended with `responseActionType` + `requiresDirectorApproval`; `responseActions` relation included with dept-name resolution (batch `findMany` → `Record<id,name>` map).
+    - `getFindingById` — `followUpTasks` select extended with `responseActionType` + `requiresDirectorApproval`; `responseActions` relation included with `targetDepartments` join (single SQL JOIN — no separate dept query).
   - **`task.controller.ts` — Director-only gate in `reviewTask`:** After status check, before self-approval check: `if (task.requiresDirectorApproval && role !== 'Director') → 403`. QN tasks are blocked for all non-Directors including the Issuer. The Issuer exception does NOT apply.
   - **15 new tests (RAC-01 → RAC-15)** in `finding.test.ts`: IR/CAR/QN creation, multi-dept, Director-only gate, error paths, response action serialisation, backward-compat (no type = standard task). Baseline 307 → **322 passing**.
 
@@ -203,6 +203,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Input validation (M-1, L-2, L-3):** `targetDepartmentIds` sanitised to positive de-duplicated ints; `issuanceNote` ≤ 2000, `note` ≤ 1000, `procedureRef` ≤ 200 chars; whitespace-only task titles rejected.
   - **Audit accuracy (L-1):** `reviewFinding`'s `taxonomyChanged` no longer fires a spurious `TAXONOMY_SET` entry for an empty `hazardTagIds: []`.
   - **Efficiency:** template `formSchema`/`estimatedHours` fetched once in pre-validation (was an N+1 re-fetch per row inside the tx); validation builds a typed `prepared[]` array instead of mutating `req.body`.
+  - **Schema join (dept resolution):** `targetDepartmentIds Json` column replaced with `FindingResponseActionDepartment` join table. `getFindingById` now resolves dept names via a Prisma relation include (single SQL JOIN) instead of a second `findMany` query. No API surface change — response still includes `targetDepartments: [{ id, name }]`.
   - **Reuse/cleanup:** extracted `requireReviewerRole`, `validateTaxonomyFields`, `replaceHazardTags`, `validateResponseActionEntry` helpers (see `FINDING_EXPANSION_DEV_GUIDE.md` §4).
   - **Confirmed intentional (not changed):** open finding read-visibility for all authenticated users (`buildFindingScope → {}`); any authenticated user may raise a standalone finding.
 
@@ -782,8 +783,7 @@ These are two separate systems that serve different purposes. **Both** are writt
 | `findingId` | Int | FK to `Finding` |
 | `type` | String | One of `CAR \| NCR \| QN \| QR \| IR \| Dissemination` |
 | `taskId` | Int? | FK to the generated Task (null only in error state) |
-| `targetDepartmentIds` | Json | Int array — all six types require ≥1 dept |
-| `targetDepartments` | Computed | Resolved `{ id, name }` objects (batch-fetched in `getFindingById`) |
+| `targetDepartments` | `FindingResponseActionDepartment[]` | Join table rows; all six types require ≥1 dept. Replaced former `targetDepartmentIds Json` column (migrated 2026-06-09). |
 | `procedureRef` | String? | Optional reference to a procedure/regulation |
 | `note` | String? | Optional free-text note |
 | `createdByUserId` | Int | User who triggered generation |
@@ -940,7 +940,8 @@ All changes needed before Phase 5 development begins:
 | `Task` | ADD field | `responseActionType String?` — one of `CAR \| NCR \| QN \| QR \| IR \| Dissemination`. Populated server-side when task is generated as a response action. Added 2026-06-09 |
 | `Task` | ADD field | `requiresDirectorApproval Boolean @default(false)` — derived server-side from `responseActionType ∈ DIRECTOR_APPROVAL_TYPES`. When `true`, only Directors may review. Added 2026-06-09 |
 | `Finding` | CHANGE field | `sourceTaskId Int` → `sourceTaskId Int?` (nullable) — standalone findings have no source task. Added 2026-06-09 |
-| **NEW (2026-06-09)** | CREATE model | `FindingResponseAction` — links a Finding to a response-action follow-up Task; stores `type`, `taskId`, `targetDepartmentIds` (Json), `procedureRef`, `note`, `createdByUserId`, `deletedAt` |
+| **NEW (2026-06-09)** | CREATE model | `FindingResponseAction` — links a Finding to a response-action follow-up Task; stores `type`, `taskId`, `targetDepartments` (join table), `procedureRef`, `note`, `createdByUserId`, `deletedAt` |
+| **NEW (2026-06-09)** | CREATE model | `FindingResponseActionDepartment` — join table `FindingResponseAction ↔ Department`; replaces former `targetDepartmentIds Json` column; `unique(responseActionId, departmentId)` |
 | `AuditLog` | CHANGE | `entityId Int` → `entityId String` |
 | `User`, `Task`, `Finding` | ADD field | `deletedAt DateTime?` (soft delete) |
 | **NEW** | CREATE model | `WorkPackage` |

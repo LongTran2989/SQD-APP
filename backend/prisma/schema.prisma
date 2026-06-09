@@ -16,6 +16,7 @@ model Department {
   name      String     @unique
   divisions Division[]
   findings  Finding[]  @relation("FindingDepartment")
+  responseActionTargets FindingResponseActionDepartment[] @relation("ResponseActionDepts")
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 }
@@ -510,7 +511,8 @@ model FindingLink {
 }
 
 // Response action raised from a Finding. Created atomically with the generated Task.
-// Soft-deleted (never physically removed). targetDepartmentIds: always a JSON int-array.
+// Soft-deleted (never physically removed).
+// Target departments stored in FindingResponseActionDepartment join table.
 // procedureRef: provision for Change Management phase (QN procedure doc reference).
 model FindingResponseAction {
   id        Int     @id @default(autoincrement())
@@ -521,9 +523,9 @@ model FindingResponseAction {
   taskId Int?   @unique
   task   Task?  @relation("TaskResponseAction", fields: [taskId], references: [id])
 
-  targetDepartmentIds Json    // int[] — always populated (all 6 types require a dept target)
-  procedureRef        String? // Provision: procedure doc reference for Change Management phase
-  note                String? // Optional Manager note
+  targetDepartments FindingResponseActionDepartment[] @relation("ResponseActionDepts")
+  procedureRef      String? // Provision: procedure doc reference for Change Management phase
+  note              String? // Optional Manager note
 
   createdByUserId Int
   createdByUser   User @relation("FindingResponseActionCreatedBy", fields: [createdByUserId], references: [id])
@@ -534,6 +536,20 @@ model FindingResponseAction {
 
   @@index([findingId])
   @@index([type])
+}
+
+// Join table: FindingResponseAction ↔ Department (replaces targetDepartmentIds Json).
+// Hard-deleted with the parent response action (onDelete: Cascade).
+model FindingResponseActionDepartment {
+  id               Int                  @id @default(autoincrement())
+  responseActionId Int
+  responseAction   FindingResponseAction @relation("ResponseActionDepts", fields: [responseActionId], references: [id], onDelete: Cascade)
+  departmentId     Int
+  department       Department            @relation("ResponseActionDepts", fields: [departmentId], references: [id])
+  createdAt        DateTime              @default(now())
+
+  @@unique([responseActionId, departmentId])
+  @@index([departmentId])
 }
 
 // -----------------------------------------------------------------------

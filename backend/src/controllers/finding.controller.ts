@@ -419,7 +419,10 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
           orderBy: { createdAt: 'asc' },
           include: {
             task: { select: { id: true, taskId: true, status: true } },
-            createdByUser: { select: { id: true, name: true } }
+            createdByUser: { select: { id: true, name: true } },
+            targetDepartments: {
+              select: { department: { select: { id: true, name: true } } }
+            }
           }
         }
       }
@@ -443,26 +446,10 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
       hazardTagIds: finding.hazardTags.map((h) => h.hazardTagId)
     });
 
-    // Gather all dept IDs across all response actions, resolve names once.
-    const allDeptIds = (finding.responseActions ?? [])
-      .flatMap((ra) => (ra.targetDepartmentIds as number[]) ?? []);
-    const uniqueDeptIds = [...new Set(allDeptIds)];
-    const deptMap: Record<number, string> = {};
-    if (uniqueDeptIds.length > 0) {
-      const depts = await prisma.department.findMany({
-        where: { id: { in: uniqueDeptIds } },
-        select: { id: true, name: true }
-      });
-      depts.forEach((d) => { deptMap[d.id] = d.name; });
-    }
-
-    // Attach resolved dept names to each responseAction.
+    // Department names come from the Prisma relation join — no separate query needed.
     const responseActions = (finding.responseActions ?? []).map((ra) => ({
       ...ra,
-      targetDepartments: ((ra.targetDepartmentIds as number[]) ?? []).map((deptId) => ({
-        id: deptId,
-        name: deptMap[deptId] ?? `Dept ${deptId}`
-      }))
+      targetDepartments: ra.targetDepartments.map((rtd) => rtd.department)
     }));
 
     res.json({
@@ -808,7 +795,9 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
               findingId: finding.id,
               type: entry.responseActionType,
               taskId: created.id,
-              targetDepartmentIds: entry.targetDepartmentIds,
+              targetDepartments: {
+                create: entry.targetDepartmentIds.map((departmentId) => ({ departmentId }))
+              },
               note: entry.note,
               procedureRef: entry.procedureRef,
               createdByUserId: userId

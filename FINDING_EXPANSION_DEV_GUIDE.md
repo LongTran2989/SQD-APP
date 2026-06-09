@@ -104,10 +104,19 @@ Links a `Finding` to one of its follow-up `Task`s and carries the formal respons
 
 - `findingId`, `type`: one of `'CAR' | 'NCR' | 'QN' | 'QR' | 'IR' | 'Dissemination'`
 - `taskId Int?` — the generated follow-up task (null only in error state)
-- `targetDepartmentIds Json` — int array; all six types require ≥1 dept
+- `targetDepartments FindingResponseActionDepartment[]` — join table; all six types require ≥1 dept
 - `procedureRef String?`, `note String?`
 - `createdByUserId` — user who triggered generation
 - `deletedAt DateTime?` — soft-delete (compliance mandate)
+
+### `FindingResponseActionDepartment` (join table)
+
+Replaces the former `targetDepartmentIds Json` column. One row per (responseAction, department) pair.
+
+- `responseActionId` FK → `FindingResponseAction` (cascade delete)
+- `departmentId` FK → `Department`
+- Unique on `(responseActionId, departmentId)`
+- Hard-deleted via cascade when the parent `FindingResponseAction` is deleted
 
 Response action constants live in `backend/src/services/findingExpansion.ts` (same file as other constants):
 - `RESPONSE_ACTION_TYPES` — full list of six types
@@ -178,7 +187,7 @@ These collapse logic that was previously copy-pasted across endpoints. All throw
 | `requireReviewerRole(res, role, action)` | `boolean` (writes 403 + `false` when not Manager/Director). `action` is folded into the message so each endpoint keeps a specific error string. | all seven reviewer-gated handlers |
 | `validateTaxonomyFields(client, ataChapterId, hazardTagIds)` | de-duplicated `tagIds`, or `null` when `hazardTagIds` was not supplied (caller leaves tags untouched) | `createFindingService`, `reviewFinding`, `updateTaxonomy` |
 | `replaceHazardTags(tx, findingId, tagIds)` | `void` — `deleteMany` then re-create the tag set inside the open tx | `reviewFinding`, `updateTaxonomy` |
-| `validateResponseActionEntry(client, entry)` | sanitized `targetDepartmentIds` (positive ints, de-duplicated), or `null` when the entry has no response action | `generateFollowUpTasks` |
+| `validateResponseActionEntry(client, entry)` | sanitized department ID array (positive ints, de-duplicated), or `null` when the entry has no response action; used by `generateFollowUpTasks` to populate the join table | `generateFollowUpTasks` |
 
 > **Why `null` vs `[]` matters for `validateTaxonomyFields`:** `null` means "the caller omitted `hazardTagIds`, do not touch existing tags"; an empty array means "clear all tags". `createFindingService` coalesces `?? []` because a brand-new finding has no tags to preserve.
 
@@ -362,15 +371,15 @@ Called from `task.controller.ts` after any task reaches a final status (`Closed 
 | File | Change |
 |---|---|
 | `services/findingExpansion.ts` | Added `RESPONSE_ACTION_TYPES`, `MULTI_DEPT_SINGLE_TASK_TYPES`, `DIRECTOR_APPROVAL_TYPES`, `ResponseActionType`, `RESPONSE_ACTION_CREATED` audit string |
-| `controllers/finding.controller.ts` | `createFinding` / `createFindingService` — `taskId` optional; standalone path requires `targetDivisionId`. `generateFollowUpTasks` — response action validation + `FindingResponseAction` creation + `Task.responseActionType` / `requiresDirectorApproval` population. `getFindingById` — `responseActions` relation included |
+| `controllers/finding.controller.ts` | `createFinding` / `createFindingService` — `taskId` optional; standalone path requires `targetDivisionId`. `generateFollowUpTasks` — response action validation + `FindingResponseAction` creation (with nested `targetDepartments` join rows) + `Task.responseActionType` / `requiresDirectorApproval` population. `getFindingById` — `responseActions` relation included with `targetDepartments` join (no separate dept query) |
 | `controllers/task.controller.ts` | `reviewTask` — Director-only gate: checks `task.requiresDirectorApproval` before any other review logic → 403 for non-Directors |
-| `prisma/schema.prisma` | Added `FindingResponseAction` model; added `responseActionType String?` + `requiresDirectorApproval Boolean @default(false)` to `Task`; made `Finding.sourceTaskId` nullable |
+| `prisma/schema.prisma` | Added `FindingResponseAction` model + `FindingResponseActionDepartment` join table; added `responseActionType String?` + `requiresDirectorApproval Boolean @default(false)` to `Task`; made `Finding.sourceTaskId` nullable; added `responseActionTargets` back-reference to `Department` |
 
 **Frontend — modified files:**
 
 | File | Change |
 |---|---|
-| `types/index.ts` | `ResponseActionType` union; `ResolvedDepartment`, `FindingResponseAction` interfaces; `Task` + `FindingFollowUpTask` extended with `responseActionType` + `requiresDirectorApproval`; `FindingDetail.responseActions` array |
+| `types/index.ts` | `ResponseActionType` union; `ResolvedDepartment`, `FindingResponseAction` interfaces (dept list as `targetDepartments: ResolvedDepartment[]` — no `targetDepartmentIds` field); `Task` + `FindingFollowUpTask` extended with `responseActionType` + `requiresDirectorApproval`; `FindingDetail.responseActions` array |
 | `api/findingApi.ts` | `RaiseFindingPayload.taskId` optional + `targetDivisionId` added; `FollowUpTaskInput` extended with response action fields |
 | `components/findings/RaiseFindingPanel.tsx` | `taskId` prop optional; division picker shown when no `taskId`; conditional spread in `raiseFinding` call |
 | `app/dashboard/findings/page.tsx` | Amber "Raise Finding" button; standalone `RaiseFindingPanel` (no `taskId`) |
@@ -419,9 +428,9 @@ Called from `task.controller.ts` after any task reaches a final status (`Closed 
 
 11. **`requiresDirectorApproval` is always derived server-side — never set it from the client.** The flag is computed from `responseActionType ∈ DIRECTOR_APPROVAL_TYPES` in `generateFollowUpTasks`. The client receives it read-only for display (purple banner, "Director approval required" label). If you add a new response action type that should block non-Directors from reviewing, add it to `DIRECTOR_APPROVAL_TYPES` in `findingExpansion.ts` — nothing else needs to change.
 
-12. **Per-department QN task tracking is deferred.** QN tasks currently create one task regardless of how many target departments are selected; all dept IDs are stored in `FindingResponseAction.targetDepartmentIds` for future reference. Individual-per-dept task creation is deferred to the Change Management phase.
+12. **Per-department QN task tracking is deferred.** QN tasks currently create one task regardless of how many target departments are selected; all dept IDs are stored as rows in `FindingResponseActionDepartment` for future reference. Individual-per-dept task creation is deferred to the Change Management phase.
 
-13. **`generateFollowUpTasks` validates into a `prepared[]` array — it never mutates `req.body`.** The pre-validation loop builds a typed `PreparedTask[]` carrying the sanitized title (trimmed), the template `formSchema`/`estimatedHours` (fetched **once** here, not re-queried inside the transaction — this was an N+1), and the sanitized `targetDepartmentIds`. The `$transaction` iterates `prepared`, never the raw `tasks`. Do not reintroduce reads of `entry.<field>` from the request body inside the tx, and do not write sanitized values back onto `req.body` entries (a prior version did `entry.targetDepartmentIds = deptIds`, which silently rewrote the request payload).
+13. **`generateFollowUpTasks` validates into a `prepared[]` array — it never mutates `req.body`.** The pre-validation loop builds a typed `PreparedTask[]` carrying the sanitized title (trimmed), the template `formSchema`/`estimatedHours` (fetched **once** here, not re-queried inside the transaction — this was an N+1), and the sanitized `targetDepartmentIds` (validated department ID array used to create `FindingResponseActionDepartment` rows via a nested Prisma write). The `$transaction` iterates `prepared`, never the raw `tasks`. Do not reintroduce reads of `entry.<field>` from the request body inside the tx, and do not write sanitized values back onto `req.body` entries (a prior version did `entry.targetDepartmentIds = deptIds`, which silently rewrote the request payload).
 
 14. **Follow-up task titles are trimmed and must be non-empty after trim.** `!entry.title` alone passes a whitespace-only string (`"   "` is truthy); the check is `typeof title === 'string' ? title.trim() : ''` then `!title`. A blank-after-trim title returns 400.
 

@@ -435,19 +435,27 @@ describe('Findings Backend (Phase 6)', () => {
     it('RAC-02: CAR with one department → 201, action row stores the department', async () => {
       const res = await genResponseAction({ responseActionType: 'CAR', targetDepartmentIds: [departmentId] });
       expect(res.status).toBe(201);
-      const actions = await prisma.findingResponseAction.findMany({ where: { findingId } });
+      const actions = await prisma.findingResponseAction.findMany({
+        where: { findingId },
+        include: { targetDepartments: { select: { departmentId: true } } }
+      });
       expect(actions).toHaveLength(1);
       expect(actions[0]?.type).toBe('CAR');
-      expect(actions[0]?.targetDepartmentIds).toEqual([departmentId]);
+      expect(actions[0]?.targetDepartments.map((d) => d.departmentId)).toEqual([departmentId]);
     });
 
     it('RAC-03: QN with three departments → 201, one task, one action with three dept IDs', async () => {
       const res = await genResponseAction({ responseActionType: 'QN', targetDepartmentIds: [departmentId, dept2, dept3] });
       expect(res.status).toBe(201);
       expect(res.body.createdTasks).toHaveLength(1);
-      const actions = await prisma.findingResponseAction.findMany({ where: { findingId } });
+      const actions = await prisma.findingResponseAction.findMany({
+        where: { findingId },
+        include: { targetDepartments: { select: { departmentId: true }, orderBy: { departmentId: 'asc' } } }
+      });
       expect(actions).toHaveLength(1);
-      expect(actions[0]?.targetDepartmentIds).toEqual([departmentId, dept2, dept3]);
+      expect(actions[0]?.targetDepartments.map((d) => d.departmentId).sort()).toEqual(
+        [departmentId, dept2, dept3].sort()
+      );
     });
 
     it('RAC-04: CAR + QN in one call → 201, two tasks, two action rows with correct types', async () => {

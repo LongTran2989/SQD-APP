@@ -456,7 +456,6 @@ export interface FindingResponseAction {
   type: ResponseActionType;
   taskId: number | null;
   task: { id: number; taskId: string; status: TaskStatus } | null;
-  targetDepartmentIds: number[];
   targetDepartments: ResolvedDepartment[];
   procedureRef: string | null;
   note: string | null;
