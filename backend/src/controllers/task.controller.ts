@@ -137,6 +137,9 @@ function computeIsOverdue(task: { deadline: Date | null; status: string }): bool
 
 /**
  * Returns the standard task include object for consistent response shapes.
+ * All scalar fields (incl. responseActionType, requiresDirectorApproval) are
+ * returned automatically by Prisma when using `include`; only relations need
+ * to be listed here.
  */
 function taskInclude() {
   return {
@@ -787,7 +790,9 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
         issuerId: true,
         assignedToUserId: true,
         targetDivisionId: true,
-        status: true
+        status: true,
+        responseActionType: true,
+        requiresDirectorApproval: true
       }
     });
 
@@ -798,6 +803,16 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
 
     if (task.status !== 'In Review') {
       res.status(400).json({ message: `Task must be In Review to perform a review action. Current status: ${task.status}` });
+      return;
+    }
+
+    // Director-only gate: QN tasks may only be reviewed/approved by a Director.
+    // This intentionally blocks Managers (including the Issuer) — the Issuer
+    // exception does NOT apply when requiresDirectorApproval is true.
+    if (task.requiresDirectorApproval && role !== 'Director') {
+      res.status(403).json({
+        message: 'This task requires Director approval. Only a Director may review or approve it.'
+      });
       return;
     }
 
