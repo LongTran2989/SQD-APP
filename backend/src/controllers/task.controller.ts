@@ -348,6 +348,9 @@ export async function createTaskService(
   if (!templateId || !targetDivisionId) {
     throw new HttpError(400, 'templateId and targetDivisionId are required');
   }
+  if (issuanceNote != null && (typeof issuanceNote !== 'string' || issuanceNote.length > 2000)) {
+    throw new HttpError(400, 'issuanceNote must be a string of at most 2000 characters');
+  }
 
   // Validate template — must exist, Published, not soft-deleted
   const template = await client.template.findUnique({

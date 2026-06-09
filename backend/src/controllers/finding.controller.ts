@@ -451,6 +451,10 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'Managers may only review findings in their division' });
+      return;
+    }
     if (finding.status !== 'Open') {
       res.status(400).json({ message: 'Finding has already been reviewed' });
       return;
@@ -473,7 +477,7 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
       }
     }
     // Whether this review actually changes the finding's taxonomy (for audit).
-    const taxonomyChanged = ataChapterId !== undefined || tagIds !== null;
+    const taxonomyChanged = ataChapterId !== undefined || (tagIds !== null && tagIds.length > 0);
 
     const reviewerName = await getUserName(userId);
     const newStatus = 'In Progress';
@@ -559,6 +563,10 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
       res.status(400).json({ message: 'tasks must be a non-empty array' });
       return;
     }
+    if (tasks.length > 20) {
+      res.status(400).json({ message: 'A maximum of 20 follow-up tasks may be generated at once' });
+      return;
+    }
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
@@ -572,6 +580,14 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
     });
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'Managers may only generate tasks for findings in their division' });
+      return;
+    }
+    if (!['Open', 'In Progress'].includes(finding.status)) {
+      res.status(400).json({ message: `Cannot generate follow-up tasks: finding is ${finding.status}` });
       return;
     }
 
@@ -632,22 +648,33 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
           return;
         }
         // All types require at least one target department.
-        if (!Array.isArray(entry.targetDepartmentIds) || entry.targetDepartmentIds.length === 0) {
-          res.status(400).json({ message: `responseActionType '${entry.responseActionType}' requires at least one targetDepartmentId` });
+        const rawIds: unknown[] = Array.isArray(entry.targetDepartmentIds) ? entry.targetDepartmentIds : [];
+        const deptIds = [...new Set(rawIds.map(Number).filter(n => Number.isInteger(n) && n > 0))];
+        if (deptIds.length === 0 || deptIds.length !== rawIds.length) {
+          res.status(400).json({ message: `responseActionType '${entry.responseActionType}' requires an array of positive integer department IDs` });
           return;
         }
+        entry.targetDepartmentIds = deptIds;
         // Validate dept IDs exist in DB.
-        const deptCount = await prisma.department.count({ where: { id: { in: entry.targetDepartmentIds } } });
-        if (deptCount !== entry.targetDepartmentIds.length) {
+        const deptCount = await prisma.department.count({ where: { id: { in: deptIds } } });
+        if (deptCount !== deptIds.length) {
           res.status(400).json({ message: 'One or more targetDepartmentIds not found' });
           return;
         }
         // CAR/NCR/QR/IR: exactly one dept per row (multi-dept = multiple rows).
         const isSingleDeptType = !(MULTI_DEPT_SINGLE_TASK_TYPES as readonly string[]).includes(entry.responseActionType);
-        if (isSingleDeptType && entry.targetDepartmentIds.length !== 1) {
+        if (isSingleDeptType && deptIds.length !== 1) {
           res.status(400).json({ message: `'${entry.responseActionType}' requires exactly one targetDepartmentId per task row` });
           return;
         }
+      }
+      if (entry.note != null && (typeof entry.note !== 'string' || entry.note.length > 1000)) {
+        res.status(400).json({ message: 'note must be a string of at most 1000 characters' });
+        return;
+      }
+      if (entry.procedureRef != null && (typeof entry.procedureRef !== 'string' || entry.procedureRef.length > 200)) {
+        res.status(400).json({ message: 'procedureRef must be a string of at most 200 characters' });
+        return;
       }
     }
 
@@ -790,6 +817,10 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
       res.status(404).json({ message: 'Finding not found' });
       return;
     }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'Managers may only close findings in their division' });
+      return;
+    }
 
     if (finding.status !== 'Pending Verification') {
       res.status(400).json({ message: 'Finding must be in Pending Verification to be closed' });
@@ -854,6 +885,10 @@ export const advanceFinding = async (req: Request, res: Response): Promise<void>
     });
     if (!finding) {
       res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
+      res.status(403).json({ message: 'Managers may only advance findings in their division' });
       return;
     }
     if (finding.status !== 'In Progress') {
