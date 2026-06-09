@@ -1508,6 +1508,17 @@ describe('Task Backend (Phase 5.2)', () => {
           assignmentType: 'INDIVIDUAL'
         }
       });
+      // Phase 5.6 gate: a Closed task can only be rated once a TimeBooking exists.
+      // Seed a minimal booking so the rating tests exercise the RBAC/score logic
+      // rather than tripping the booking precondition.
+      await prisma.timeBooking.create({
+        data: {
+          taskId: t.id,
+          assigneeEntry: { userId: assigneeId, hours: 1 },
+          collaborators: [],
+          totalHours: 1
+        }
+      });
       return t.id;
     }
 
