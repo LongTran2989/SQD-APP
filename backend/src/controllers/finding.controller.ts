@@ -5,7 +5,10 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity, evaluateCloseGate } from '../services/findingService';
 import { computeTrendForSignature } from '../services/trendService';
 import { buildFindingScope, assertManagerDivisionScope, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
-import { FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
+import {
+  RESPONSE_ACTION_TYPES, MULTI_DEPT_SINGLE_TASK_TYPES,
+  DIRECTOR_APPROVAL_TYPES, FINDING_EXPANSION_ACTIONS
+} from '../constants/findingExpansion';
 import { HttpError, isHttpError } from '../utils/httpError';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -102,7 +105,8 @@ async function getUserName(userId: number): Promise<string> {
 // ─── POST /api/findings ─────────────────────────────────────────────────────
 
 export interface CreateFindingParams {
-  taskId: number;
+  taskId?: number | null;           // optional — absent = standalone finding
+  targetDivisionId?: number | null; // required when taskId is absent
   eventType: string;
   departmentId: number;
   description: string;
@@ -125,20 +129,38 @@ export async function createFindingService(
   actor: { userId: number },
   params: CreateFindingParams
 ) {
-  const { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds } = params;
+  const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds } = params;
 
-  if (!taskId || !eventType || !departmentId || !description) {
-    throw new HttpError(400, 'taskId, eventType, departmentId, and description are required');
+  if (!eventType || !departmentId || !description) {
+    throw new HttpError(400, 'eventType, departmentId, and description are required');
   }
 
-  // Source Task must exist and not be soft-deleted.
-  const task = await client.task.findUnique({
-    where: { id: taskId, deletedAt: null },
-    select: { id: true, targetDivisionId: true, template: { select: { allowsFindings: true } } }
-  });
-  if (!task) throw new HttpError(404, 'Source task not found');
-  if (!task.template?.allowsFindings) {
-    throw new HttpError(400, 'This task\'s template does not allow findings to be raised');
+  // Resolve source and division. Task-originated path keeps the existing
+  // behaviour; standalone path requires an explicit target division.
+  let resolvedDivisionId: number | null = null;
+
+  if (taskId) {
+    // Source Task must exist and not be soft-deleted.
+    const task = await client.task.findUnique({
+      where: { id: taskId, deletedAt: null },
+      select: { id: true, targetDivisionId: true, template: { select: { allowsFindings: true } } }
+    });
+    if (!task) throw new HttpError(404, 'Source task not found');
+    if (!task.template?.allowsFindings) {
+      throw new HttpError(400, 'This task\'s template does not allow findings to be raised');
+    }
+    resolvedDivisionId = task.targetDivisionId ?? null;
+  } else {
+    // Standalone path — targetDivisionId required.
+    if (!targetDivisionId) {
+      throw new HttpError(400, 'targetDivisionId is required when raising a finding without a source task');
+    }
+    const division = await client.division.findUnique({
+      where: { id: targetDivisionId },
+      select: { id: true }
+    });
+    if (!division) throw new HttpError(400, 'Division not found');
+    resolvedDivisionId = targetDivisionId;
   }
 
   // Department must exist.
@@ -168,10 +190,11 @@ export async function createFindingService(
       aircraftRegistration: aircraftRegistration ?? null,
       regulatoryReference: regulatoryReference ?? null,
       status: 'Open',
-      sourceTaskId: task.id,
+      sourceTaskId: taskId ?? null,
       reportedByUserId: actor.userId,
-      // Inherit the source task's division for RBAC division-scoping.
-      targetDivisionId: task.targetDivisionId ?? null,
+      // Inherit the source task's division (task path) or use the explicit
+      // target division (standalone path) for RBAC division-scoping.
+      targetDivisionId: resolvedDivisionId,
       ataChapterId: ataChapterId ?? null,
       ...(tagIds.length > 0
         ? { hazardTags: { create: tagIds.map((hazardTagId) => ({ hazardTagId })) } }
@@ -182,11 +205,11 @@ export async function createFindingService(
   await logFindingAuditAndActivity(
     client,
     created.id,
-    task.id,
+    taskId ?? null,
     'CREATED',
     actor.userId,
     `Finding #${created.id} raised by ${reporterName}`,
-    { findingId: created.id, eventType, sourceTaskId: task.id }
+    { findingId: created.id, eventType, sourceTaskId: taskId ?? null }
   );
 
   return created;
@@ -195,10 +218,10 @@ export async function createFindingService(
 export const createFinding = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req.user!;
-    const { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds } = req.body;
+    const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds } = req.body;
 
     const finding = await prisma.$transaction((tx) =>
-      createFindingService(tx, { userId }, { taskId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds })
+      createFindingService(tx, { userId }, { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds })
     );
 
     res.status(201).json(finding);
@@ -292,7 +315,9 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
             status: true,
             assignedToUserId: true,
             assignedToUser: { select: { id: true, name: true } },
-            template: { select: { title: true } }
+            template: { select: { title: true } },
+            responseActionType: true,
+            requiresDirectorApproval: true
           }
         },
         ataChapter: true,
@@ -319,7 +344,15 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
           }
         },
         linksFrom: { include: { relatedFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },
-        linksTo: { include: { fromFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } }
+        linksTo: { include: { fromFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },
+        responseActions: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            task: { select: { id: true, taskId: true, status: true } },
+            createdByUser: { select: { id: true, name: true } }
+          }
+        }
       }
     });
 
@@ -341,6 +374,28 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
       hazardTagIds: finding.hazardTags.map((h) => h.hazardTagId)
     });
 
+    // Gather all dept IDs across all response actions, resolve names once.
+    const allDeptIds = (finding.responseActions ?? [])
+      .flatMap((ra) => (ra.targetDepartmentIds as number[]) ?? []);
+    const uniqueDeptIds = [...new Set(allDeptIds)];
+    const deptMap: Record<number, string> = {};
+    if (uniqueDeptIds.length > 0) {
+      const depts = await prisma.department.findMany({
+        where: { id: { in: uniqueDeptIds } },
+        select: { id: true, name: true }
+      });
+      depts.forEach((d) => { deptMap[d.id] = d.name; });
+    }
+
+    // Attach resolved dept names to each responseAction.
+    const responseActions = (finding.responseActions ?? []).map((ra) => ({
+      ...ra,
+      targetDepartments: ((ra.targetDepartmentIds as number[]) ?? []).map((deptId) => ({
+        id: deptId,
+        name: deptMap[deptId] ?? `Dept ${deptId}`
+      }))
+    }));
+
     res.json({
       ...finding,
       trend,
@@ -358,8 +413,11 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
         title: t.title ?? t.template?.title ?? null,
         status: t.status,
         assignedToUserId: t.assignedToUserId,
-        assignedToUser: t.assignedToUser
+        assignedToUser: t.assignedToUser,
+        responseActionType: t.responseActionType,
+        requiresDirectorApproval: t.requiresDirectorApproval
       })),
+      responseActions,
       dueDateBreached
     });
   } catch (error) {
@@ -566,6 +624,31 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
           return;
         }
       }
+
+      // Optional response action: validate type + target departments.
+      if (entry.responseActionType != null) {
+        if (!RESPONSE_ACTION_TYPES.includes(entry.responseActionType)) {
+          res.status(400).json({ message: `Invalid responseActionType: '${entry.responseActionType}'` });
+          return;
+        }
+        // All types require at least one target department.
+        if (!Array.isArray(entry.targetDepartmentIds) || entry.targetDepartmentIds.length === 0) {
+          res.status(400).json({ message: `responseActionType '${entry.responseActionType}' requires at least one targetDepartmentId` });
+          return;
+        }
+        // Validate dept IDs exist in DB.
+        const deptCount = await prisma.department.count({ where: { id: { in: entry.targetDepartmentIds } } });
+        if (deptCount !== entry.targetDepartmentIds.length) {
+          res.status(400).json({ message: 'One or more targetDepartmentIds not found' });
+          return;
+        }
+        // CAR/NCR/QR/IR: exactly one dept per row (multi-dept = multiple rows).
+        const isSingleDeptType = !(MULTI_DEPT_SINGLE_TASK_TYPES as readonly string[]).includes(entry.responseActionType);
+        if (isSingleDeptType && entry.targetDepartmentIds.length !== 1) {
+          res.status(400).json({ message: `'${entry.responseActionType}' requires exactly one targetDepartmentId per task row` });
+          return;
+        }
+      }
     }
 
     const actorName = await getUserName(userId);
@@ -619,7 +702,11 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
             status: 'Unassigned',
             schemaSnapshot: template!.formSchema as any,
             estimatedHours: template!.estimatedHours ?? null,
-            assignmentType: 'INDIVIDUAL'
+            assignmentType: 'INDIVIDUAL',
+            responseActionType: entry.responseActionType ?? null,
+            // Derived server-side — never trusted from the client.
+            requiresDirectorApproval: entry.responseActionType != null &&
+              (DIRECTOR_APPROVAL_TYPES as readonly string[]).includes(entry.responseActionType)
           },
           select: { id: true, taskId: true }
         });
@@ -633,6 +720,37 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
           `Follow-up Task ${created.taskId} created by ${actorName}`,
           { findingId: finding.id, taskId: created.taskId, taskDbId: created.id }
         );
+
+        // Record the response action and link it to the generated task.
+        if (entry.responseActionType != null) {
+          await tx.findingResponseAction.create({
+            data: {
+              findingId: finding.id,
+              type: entry.responseActionType,
+              taskId: created.id,
+              targetDepartmentIds: entry.targetDepartmentIds as Prisma.InputJsonValue,
+              note: entry.note ?? null,
+              procedureRef: entry.procedureRef ?? null,
+              createdByUserId: userId
+            }
+          });
+
+          await logFindingAuditAndActivity(
+            tx,
+            finding.id,
+            finding.sourceTaskId,
+            FINDING_EXPANSION_ACTIONS.RESPONSE_ACTION_CREATED,
+            userId,
+            `Response action ${entry.responseActionType} created → Task ${created.taskId} by ${actorName}`,
+            {
+              findingId: finding.id,
+              responseActionType: entry.responseActionType,
+              taskId: created.taskId,
+              taskDbId: created.id,
+              targetDepartmentIds: entry.targetDepartmentIds
+            }
+          );
+        }
 
         results.push(created);
       }
