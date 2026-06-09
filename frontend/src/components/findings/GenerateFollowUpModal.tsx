@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Template, WorkPackageEnriched } from '../../types';
+import { Template, WorkPackageEnriched, ResponseActionType } from '../../types';
 import { generateFollowUpTasks, FollowUpTaskInput } from '../../api/findingApi';
 import { getWorkPackages } from '../../api/wpApi';
+import { getDatasource } from '../../api/taskApi';
 import { apiClient } from '../../api/client';
 import toast from 'react-hot-toast';
 import { X, Plus, Trash2, ListPlus } from 'lucide-react';
@@ -23,18 +24,21 @@ interface RowDraft {
   wpMode: WpMode;
   wpId: number | '';
   newWpName: string;
+  responseActionType: ResponseActionType | '';
+  targetDepartmentIds: number[];
 }
 
 let _key = 0;
 const nextKey = () => ++_key;
 
 function emptyRow(): RowDraft {
-  return { _key: nextKey(), templateId: '', title: '', wpMode: 'none', wpId: '', newWpName: '' };
+  return { _key: nextKey(), templateId: '', title: '', wpMode: 'none', wpId: '', newWpName: '', responseActionType: '', targetDepartmentIds: [] };
 }
 
 export default function GenerateFollowUpModal({ findingId, onClose, onGenerated }: Props) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [openWps, setOpenWps] = useState<WorkPackageEnriched[]>([]);
+  const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
   const [rows, setRows] = useState<RowDraft[]>([emptyRow()]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -46,6 +50,7 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
     getWorkPackages()
       .then((wps) => setOpenWps(wps.filter((w) => w.computedStatus === 'Open' || w.computedStatus === 'In Progress')))
       .catch(() => {});
+    getDatasource('departments').then(setDepartments).catch(() => {});
   }, []);
 
   const updateRow = (key: number, patch: Partial<RowDraft>) =>
@@ -69,6 +74,14 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
       if (!r.title.trim()) return toast.error('Each task needs a title');
       if (r.wpMode === 'existing' && !r.wpId) return toast.error('Select a Work Package to attach to');
       if (r.wpMode === 'new' && !r.newWpName.trim()) return toast.error('Enter a name for the new Work Package');
+      if (r.responseActionType) {
+        if (r.targetDepartmentIds.length === 0) {
+          return toast.error(`Select at least one department for ${r.responseActionType}`);
+        }
+        if (!['QN', 'Dissemination'].includes(r.responseActionType) && r.targetDepartmentIds.length > 1) {
+          return toast.error(`${r.responseActionType}: add one row per department for multiple targets`);
+        }
+      }
     }
 
     const payload: FollowUpTaskInput[] = rows.map((r) => ({
@@ -76,6 +89,10 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
       title: r.title.trim(),
       ...(r.wpMode === 'existing' ? { wpId: Number(r.wpId) } : {}),
       ...(r.wpMode === 'new' ? { createNewWp: true, newWpName: r.newWpName.trim() } : {}),
+      ...(r.responseActionType ? {
+        responseActionType: r.responseActionType,
+        targetDepartmentIds: r.targetDepartmentIds,
+      } : {}),
     }));
 
     setSubmitting(true);
@@ -118,6 +135,78 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
               </div>
 
               <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">Response Action Type</label>
+                <select
+                  value={row.responseActionType}
+                  onChange={(e) => updateRow(row._key, {
+                    responseActionType: e.target.value as ResponseActionType | '',
+                    targetDepartmentIds: [],
+                    templateId: '',
+                  })}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">(None — generic follow-up)</option>
+                  <option value="IR">IR — Investigation Report (internal)</option>
+                  <option value="CAR">CAR — Corrective Action Request</option>
+                  <option value="NCR">NCR — Non-Conformance Report</option>
+                  <option value="QR">QR — Quality Request (CAPA)</option>
+                  <option value="QN">QN — Quality Notice (Director approval required)</option>
+                  <option value="Dissemination">Dissemination — Sharing / Notification</option>
+                </select>
+                {row.responseActionType && (
+                  <p className="mt-1 text-xs text-slate-400">
+                    {row.responseActionType === 'IR' && 'Internal SQD investigation. RCA/CAPA entered directly.'}
+                    {['CAR', 'NCR'].includes(row.responseActionType) && 'External: target dept investigates and returns RCA/CAPA. Add one row per department.'}
+                    {row.responseActionType === 'QR' && 'Quality Request is itself the corrective action. One row per department.'}
+                    {row.responseActionType === 'QN' && 'Informational notice. Director must approve before issue. Select all target departments.'}
+                    {row.responseActionType === 'Dissemination' && 'Sharing finding with relevant parties. Select all target departments.'}
+                  </p>
+                )}
+              </div>
+
+              {row.responseActionType && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">
+                    Target Department(s) *
+                    {!['QN', 'Dissemination'].includes(row.responseActionType) && ' (one per row for multiple depts)'}
+                  </label>
+                  {!['QN', 'Dissemination'].includes(row.responseActionType) ? (
+                    <select
+                      value={row.targetDepartmentIds[0] ?? ''}
+                      onChange={(e) => updateRow(row._key, {
+                        targetDepartmentIds: e.target.value ? [Number(e.target.value)] : []
+                      })}
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select department…</option>
+                      {departments.map((d) => (
+                        <option key={d.value} value={d.value}>{d.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1">
+                      {departments.map((d) => (
+                        <label key={d.value} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={row.targetDepartmentIds.includes(Number(d.value))}
+                            onChange={(e) => {
+                              const id = Number(d.value);
+                              const ids = e.target.checked
+                                ? [...row.targetDepartmentIds, id]
+                                : row.targetDepartmentIds.filter((x) => x !== id);
+                              updateRow(row._key, { targetDepartmentIds: ids });
+                            }}
+                          />
+                          {d.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Template (Published) *</label>
                 <select
                   value={row.templateId}
@@ -125,7 +214,10 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
                   className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Select template…</option>
-                  {templates.map((t) => (
+                  {(row.responseActionType
+                    ? templates.filter((t) => t.type === row.responseActionType)
+                    : templates
+                  ).map((t) => (
                     <option key={t.id} value={t.id}>{t.templateId} — {t.title}</option>
                   ))}
                 </select>
