@@ -72,7 +72,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         employeeId: user.employeeId,
         name: user.name,
         role: user.role.name,
-        divisionId: user.divisionId
+        divisionId: user.divisionId,
+        preferences: user.preferences ?? null
       }
     });
   } catch (error) {

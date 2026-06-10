@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
 import { TaskEnriched, TaskStatus, DeadlineStatus } from '../../../types';
 import { getTasks, getMyTasks, getUnassignedTasks, selfAssignTask } from '../../../api/taskApi';
+import { updateMyPreferences } from '../../../api/userApi';
 import TaskStatusBadge, { STATUS_CONFIG } from '../../../components/tasks/TaskStatusBadge';
 import toast from 'react-hot-toast';
 import {
@@ -15,6 +16,7 @@ import {
   AlertTriangle,
   Eye,
   Zap,
+  Columns3,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -27,6 +29,21 @@ const ALL_STATUSES: TaskStatus[] = [
   'Unassigned', 'Assigned', 'In Progress', 'In Review',
   'Follow-up Required', 'Closed', 'Rejected', 'Terminated', 'Inactive',
 ];
+
+// Toggleable list columns (Actions is always shown). Order here = render order.
+const TASK_COLUMNS: { key: string; label: string }[] = [
+  { key: 'taskId', label: 'Task ID' },
+  { key: 'title', label: 'Title' },
+  { key: 'status', label: 'Status' },
+  { key: 'assignee', label: 'Assignee' },
+  { key: 'issuer', label: 'Issuer' },
+  { key: 'deadline', label: 'Deadline' },
+  { key: 'division', label: 'Division' },
+  { key: 'lastActivity', label: 'Last Activity' },
+];
+// Default-hidden columns (per plan); everything else visible by default.
+const DEFAULT_HIDDEN_COLUMNS = ['taskId', 'division'];
+const DEFAULT_VISIBLE_COLUMNS = TASK_COLUMNS.map((c) => c.key).filter((k) => !DEFAULT_HIDDEN_COLUMNS.includes(k));
 
 // Tiered deadline badge styling: increasing urgency Yellow → Orange → Red.
 const DEADLINE_BADGE: Record<Exclude<DeadlineStatus, null>, { label: string; className: string }> = {
@@ -46,7 +63,27 @@ function formatDeadline(deadline: string | null): string {
 
 export default function TaskListPage() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, setPreferences } = useAuthStore();
+
+  // ── Column visibility (persisted to User.preferences) ──
+  const [visibleCols, setVisibleCols] = useState<string[]>(
+    user?.preferences?.taskColumns ?? DEFAULT_VISIBLE_COLUMNS
+  );
+  const [showColMenu, setShowColMenu] = useState(false);
+  const isColVisible = (key: string) => visibleCols.includes(key);
+
+  const toggleColumn = async (key: string) => {
+    const next = visibleCols.includes(key)
+      ? visibleCols.filter((k) => k !== key)
+      : [...visibleCols, key];
+    setVisibleCols(next);
+    try {
+      const { preferences } = await updateMyPreferences({ taskColumns: next });
+      setPreferences(preferences);
+    } catch {
+      toast.error('Failed to save column preferences');
+    }
+  };
 
   // ── Tab & filter state (persists within session via component state) ──
   const [activeTab, setActiveTab] = useState<ActiveTab>('all');
@@ -280,6 +317,33 @@ export default function TaskListPage() {
               className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+
+          {/* Column selector */}
+          <div className="relative sm:ml-auto">
+            <button
+              id="columns-button"
+              onClick={() => setShowColMenu((v) => !v)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:border-slate-400"
+            >
+              <Columns3 className="w-4 h-4" />
+              Columns
+            </button>
+            {showColMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2">
+                {TASK_COLUMNS.map((c) => (
+                  <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      checked={isColVisible(c.key)}
+                      onChange={() => toggleColumn(c.key)}
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Table */}
@@ -306,14 +370,14 @@ export default function TaskListPage() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Task ID</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Title</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Assignee</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Issuer</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Deadline</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Division</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Last Activity</th>
+                  {isColVisible('taskId') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Task ID</th>}
+                  {isColVisible('title') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Title</th>}
+                  {isColVisible('status') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>}
+                  {isColVisible('assignee') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Assignee</th>}
+                  {isColVisible('issuer') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Issuer</th>}
+                  {isColVisible('deadline') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Deadline</th>}
+                  {isColVisible('division') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Division</th>}
+                  {isColVisible('lastActivity') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Last Activity</th>}
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Actions</th>
                 </tr>
               </thead>
@@ -321,13 +385,16 @@ export default function TaskListPage() {
                 {filteredTasks.map((task) => (
                   <tr key={task.id} className="hover:bg-slate-50/80 transition-colors group">
                     {/* Task ID */}
+                    {isColVisible('taskId') && (
                     <td className="p-4 align-middle">
                       <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-bold font-mono border border-slate-200">
                         {task.taskId}
                       </span>
                     </td>
+                    )}
 
                     {/* Title */}
+                    {isColVisible('title') && (
                     <td className="p-4 align-middle max-w-xs">
                       <div className="font-medium text-slate-800 truncate">
                         {task.template?.title ?? '—'}
@@ -338,8 +405,10 @@ export default function TaskListPage() {
                         </div>
                       )}
                     </td>
+                    )}
 
                     {/* Status + overdue badge */}
+                    {isColVisible('status') && (
                     <td className="p-4 align-middle">
                       <div className="flex items-center gap-2 flex-wrap">
                         <TaskStatusBadge status={task.status} />
@@ -351,20 +420,26 @@ export default function TaskListPage() {
                         )}
                       </div>
                     </td>
+                    )}
 
                     {/* Assignee */}
+                    {isColVisible('assignee') && (
                     <td className="p-4 align-middle text-sm text-slate-600">
                       {task.assignedToUser?.name ?? (
                         <span className="text-slate-400 italic">Unassigned</span>
                       )}
                     </td>
+                    )}
 
                     {/* Issuer */}
+                    {isColVisible('issuer') && (
                     <td className="p-4 align-middle text-sm text-slate-600">
                       {task.issuer?.name ?? '—'}
                     </td>
+                    )}
 
                     {/* Deadline */}
+                    {isColVisible('deadline') && (
                     <td className="p-4 align-middle text-sm">
                       <span className={
                         task.deadlineStatus === 'Overdue' ? 'text-red-600 font-semibold'
@@ -375,16 +450,21 @@ export default function TaskListPage() {
                         {formatDeadline(task.deadline)}
                       </span>
                     </td>
+                    )}
 
                     {/* Division */}
+                    {isColVisible('division') && (
                     <td className="p-4 align-middle text-sm text-slate-600">
                       {task.targetDivision?.name ?? '—'}
                     </td>
+                    )}
 
                     {/* Last Activity */}
+                    {isColVisible('lastActivity') && (
                     <td className="p-4 align-middle text-sm text-slate-500">
                       {task.lastActivityAt ? formatDeadline(task.lastActivityAt) : '—'}
                     </td>
+                    )}
 
                     {/* Actions */}
                     <td className="p-4 align-middle">

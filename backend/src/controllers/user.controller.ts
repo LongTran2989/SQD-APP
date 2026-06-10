@@ -50,3 +50,61 @@ export const updateUserRole = async (req: Request, res: Response): Promise<void>
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+// Top-level keys the client is allowed to persist in User.preferences.
+const ALLOWED_PREFERENCE_KEYS = ['taskColumns', 'taskFilters'] as const;
+// Hard cap on the serialized preferences blob (defensive — it is user-controlled).
+const MAX_PREFERENCES_BYTES = 16 * 1024;
+
+// ─── PATCH /api/users/me/preferences ──────────────────────────────────────────
+// Deep-merges an allowlisted subset of UI state into the caller's own preferences.
+export const updateMyPreferences = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user!.userId;
+    const incoming = req.body?.preferences;
+
+    if (incoming === null || typeof incoming !== 'object' || Array.isArray(incoming)) {
+      res.status(400).json({ message: 'preferences must be an object' });
+      return;
+    }
+
+    // Reject any key outside the allowlist — never store arbitrary client JSON.
+    const unknownKeys = Object.keys(incoming).filter((k) => !(ALLOWED_PREFERENCE_KEYS as readonly string[]).includes(k));
+    if (unknownKeys.length > 0) {
+      res.status(400).json({ message: `Unsupported preference keys: ${unknownKeys.join(', ')}` });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+      select: { preferences: true }
+    });
+    if (!user) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    // Shallow merge at the top allowlisted level (each key is replaced wholesale,
+    // so saving one device's column prefs never clobbers another key's value).
+    const current = (user.preferences && typeof user.preferences === 'object' && !Array.isArray(user.preferences))
+      ? (user.preferences as Record<string, unknown>)
+      : {};
+    const merged = { ...current, ...incoming };
+
+    if (Buffer.byteLength(JSON.stringify(merged), 'utf8') > MAX_PREFERENCES_BYTES) {
+      res.status(413).json({ message: 'preferences payload too large' });
+      return;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { preferences: merged },
+      select: { preferences: true }
+    });
+
+    res.json({ preferences: updated.preferences });
+  } catch (error) {
+    console.error('Error updating preferences:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};

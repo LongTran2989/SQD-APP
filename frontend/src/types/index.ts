@@ -3,6 +3,11 @@ export interface Role {
   name: string;
 }
 
+export interface UserPreferences {
+  taskColumns?: string[];
+  taskFilters?: Record<string, unknown>;
+}
+
 export interface User {
   id: number;
   employeeId: string;
@@ -10,6 +15,7 @@ export interface User {
   email: string;
   role: string; // The backend returns the role name as a string
   divisionId: number | null;
+  preferences?: UserPreferences | null;
 }
 
 export interface AuthResponse {
