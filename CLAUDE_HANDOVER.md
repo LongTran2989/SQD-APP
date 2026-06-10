@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-08 (rev 8). Supersedes all previous versions.*
+*Last updated: 2026-06-10 (rev 9). Supersedes all previous versions.*
 
 ---
 
@@ -674,7 +674,7 @@ These are two separate systems that serve different purposes. **Both** are writt
 **Model:** `TimeBooking` — one-to-one with Task (uniqueness enforced at DB level).
 **Sub-model:** `TimeEntry` — append-only individual log entries linked to a `TimeBooking`.
 
-**Available only when Task status is:** `Closed`, `Rejected`, or `Terminated`
+**Available only when Task status is:** `In Review`, `Closed`, `Rejected`, or `Terminated` (Phase 8 extended from the original `Closed`/`Rejected`/`Terminated` only)
 
 #### TimeBooking attributes:
 
@@ -1068,6 +1068,25 @@ Extends Phase 5.6 Time Booking with deeper audit trail, mandatory enforcement, o
 - [x] **Analytics frontend** (`/dashboard/analytics`) — Template Efficiency table, Staff Performance table, incomplete-bookings amber banner; Manager/Director/Admin sidebar nav item
 - [x] **DB indexes** on `Task`: `[status, deletedAt]`, `[targetDivisionId, status, deletedAt]`, `[templateId, status, deletedAt]`, `[completedAt]`
 
+### Phase 8 — Time-Booking Workflow Refinements (COMPLETED 2026-06-10)
+
+Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are purely behavioural/UI. Post-ship `/code-review` was run and all findings addressed in the same branch.
+
+**Two workflow adjustments:**
+
+- **Allow final booking during `In Review`** — `FINAL_TASK_STATUSES` in `timebooking.controller.ts` now includes `'In Review'`. This single constant gates both endpoints: `createTimeBooking` (POST) now accepts `In Review` status; `createTimeEntry` (POST) now blocks new session entries for the same status (correct — you cannot log new work once a task is submitted for review).
+- **Keep Work Log visible after close** — `TimeEntryPanel` is now rendered for all post-assignment statuses (`task.status !== 'Unassigned' && task.status !== 'Inactive'`), so the history list persists on `Closed`/`Rejected`/`Terminated` tasks for traceability. The create form inside `TimeEntryPanel` is gated separately via a `LOGGABLE_STATUSES` constant (`Assigned` / `In Progress` / `Follow-up Required`) — final-state and `In Review` tasks show the history read-only only.
+
+**Frontend additions:**
+- `TimeBookingPanel` wrapped in `<div id="time-booking-section">` for in-page anchor navigation.
+- Amber banner on `In Review` tasks without a booking: *"Submit it now so your manager can rate the task once it is approved."* (Accurate: rating happens after `Closed`, not during `In Review` — the rating gate lives in `task.controller.ts` which uses a separate `FINAL_TASK_STATUSES` constant that does not include `In Review`.)
+- Pre-submit reminder link added below the Save/Submit button group in `TaskActionBar.tsx` (`isEditable && isAssignee` block): *"After submitting, Please perform final time booking!"*
+
+**Code-review fixes (same branch, post-ship):**
+- `TimeEntryPanel.tsx`: `LOGGABLE_STATUSES` constant added; form gated with `isAssignee && canLogEntries` to prevent an interactive form rendering on tasks where the backend would hard-reject the POST with 400.
+- `page.tsx` In Review banner copy corrected (see above — removed misleading "your manager needs this before rating").
+- `timebooking.controller.ts` 400 error message updated to list "In Review, Closed, Rejected, or Terminated" (was stale after adding `In Review` to `FINAL_TASK_STATUSES`).
+
 ### Phase 7 — User Management & Settings
 - [ ] `/dashboard/users` — Admin only: manage users, roles, divisions
 - [ ] `/dashboard/settings` — personal preferences, password change
@@ -1129,6 +1148,10 @@ Extends Phase 5.6 Time Booking with deeper audit trail, mandatory enforcement, o
 31. **`requiresDirectorApproval` is always server-derived — never trust the client:** The flag is set by `generateFollowUpTasks` based on `responseActionType ∈ DIRECTOR_APPROVAL_TYPES`. The client-side `Task` interface includes it for display purposes only (purple banner in `TaskDetailPanel`, text label in finding follow-up list). If a client somehow sends `requiresDirectorApproval: false` in a request body, the server ignores it and re-derives from `responseActionType`.
 
 32. **Per-department QN task tracking deferred to Change Management phase:** QN (Quality Notice) tasks currently set `requiresDirectorApproval = true` and record all target departments in `FindingResponseAction.targetDepartmentIds`. Per-department completion tracking (one task per dept, tracked individually) is deferred to the Change Management phase. The current implementation creates a single task regardless of how many departments are selected for QN/Dissemination types.
+
+33. **`FINAL_TASK_STATUSES` is intentionally duplicated across controllers and is NOT the same as `LOGGABLE_STATUSES` in the frontend:** `timebooking.controller.ts` has its own module-local copy that now includes `'In Review'`. `task.controller.ts`, `analytics.controller.ts`, `wp.controller.ts`, and `findingService.ts` each have their own copy that is still `['Closed', 'Rejected', 'Terminated']`. Do NOT consolidate into a shared constant — the rating gate, WP status, and finding hooks must not include `'In Review'`. `TimeEntryPanel.tsx` has a separate `LOGGABLE_STATUSES = ['Assigned', 'In Progress', 'Follow-up Required']` that gates the entry create form; it is also intentionally separate from the backend constant.
+
+34. **Rating is still blocked for `In Review` tasks despite booking being allowed there:** The rating gate in `task.controller.ts` (`rateTask`) uses its own `FINAL_TASK_STATUSES` which does NOT include `'In Review'`. A manager attempting to rate an `In Review` task will get *"Task must be in a final state to be rated."* This is correct by design — the booking is created during `In Review` as preparation so it is ready the moment the task is approved/closed. The In Review banner copy reflects this: *"Submit it now so your manager can rate the task once it is approved."*
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 
