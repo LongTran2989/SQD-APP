@@ -179,6 +179,11 @@ export default function TemplateListPage() {
                       <td className="p-4 align-middle">
                         <div className="font-semibold text-slate-800">{template.title}</div>
                         <div className="flex items-center gap-2 mt-1">
+                          {template.hasPendingChanges && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">
+                              PENDING
+                            </span>
+                          )}
                           {template.skillLevel > 0 && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700">
                               SKILL {template.skillLevel}

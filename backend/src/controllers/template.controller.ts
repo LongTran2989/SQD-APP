@@ -7,6 +7,43 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
+// Roles that may own/edit/publish templates (a template owner must be one of these).
+const TEMPLATE_OWNER_ROLES = ['Manager', 'Director', 'Admin'];
+
+/**
+ * Optimistic concurrency guard. The client echoes the `updatedAt` it last saw;
+ * if it no longer matches the DB row, the row changed under it → 409 Conflict.
+ * When the client omits the token we skip the check (back-compat). Returns false
+ * (and writes the response) on conflict so callers can early-return.
+ */
+function assertNotStale(dbUpdatedAt: Date, clientUpdatedAt: unknown, res: Response): boolean {
+  if (clientUpdatedAt === undefined || clientUpdatedAt === null) return true;
+  const client = new Date(String(clientUpdatedAt)).getTime();
+  if (Number.isNaN(client) || client !== dbUpdatedAt.getTime()) {
+    res.status(409).json({ message: 'This template was modified by someone else. Please reload and try again.' });
+    return false;
+  }
+  return true;
+}
+
+/** Canonical JSON (sorted object keys) for order-insensitive deep comparison. */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce((acc, k) => {
+        acc[k] = canonicalize((value as Record<string, unknown>)[k]);
+        return acc;
+      }, {} as Record<string, unknown>);
+  }
+  return value;
+}
+
+function deepEqualCanonical(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonicalize(a)) === JSON.stringify(canonicalize(b));
+}
+
 // ─── GET /api/templates ──────────────────────────────────────────────
 export const getTemplates = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -24,28 +61,14 @@ export const getTemplates = async (req: Request, res: Response): Promise<void> =
     const isAdminOrDirector = ['Admin', 'Director'].includes(userRole);
 
     const mappedTemplates = templates.map(t => {
-      // For anyone else, do not leak draftSchema
-      let returnedTemplate = { ...t, draftSchema: undefined };
-
-      if (t.draftSchema && (t.ownerId === userId || isAdminOrDirector)) {
-        returnedTemplate = {
-          ...returnedTemplate,
-          status: 'Draft',
-          ...(Array.isArray(t.draftSchema) 
-            ? { formSchema: t.draftSchema as any } 
-            : {
-                title: (t.draftSchema as any).title,
-                description: (t.draftSchema as any).description,
-                formSchema: (t.draftSchema as any).formSchema,
-                requiresApproval: (t.draftSchema as any).requiresApproval,
-                allowsFindings: (t.draftSchema as any).allowsFindings,
-                estimatedHours: (t.draftSchema as any).estimatedHours,
-                skillLevel: (t.draftSchema as any).skillLevel,
-                type: (t.draftSchema as any).type,
-              })
-        };
-      }
-      return returnedTemplate;
+      const canSeeDraft = t.ownerId === userId || isAdminOrDirector;
+      // PR7: no longer mask Published-with-draft as 'Draft'. Return the TRUE status
+      // plus a hasPendingChanges flag; expose draftSchema only to owner/Admin/Director.
+      return {
+        ...t,
+        hasPendingChanges: t.draftSchema != null,
+        draftSchema: canSeeDraft ? t.draftSchema : undefined,
+      };
     });
 
     res.json(mappedTemplates);
@@ -80,26 +103,15 @@ export const getTemplateById = async (req: Request, res: Response): Promise<void
     const userId = req.user!.userId;
     const userRole = req.user!.role;
     const isAdminOrDirector = ['Admin', 'Director'].includes(userRole);
+    const canSeeDraft = template.ownerId === userId || isAdminOrDirector;
 
-    let responseTemplate: any = { ...template, draftSchema: undefined };
-    if (template.draftSchema && (template.ownerId === userId || isAdminOrDirector)) {
-      responseTemplate = {
-        ...responseTemplate,
-        status: 'Draft',
-        ...(Array.isArray(template.draftSchema) 
-          ? { formSchema: template.draftSchema } 
-          : {
-              title: (template.draftSchema as any).title,
-              description: (template.draftSchema as any).description,
-              formSchema: (template.draftSchema as any).formSchema,
-              requiresApproval: (template.draftSchema as any).requiresApproval,
-              allowsFindings: (template.draftSchema as any).allowsFindings,
-              estimatedHours: (template.draftSchema as any).estimatedHours,
-              skillLevel: (template.draftSchema as any).skillLevel,
-              type: (template.draftSchema as any).type,
-            })
-      };
-    }
+    // PR7: return the TRUE status + hasPendingChanges; expose draftSchema only to
+    // owner/Admin/Director so the builder can edit the pending draft.
+    const responseTemplate = {
+      ...template,
+      hasPendingChanges: template.draftSchema != null,
+      draftSchema: canSeeDraft ? template.draftSchema : undefined,
+    };
 
     res.json(responseTemplate);
   } catch (error) {
@@ -189,7 +201,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
     const userRole = req.user!.role;
-    const { title, description, formSchema, requiresApproval, allowsFindings, estimatedHours, skillLevel, type } = req.body;
+    const { title, description, formSchema, requiresApproval, allowsFindings, estimatedHours, skillLevel, type, updatedAt } = req.body;
 
     const existingTemplate = await prisma.template.findUnique({ where: { id } });
 
@@ -208,6 +220,10 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
       res.status(403).json({ message: 'Only the template owner can modify this template.' });
       return;
     }
+
+    // Optimistic concurrency (PR7): the client echoes the updatedAt it last saw.
+    // Treat it as an opaque token; reject if the row has moved on since.
+    if (!assertNotStale(existingTemplate.updatedAt, updatedAt, res)) return;
 
     let dataToUpdate: any = {
       revisedByUserId: userId,
@@ -250,25 +266,12 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
       }
     });
 
-    let responseTemplate: any = { ...updatedTemplate, draftSchema: undefined };
-    if (updatedTemplate.draftSchema && (updatedTemplate.ownerId === userId || ['Admin', 'Director'].includes(userRole))) {
-      responseTemplate = {
-        ...responseTemplate,
-        status: 'Draft',
-        ...(Array.isArray(updatedTemplate.draftSchema) 
-          ? { formSchema: updatedTemplate.draftSchema } 
-          : {
-              title: (updatedTemplate.draftSchema as any).title,
-              description: (updatedTemplate.draftSchema as any).description,
-              formSchema: (updatedTemplate.draftSchema as any).formSchema,
-              requiresApproval: (updatedTemplate.draftSchema as any).requiresApproval,
-              allowsFindings: (updatedTemplate.draftSchema as any).allowsFindings,
-              estimatedHours: (updatedTemplate.draftSchema as any).estimatedHours,
-              skillLevel: (updatedTemplate.draftSchema as any).skillLevel,
-              type: (updatedTemplate.draftSchema as any).type,
-            })
-      };
-    }
+    const canSeeDraft = updatedTemplate.ownerId === userId || ['Admin', 'Director'].includes(userRole);
+    const responseTemplate = {
+      ...updatedTemplate,
+      hasPendingChanges: updatedTemplate.draftSchema != null,
+      draftSchema: canSeeDraft ? updatedTemplate.draftSchema : undefined,
+    };
 
     res.json(responseTemplate);
   } catch (error) {
@@ -283,6 +286,7 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
     const userRole = req.user!.role;
+    const { updatedAt: clientUpdatedAt } = req.body ?? {};
 
     const result = await prisma.$transaction(async (tx) => {
       const template = await tx.template.findUnique({ where: { id } });
@@ -295,6 +299,15 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
       // Check ownership
       if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
         throw new Error('Only the template owner can publish this template.');
+      }
+
+      // Optimistic concurrency (PR7) — inside the tx so a concurrent draft write
+      // cannot slip between the read and the publish.
+      if (clientUpdatedAt !== undefined && clientUpdatedAt !== null) {
+        const client = new Date(String(clientUpdatedAt)).getTime();
+        if (Number.isNaN(client) || client !== template.updatedAt.getTime()) {
+          throw new Error('STALE_TEMPLATE');
+        }
       }
 
       // If already published, archive the current version before overwriting
@@ -345,6 +358,34 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
         throw new Error('Cannot publish a template with an empty formSchema');
       }
 
+      // PR7: when republishing a Published template's pending draft, abort if the
+      // draft is identical to what is already live (order-insensitive deep compare).
+      if (template.status === 'Published' && template.draftSchema != null) {
+        const nextState = {
+          title: dataToPublish.title ?? template.title,
+          description: dataToPublish.description ?? template.description,
+          formSchema: dataToPublish.formSchema,
+          requiresApproval: dataToPublish.requiresApproval ?? template.requiresApproval,
+          allowsFindings: dataToPublish.allowsFindings ?? template.allowsFindings,
+          estimatedHours: dataToPublish.estimatedHours ?? template.estimatedHours,
+          skillLevel: dataToPublish.skillLevel ?? template.skillLevel,
+          type: dataToPublish.type ?? template.type,
+        };
+        const currentState = {
+          title: template.title,
+          description: template.description,
+          formSchema: template.formSchema,
+          requiresApproval: template.requiresApproval,
+          allowsFindings: template.allowsFindings,
+          estimatedHours: template.estimatedHours,
+          skillLevel: template.skillLevel,
+          type: template.type,
+        };
+        if (deepEqualCanonical(nextState, currentState)) {
+          throw new Error('NO_CHANGES');
+        }
+      }
+
       // Publish
       return tx.template.update({
         where: { id },
@@ -379,6 +420,14 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
       res.status(403).json({ message: error.message });
       return;
     }
+    if (error.message === 'STALE_TEMPLATE') {
+      res.status(409).json({ message: 'This template was modified by someone else. Please reload and try again.' });
+      return;
+    }
+    if (error.message === 'NO_CHANGES') {
+      res.status(400).json({ message: 'No changes to publish — the draft is identical to the current published version.' });
+      return;
+    }
     console.error('Error publishing template:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -403,16 +452,31 @@ export const transferOwnership = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // Only owner or privileged user can transfer
-    if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
-      res.status(403).json({ message: 'Only the template owner or an Admin can transfer ownership.' });
+    const isGlobal = ['Admin', 'Director'].includes(userRole); // Director/Admin act cross-division
+
+    // Who may transfer: the owner, or a global role (Director/Admin).
+    if (template.ownerId !== userId && !isGlobal) {
+      res.status(403).json({ message: 'Only the template owner or a Director/Admin can transfer ownership.' });
       return;
     }
 
-    // Check if new owner exists
-    const newOwner = await prisma.user.findUnique({ where: { id: parseInt(newOwnerId), deletedAt: null } });
+    // The new owner must exist and hold a task-creator role (Manager/Director/Admin).
+    const newOwner = await prisma.user.findUnique({
+      where: { id: parseInt(newOwnerId), deletedAt: null },
+      include: { role: { select: { name: true } } }
+    });
     if (!newOwner) {
       res.status(404).json({ message: 'New owner user not found' });
+      return;
+    }
+    if (!TEMPLATE_OWNER_ROLES.includes(newOwner.role.name)) {
+      res.status(400).json({ message: 'New owner must be a Manager, Director, or Admin.' });
+      return;
+    }
+
+    // The new owner must be in the template's division unless the actor is global.
+    if (!isGlobal && newOwner.divisionId !== template.divisionId) {
+      res.status(403).json({ message: 'New owner must belong to the same division as the template.' });
       return;
     }
 

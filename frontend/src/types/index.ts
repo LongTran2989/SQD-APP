@@ -80,6 +80,7 @@ export interface Template {
   
   formSchema: FormField[];
   draftSchema?: any;
+  hasPendingChanges?: boolean;
   revisionArchives?: any[];
   
   createdAt: string;
