@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
@@ -82,6 +82,24 @@ export default function TaskDetailPage() {
   useEffect(() => {
     loadTask();
   }, [loadTask]);
+
+  // ── Lightweight meta refresh — updates task/activity/findings without resetting
+  //    formData. Use this for callbacks triggered mid-edit (time entries, bookings)
+  //    so unsaved form changes are not wiped. loadTask() is for initial mount only.
+  const refreshTaskMeta = useCallback(async () => {
+    if (!taskId) return;
+    try {
+      const [taskData, activityData] = await Promise.all([
+        getTaskById(taskId),
+        getTaskActivity(taskId),
+      ]);
+      setTask(taskData);
+      setActivities(activityData);
+      getFindingsByTask(taskId).then(setLinkedFindings).catch(() => {});
+    } catch {
+      // non-fatal — page already loaded, silently ignore
+    }
+  }, [taskId]);
 
   // ── Form data change handler ──
   const handleDataChange = (fieldId: string, value: unknown) => {
@@ -304,14 +322,14 @@ export default function TaskDetailPage() {
             <TimeEntryPanel
               task={task}
               currentUser={user}
-              onEntryAdded={loadTask}
+              onEntryAdded={refreshTaskMeta}
             />
           )}
 
           {/* Time Booking — available from In Review onwards */}
           {['In Review', 'Closed', 'Rejected', 'Terminated'].includes(task.status) && (
             <div id="time-booking-section">
-              <TimeBookingPanel task={task} currentUser={user} onBookingChange={loadTask} />
+              <TimeBookingPanel task={task} currentUser={user} onBookingChange={refreshTaskMeta} />
             </div>
           )}
 
