@@ -1027,6 +1027,63 @@ describe('Task Backend (Phase 5.2)', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // PR4 — Deadline status tiers (non-breaking; isOverdue retained)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Deadline status (PR4)', () => {
+    const daysFromNow = (n: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      return d.toISOString().split('T')[0];
+    };
+
+    async function createWithDeadline(deadline?: string): Promise<string> {
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId, assignedToUserId: staffId, deadline });
+      expect(res.status).toBe(201);
+      return res.body.id;
+    }
+
+    it('PR4-A: no deadline → deadlineStatus null, isOverdue false', async () => {
+      const id = await createWithDeadline();
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBeNull();
+      expect(res.body.isOverdue).toBe(false);
+    });
+
+    it('PR4-B: deadline today → Due Today', async () => {
+      const id = await createWithDeadline(daysFromNow(0));
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBe('Due Today');
+    });
+
+    it('PR4-C: deadline within 72h → Due Soon', async () => {
+      const id = await createWithDeadline(daysFromNow(2));
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBe('Due Soon');
+    });
+
+    it('PR4-D: deadline far future → null (no badge)', async () => {
+      const id = await createWithDeadline(daysFromNow(30));
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBeNull();
+    });
+
+    it('PR4-E: deadline in the past → Overdue (and isOverdue true)', async () => {
+      const id = await createWithDeadline(daysFromNow(2));
+      // Force the deadline into the past directly (endpoint blocks past dates).
+      const past = new Date();
+      past.setDate(past.getDate() - 3);
+      await prisma.task.update({ where: { id: Number(id) }, data: { deadline: past } });
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBe('Overdue');
+      expect(res.body.isOverdue).toBe(true);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Group 5 — Review Actions
   // ──────────────────────────────────────────────────────────────────────────
 

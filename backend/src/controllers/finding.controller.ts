@@ -649,6 +649,8 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
       title: string;
       formSchema: Prisma.InputJsonValue;
       estimatedHours: number | null;
+      requiresApproval: boolean;
+      skillLevel: number;
       createNewWp: boolean;
       newWpName: string | null;
       wpId: number | null;

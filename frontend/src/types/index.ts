@@ -105,9 +105,11 @@ export interface Task {
   rejectionReason: string | null;
   rating: number | null;
   estimatedHours: number | null;
+  skillLevel: number;
   issuanceNote: string | null;
   responseActionType: ResponseActionType | null;
   requiresDirectorApproval: boolean;
+  requiresApproval: boolean;
   assignmentType: string;
   schemaSnapshot: FormField[];
   targetDivisionId: number | null;
@@ -119,8 +121,11 @@ export interface Task {
 
 // Enriched Task — returned by GET /api/tasks/:id and list endpoints
 // Includes nested joined objects from taskInclude() + computed isOverdue
+export type DeadlineStatus = 'Due Soon' | 'Due Today' | 'Overdue' | null;
+
 export interface TaskEnriched extends Task {
   isOverdue: boolean;
+  deadlineStatus: DeadlineStatus;
   template: { id: number; templateId: string; title: string; allowsFindings?: boolean } | null;
   issuer: { id: number; name: string } | null;
   assignedToUser: { id: number; name: string; role?: string } | null;

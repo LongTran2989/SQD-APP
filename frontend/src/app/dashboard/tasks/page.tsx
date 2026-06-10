@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
-import { TaskEnriched, TaskStatus } from '../../../types';
+import { TaskEnriched, TaskStatus, DeadlineStatus } from '../../../types';
 import { getTasks, getMyTasks, getUnassignedTasks, selfAssignTask } from '../../../api/taskApi';
 import TaskStatusBadge, { STATUS_CONFIG } from '../../../components/tasks/TaskStatusBadge';
 import toast from 'react-hot-toast';
@@ -27,6 +27,13 @@ const ALL_STATUSES: TaskStatus[] = [
   'Unassigned', 'Assigned', 'In Progress', 'In Review',
   'Follow-up Required', 'Closed', 'Rejected', 'Terminated', 'Inactive',
 ];
+
+// Tiered deadline badge styling: increasing urgency Yellow → Orange → Red.
+const DEADLINE_BADGE: Record<Exclude<DeadlineStatus, null>, { label: string; className: string }> = {
+  'Due Soon':  { label: 'DUE SOON',  className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  'Due Today': { label: 'DUE TODAY', className: 'bg-orange-50 text-orange-700 border-orange-200' },
+  'Overdue':   { label: 'OVERDUE',   className: 'bg-red-50 text-red-600 border-red-200' },
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -280,10 +287,10 @@ export default function TaskListPage() {
                     <td className="p-4 align-middle">
                       <div className="flex items-center gap-2 flex-wrap">
                         <TaskStatusBadge status={task.status} />
-                        {task.isOverdue && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-600 rounded-full text-[10px] font-bold border border-red-200">
+                        {task.deadlineStatus && (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${DEADLINE_BADGE[task.deadlineStatus].className}`}>
                             <AlertTriangle className="w-2.5 h-2.5" />
-                            OVERDUE
+                            {DEADLINE_BADGE[task.deadlineStatus].label}
                           </span>
                         )}
                       </div>
@@ -303,7 +310,12 @@ export default function TaskListPage() {
 
                     {/* Deadline */}
                     <td className="p-4 align-middle text-sm">
-                      <span className={task.isOverdue ? 'text-red-600 font-semibold' : 'text-slate-600'}>
+                      <span className={
+                        task.deadlineStatus === 'Overdue' ? 'text-red-600 font-semibold'
+                        : task.deadlineStatus === 'Due Today' ? 'text-orange-600 font-semibold'
+                        : task.deadlineStatus === 'Due Soon' ? 'text-yellow-700 font-medium'
+                        : 'text-slate-600'
+                      }>
                         {formatDeadline(task.deadline)}
                       </span>
                     </td>

@@ -135,6 +135,42 @@ function computeIsOverdue(task: { deadline: Date | null; status: string }): bool
   return new Date() > task.deadline;
 }
 
+export type DeadlineStatus = 'Due Soon' | 'Due Today' | 'Overdue' | null;
+
+// Window (hours) before the deadline at which a task is flagged "Due Soon".
+const DUE_SOON_WINDOW_HOURS = 72;
+
+/**
+ * Tiered deadline signal, computed on-the-fly (never stored). Returns null when
+ * there is no deadline or the task is final/inactive. "Due Today" means the
+ * deadline falls on the current calendar day (server timezone); "Overdue" means
+ * the deadline has passed; "Due Soon" means within DUE_SOON_WINDOW_HOURS.
+ */
+function computeDeadlineStatus(task: { deadline: Date | null; status: string }): DeadlineStatus {
+  if (!task.deadline) return null;
+  if (FINAL_TASK_STATUSES.includes(task.status)) return null;
+  if (task.status === 'Inactive') return null;
+
+  const now = new Date();
+  const deadline = new Date(task.deadline);
+
+  // "Due Today" takes precedence for the current calendar day: a date-only deadline
+  // is stored at midnight, so a same-day deadline would otherwise read as Overdue by
+  // the afternoon. Only a deadline on an earlier calendar day is truly Overdue.
+  const sameDay =
+    now.getFullYear() === deadline.getFullYear() &&
+    now.getMonth() === deadline.getMonth() &&
+    now.getDate() === deadline.getDate();
+  if (sameDay) return 'Due Today';
+
+  if (now > deadline) return 'Overdue';
+
+  const hoursUntil = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
+  if (hoursUntil <= DUE_SOON_WINDOW_HOURS) return 'Due Soon';
+
+  return null;
+}
+
 /**
  * Returns the standard task include object for consistent response shapes.
  * All scalar fields (incl. responseActionType, requiresDirectorApproval) are
@@ -203,7 +239,8 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
 
     const result = tasks.map(t => ({
       ...t,
-      isOverdue: computeIsOverdue(t)
+      isOverdue: computeIsOverdue(t),
+      deadlineStatus: computeDeadlineStatus(t)
     }));
 
     res.json(result);
@@ -233,7 +270,8 @@ export const getMyTasks = async (req: Request, res: Response): Promise<void> => 
 
     const result = tasks.map(t => ({
       ...t,
-      isOverdue: computeIsOverdue(t)
+      isOverdue: computeIsOverdue(t),
+      deadlineStatus: computeDeadlineStatus(t)
     }));
 
     res.json(result);
@@ -266,7 +304,8 @@ export const getUnassignedTasks = async (req: Request, res: Response): Promise<v
 
     const result = tasks.map(t => ({
       ...t,
-      isOverdue: computeIsOverdue(t)
+      isOverdue: computeIsOverdue(t),
+      deadlineStatus: computeDeadlineStatus(t)
     }));
 
     res.json(result);
@@ -300,7 +339,7 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
     // All authenticated users can view the task details.
     // Action endpoints (PUT/POST) remain strictly controlled.
 
-    res.json({ ...task, isOverdue: computeIsOverdue(task) });
+    res.json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
   } catch (error) {
     console.error('Error fetching task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -471,7 +510,7 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
       createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
     );
 
-    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task) });
+    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -557,7 +596,7 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -610,7 +649,7 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId: userId }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error self-assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -745,7 +784,7 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error submitting task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -859,7 +898,7 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error reviewing task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -960,7 +999,7 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error performing post-rejection action:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1052,7 +1091,7 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
       reassignTaskService(tx, { userId, role, divisionId }, { taskId: id, newAssigneeId, reason })
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -1124,7 +1163,7 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
       { previousIssuerId, newIssuerId }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error transferring issuer rights:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1194,7 +1233,7 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
       reason
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error inactivating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1250,7 +1289,7 @@ export const reactivateTask = async (req: Request, res: Response): Promise<void>
       { fromStatus: 'Inactive', toStatus: previousStatus }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error reactivating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1308,7 +1347,7 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
       { deadline: newDeadline.toISOString() }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error setting deadline:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1382,7 +1421,7 @@ export const requestDeadlineExtension = async (req: Request, res: Response): Pro
       { reason, proposedDeadline: proposedDeadline ?? null }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error requesting deadline extension:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1481,7 +1520,7 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
       { decision, newDeadline: deadlineUpdate?.toISOString() ?? null, extensionIndex }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error deciding deadline extension:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1586,7 +1625,7 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
       { previousRating, newRating: rating, isRevision }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error rating task:', error);
     res.status(500).json({ message: 'Internal server error' });
