@@ -35,6 +35,7 @@ import {
   ChevronUp,
   AlertTriangle,
   RefreshCw,
+  Clock,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -684,6 +685,19 @@ export default function TaskActionBar({
           <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-700">
             <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
             Aviation QA integrity: you cannot approve a task you submitted yourself.
+          </div>
+        )}
+
+        {/* Final time booking nudge — stays visible until the assignee books their time */}
+        {task.status === 'In Review' && isAssignee && !task.timeBooking && (
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+            <Clock className="w-4 h-4 flex-shrink-0" />
+            <span>
+              <a href="#time-booking-section" className="font-bold underline hover:text-amber-800 transition-colors">
+                Log your final time
+              </a>
+              {' '}— required before your manager can rate this task.
+            </span>
           </div>
         )}
 
