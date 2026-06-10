@@ -17,6 +17,7 @@ import {
   Eye,
   Zap,
   Columns3,
+  ChevronDown,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ export default function TaskListPage() {
     user?.preferences?.taskColumns ?? DEFAULT_VISIBLE_COLUMNS
   );
   const [showColMenu, setShowColMenu] = useState(false);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
   const isColVisible = (key: string) => visibleCols.includes(key);
 
   const toggleColumn = async (key: string) => {
@@ -177,6 +179,7 @@ export default function TaskListPage() {
     setStartDate('');
     setEndDate('');
     setOverdueOnly(false);
+    setShowStatusMenu(false);
   };
 
   const canCreateTask = user && TASK_CREATOR_ROLES.includes(user.role);
@@ -272,39 +275,63 @@ export default function TaskListPage() {
             />
           </div>
 
-          {/* Status filter pills (multi-select) */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Status filter dropdown (multi-select) */}
+          <div className="relative">
             <button
-              id="status-filter-all"
-              onClick={() => setStatusFilters([])}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                statusFilters.length === 0
-                  ? 'bg-slate-800 text-white border-slate-800'
+              id="status-filter-button"
+              onClick={() => setShowStatusMenu((v) => !v)}
+              className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition-colors ${
+                statusFilters.length > 0
+                  ? 'bg-blue-50 text-blue-700 border-blue-300'
                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
             >
-              All
+              {statusFilters.length === 0
+                ? 'All Statuses'
+                : statusFilters.length === 1
+                ? STATUS_CONFIG[statusFilters[0]].label
+                : `${statusFilters.length} selected`}
+              <ChevronDown className="w-4 h-4" />
             </button>
-            {ALL_STATUSES.map((s) => {
-              const cfg = STATUS_CONFIG[s];
-              const isActive = statusFilters.includes(s);
-              return (
-                <button
-                  key={s}
-                  id={`status-filter-${s.replace(/\s+/g, '-').toLowerCase()}`}
-                  onClick={() =>
-                    setStatusFilters((prev) =>
-                      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
-                    )
-                  }
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                    isActive ? cfg.color + ' border-current' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
-                  }`}
-                >
-                  {cfg.label}
-                </button>
-              );
-            })}
+            {showStatusMenu && (
+              <div className="absolute left-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2">
+                <label className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm font-semibold text-slate-700">
+                  <input
+                    id="status-filter-all"
+                    type="checkbox"
+                    checked={statusFilters.length === 0}
+                    onChange={() => setStatusFilters([])}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  All Statuses
+                </label>
+                <div className="my-1 border-t border-slate-100" />
+                {ALL_STATUSES.map((s) => {
+                  const cfg = STATUS_CONFIG[s];
+                  return (
+                    <label
+                      key={s}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm"
+                    >
+                      <input
+                        id={`status-filter-${s.replace(/\s+/g, '-').toLowerCase()}`}
+                        type="checkbox"
+                        checked={statusFilters.includes(s)}
+                        onChange={() =>
+                          setStatusFilters((prev) =>
+                            prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+                          )
+                        }
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${cfg.color}`}>
+                        {cfg.label}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Overdue toggle */}
