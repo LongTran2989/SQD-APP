@@ -33,6 +33,10 @@ export default function NewWorkPackagePage() {
         timeframeFrom: values.timeframeFrom,
         timeframeTo: values.timeframeTo,
         checkTemplateId: values.checkTemplateId ? Number(values.checkTemplateId) : undefined,
+        acRegistration: values.acRegistration || null,
+        customer: values.customer || null,
+        authority: values.authority || null,
+        targetDepartmentId: values.targetDepartmentId ? Number(values.targetDepartmentId) : null,
       });
       toast.success(`Work Package ${wp.wpId} created`);
       router.push(`/dashboard/work-packages/${wp.id}`);

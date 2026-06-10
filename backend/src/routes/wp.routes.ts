@@ -29,8 +29,9 @@ router.get('/:id', getWorkPackageById);
 // WP creation — Manager, Director, Admin
 router.post('/', authorizeRoles('Admin', 'Director', 'Manager'), createWorkPackage);
 
-// WP update — Manager, Director, Admin (ownership also checked in controller)
-router.put('/:id', authorizeRoles('Admin', 'Director', 'Manager'), updateWorkPackage);
+// WP update — authorization handled in controller (managers/creator/global edit all
+// fields; assigned users may edit only the timeframe).
+router.put('/:id', updateWorkPackage);
 
 // WP status changes — checked in controller (creator, Admin, Director)
 router.put('/:id/status', updateWorkPackageStatus);

@@ -962,4 +962,94 @@ describe('Work Package Backend', () => {
       expect(res.body.length).toBeGreaterThanOrEqual(2);
     });
   });
+
+  // ─── PR8: type-specific fields, type validation, assignee timeframe edits ────
+  describe('Type-specific fields & assignee edits (PR8)', () => {
+    const future = (days: number) => new Date(Date.now() + days * 86400000).toISOString();
+
+    it('PR8-A: CHECK WP persists acRegistration/customer/authority', async () => {
+      // Seed CHECK type + a published check template.
+      await prisma.wpType.upsert({ where: { code: 'CHECK' }, update: {}, create: { code: 'CHECK', description: 'Check' } });
+      const tmpl = await prisma.template.create({ data: { templateId: `WP-CHK-${Date.now() % 100000}`, title: 'Chk', formSchema: [{ id: '1', type: 'text', label: 'x' }], status: 'Published', publishedAt: new Date(), ownerId: managerUserId, divisionId } });
+      const res = await request(app)
+        .post('/api/work-packages')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ name: 'Check WP', type: 'CHECK', divisionId, timeframeFrom: future(1), timeframeTo: future(10), checkTemplateId: tmpl.id, acRegistration: 'VN-A361', customer: 'VNA', authority: 'CAAV' });
+      expect(res.status).toBe(201);
+      expect(res.body.acRegistration).toBe('VN-A361');
+      expect(res.body.customer).toBe('VNA');
+      expect(res.body.authority).toBe('CAAV');
+    });
+
+    it('PR8-B: AUDIT WP persists targetDepartmentId; invalid dept → 400', async () => {
+      await prisma.wpType.upsert({ where: { code: 'AUDIT' }, update: {}, create: { code: 'AUDIT', description: 'Audit' } });
+      const dept = await prisma.department.upsert({ where: { name: 'WP Audit Dept' }, update: {}, create: { name: 'WP Audit Dept' } });
+
+      const ok = await request(app)
+        .post('/api/work-packages')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ name: 'Audit WP', type: 'AUDIT', divisionId, timeframeFrom: future(1), timeframeTo: future(10), targetDepartmentId: dept.id });
+      expect(ok.status).toBe(201);
+      expect(ok.body.targetDepartmentId).toBe(dept.id);
+
+      const bad = await request(app)
+        .post('/api/work-packages')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ name: 'Audit WP Bad', type: 'AUDIT', divisionId, timeframeFrom: future(1), timeframeTo: future(10), targetDepartmentId: 999999 });
+      expect(bad.status).toBe(400);
+    });
+
+    it('PR8-C: invalid WP type → 400', async () => {
+      const res = await request(app)
+        .post('/api/work-packages')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ name: 'Bad type', type: 'NOPE', divisionId, timeframeFrom: future(1), timeframeTo: future(10) });
+      expect(res.status).toBe(400);
+    });
+
+    it('PR8-D: assigned Staff can edit timeframe but not other fields', async () => {
+      await prisma.wpType.upsert({ where: { code: 'AUDIT' }, update: {}, create: { code: 'AUDIT', description: 'Audit' } });
+      const create = await request(app)
+        .post('/api/work-packages')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ name: 'Assignee WP', type: 'AUDIT', divisionId, timeframeFrom: future(1), timeframeTo: future(10) });
+      expect(create.status).toBe(201);
+      const wpId = create.body.id;
+
+      // Assign the staff user.
+      const assign = await request(app)
+        .post(`/api/work-packages/${wpId}/assign`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ userId: staffUserId });
+      expect([200, 201]).toContain(assign.status);
+
+      // Staff edits timeframe → allowed.
+      const tf = await request(app)
+        .put(`/api/work-packages/${wpId}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ timeframeFrom: future(2), timeframeTo: future(12) });
+      expect(tf.status).toBe(200);
+
+      // Staff edits the name → forbidden.
+      const nameEdit = await request(app)
+        .put(`/api/work-packages/${wpId}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ name: 'Renamed by staff' });
+      expect(nameEdit.status).toBe(403);
+    });
+
+    it('PR8-E: non-assigned Staff cannot edit → 403', async () => {
+      const create = await request(app)
+        .post('/api/work-packages')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ name: 'NoAccess WP', type: 'AUDIT', divisionId, timeframeFrom: future(1), timeframeTo: future(10) });
+      expect(create.status).toBe(201);
+
+      const res = await request(app)
+        .put(`/api/work-packages/${create.body.id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ timeframeFrom: future(2), timeframeTo: future(12) });
+      expect(res.status).toBe(403);
+    });
+  });
 });

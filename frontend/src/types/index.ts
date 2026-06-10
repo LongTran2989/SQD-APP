@@ -156,6 +156,10 @@ export interface WorkPackage {
   timeframeTo: string;
   creatorId: number;
   checkTemplateId: number | null;
+  acRegistration: string | null;
+  customer: string | null;
+  authority: string | null;
+  targetDepartmentId: number | null;
   status: WpStatus;
   inactivationLog: { reason: string; inactivatedBy: number; inactivatedAt: string } | null;
   createdAt: string;
