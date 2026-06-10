@@ -228,35 +228,51 @@ Centralized in `utils/findingAccess.ts`.
 
 ### Visibility scope (`buildFindingScope`)
 
+**Read access is open to every authenticated user by deliberate policy.**
+`buildFindingScope` returns `{}` (no filter) and `canAccessFinding` always
+returns `true`. There is no role/division restriction on *viewing* findings,
+lists, RCA, CAPA, links, or taxonomy. Mutation rights are gated per endpoint
+(below) — that is where division scoping lives, not in visibility.
+
 | Role | Can see |
 |---|---|
-| **Director / Admin** | All findings |
-| **Manager** | Findings targeting their division, **OR** where their division is involved via a follow-up task (task targets their division, or its assignee belongs to their division) — *broadened scope* |
-| **Group Leader / Staff** | Findings they reported, OR whose follow-up task they are individually assigned |
+| **All authenticated users** | All findings (read is open — transparency model) |
 
 ### Action rights
 
+`assertManagerDivisionScope` is the **single division gate for Manager
+mutations**: it returns `true` immediately for Directors, and for Managers only
+when the finding is associated with their division via `targetDivisionId`, a
+follow-up task's division, or a follow-up assignee's division. As of the
+2026-06-09 security hardening it guards **every** Manager mutation below
+(previously some endpoints only checked the role, letting a Manager mutate a
+finding in another division).
+
 | Action | Endpoint | Who |
 |---|---|---|
-| Raise finding | `POST /api/findings` | Any authenticated user (source task's template must have `allowsFindings`; task non-deleted) |
-| View finding / list | `GET /api/findings`, `GET /:id` | Anyone within visibility scope (`canAccessFinding`) |
-| Review (severity, due date, taxonomy) | `PUT /:id/review` | **Manager / Director only** |
-| Generate follow-up tasks | `POST /:id/tasks` | **Manager / Director only** |
-| Complete Stage 2 | `PUT /:id/stage2` | Reporter, any follow-up assignee, Manager, Director |
-| Close finding | `PUT /:id/close` | **Manager / Director only** |
-| RCA view | `GET /:id/rca` | Anyone with access |
-| RCA create/edit (header, why-steps, factors) | `PUT /:id/rca…` | `canEditAnalysis`: Director; reporter; follow-up assignee; **Manager only if in scope**; Admin = view-only |
-| CAPA view | `GET /:id/capa` | Anyone with access |
+| Raise finding (task-origin) | `POST /api/findings` | Any authenticated user (source task's template must have `allowsFindings`; task non-deleted) |
+| Raise finding (standalone) | `POST /api/findings` | Any authenticated user — no `taskId`; requires a valid `targetDivisionId` |
+| View finding / list | `GET /api/findings`, `GET /:id` | Any authenticated user (open read) |
+| Review (severity, due date, taxonomy) | `PUT /:id/review` | **Manager / Director** + `assertManagerDivisionScope`; finding must be `Open` |
+| Generate follow-up tasks | `POST /:id/tasks` | **Manager / Director** + `assertManagerDivisionScope`; finding must be `Open`/`In Progress`; ≤ 20 rows per call |
+| Update severity | `PUT /:id/severity` | **Manager / Director** + `assertManagerDivisionScope` |
+| Dismiss finding | `PUT /:id/dismiss` | **Manager / Director** + `assertManagerDivisionScope`; finding must be `Open` |
+| Manually advance | `PUT /:id/advance` | **Manager / Director** + `assertManagerDivisionScope`; finding must be `In Progress` with no follow-ups |
+| Update taxonomy | `PUT /:id/taxonomy` | **Manager / Director** + `assertManagerDivisionScope` |
+| Close finding | `PUT /:id/close` | **Manager / Director** + `assertManagerDivisionScope`; finding must be `Pending Verification` |
+| RCA view | `GET /:id/rca` | Any authenticated user (open read) |
+| RCA create/edit (header, why-steps, factors) | `PUT /:id/rca…` | `canEditAnalysis`: Director; reporter; follow-up assignee; CapaTaskLink assignee; Manager (globally, since read is open); Admin = view-only |
+| CAPA view | `GET /:id/capa` | Any authenticated user (open read) |
 | CAPA create/edit | `POST` / `PUT /:id/capa…` | `canEditAnalysis` (same as RCA edit) |
-| CAPA **verify / waive / delete** | `…/verify`, `…/waive`, `DELETE` | **Manager / Director + must have access to the finding** |
-| Link view | `GET /:id/links` | Anyone with access |
-| Link create / delete | `POST` / `DELETE /:id/links…` | **Manager / Director + access to finding (and related finding on create)** |
+| CAPA **verify / waive / delete** | `…/verify`, `…/waive`, `DELETE` | **Manager / Director + `canEditAnalysis`** |
+| Link view | `GET /:id/links` | Any authenticated user (open read) |
+| Link create / delete | `POST` / `DELETE /:id/links…` | **Manager / Director + `assertManagerDivisionScope`** (and related finding must exist on create) |
 | Taxonomy list (pickers) | `GET /api/taxonomy/…` | Any authenticated user (`?activeOnly=true`) |
 | Taxonomy create/update | `POST` / `PUT /api/taxonomy/…` | **Admin / Director only** |
 
-Note the deliberate distinction: a **Manager's "edit analysis" right is
-scope-bound** (`hasAccess`) rather than global — a manager outside the finding's
-division cannot edit its RCA/CAPA or manage its links even though the role matches.
+> **QN response-action follow-up tasks** additionally require a Director to
+> review/approve the generated Task (`requiresDirectorApproval` — see the
+> Response Actions section); the Manager/Issuer cannot self-approve a QN task.
 
 ---
 

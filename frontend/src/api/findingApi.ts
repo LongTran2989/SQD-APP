@@ -17,6 +17,7 @@ import {
   CapaTaskLink,
   FindingLinkType,
   FindingLinkRecord,
+  ResponseActionType,
 } from '../types';
 
 // ─── List & detail ──────────────────────────────────────────────────────────
@@ -44,7 +45,8 @@ export const getFindingsByTask = (taskId: number): Promise<FindingListItem[]> =>
 // ─── Create (raise) ─────────────────────────────────────────────────────────
 
 export interface RaiseFindingPayload {
-  taskId: number;
+  taskId?: number;
+  targetDivisionId?: number;
   eventType: string;
   departmentId: number;
   description: string;
@@ -74,6 +76,10 @@ export interface FollowUpTaskInput {
   wpId?: number;
   createNewWp?: boolean;
   newWpName?: string;
+  responseActionType?: ResponseActionType;
+  targetDepartmentIds?: number[];
+  note?: string;
+  procedureRef?: string;
 }
 
 export const generateFollowUpTasks = (

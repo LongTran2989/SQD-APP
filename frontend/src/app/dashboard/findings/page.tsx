@@ -13,7 +13,8 @@ import {
   SEVERITY_CONFIG,
 } from '../../../components/findings/FindingBadges';
 import toast from 'react-hot-toast';
-import { AlertTriangle, Eye, ClipboardList } from 'lucide-react';
+import { AlertTriangle, Eye, ClipboardList, PlusCircle } from 'lucide-react';
+import RaiseFindingPanel from '../../../components/findings/RaiseFindingPanel';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ export default function FindingsListPage() {
   const { user } = useAuthStore();
   const canFilterAdvanced = !!user && MANAGER_ROLES.includes(user.role);
 
+  const [showRaisePanel, setShowRaisePanel] = useState(false);
   const [findings, setFindings] = useState<FindingListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -82,6 +84,13 @@ export default function FindingsListPage() {
           <h1 className="text-2xl font-bold text-slate-800">Findings</h1>
           <p className="text-slate-500 mt-1">Non-conformance records and corrective action tracking</p>
         </div>
+        <button
+          onClick={() => setShowRaisePanel(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-xl transition-colors"
+        >
+          <PlusCircle className="w-4 h-4" />
+          Raise Finding
+        </button>
       </div>
 
       {/* Table card */}
@@ -267,6 +276,13 @@ export default function FindingsListPage() {
           </div>
         )}
       </div>
+
+      {showRaisePanel && (
+        <RaiseFindingPanel
+          onClose={() => setShowRaisePanel(false)}
+          onRaised={() => { setShowRaisePanel(false); fetchFindings(); }}
+        />
+      )}
     </div>
   );
 }

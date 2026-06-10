@@ -383,6 +383,183 @@ describe('Findings Backend (Phase 6)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
+  // Group F-RAC — Response Action Creation
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('F-RAC: Response Action Creation', () => {
+    let findingId: number;
+    let dept2: number; // additional departments for multi-dept response actions
+    let dept3: number;
+
+    beforeAll(async () => {
+      const d2 = await prisma.department.upsert({ where: { name: 'RAC Dept 2' }, update: {}, create: { name: 'RAC Dept 2' } });
+      const d3 = await prisma.department.upsert({ where: { name: 'RAC Dept 3' }, update: {}, create: { name: 'RAC Dept 3' } });
+      dept2 = d2.id;
+      dept3 = d3.id;
+    });
+
+    beforeEach(async () => {
+      const r = await raiseFinding(staffToken);
+      findingId = r.body.id;
+    });
+
+    // Generate a single response-action follow-up task and return its db id.
+    const genResponseAction = (overrides: Record<string, unknown>, token = managerToken) =>
+      request(app)
+        .post(`/api/findings/${findingId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'Response Task', ...overrides }] });
+
+    // Create a QN follow-up task and drive it to In Review (assigned + submitted).
+    async function createQnInReview(): Promise<number> {
+      const gen = await genResponseAction({ responseActionType: 'QN', targetDepartmentIds: [departmentId, dept2] });
+      const followUpId = gen.body.createdTasks[0].id;
+      await prisma.task.update({ where: { id: followUpId }, data: { assignedToUserId: staffId, status: 'Assigned' } });
+      await request(app).put(`/api/tasks/${followUpId}/submit`).set('Authorization', `Bearer ${staffToken}`);
+      return followUpId;
+    }
+
+    it('RAC-01: IR with one department → 201, task IR, no Director approval, one action row linked', async () => {
+      const res = await genResponseAction({ responseActionType: 'IR', targetDepartmentIds: [departmentId] });
+      expect(res.status).toBe(201);
+      const taskDbId = res.body.createdTasks[0].id;
+      const task = await prisma.task.findUnique({ where: { id: taskDbId } });
+      expect(task?.responseActionType).toBe('IR');
+      expect(task?.requiresDirectorApproval).toBe(false);
+      const actions = await prisma.findingResponseAction.findMany({ where: { findingId } });
+      expect(actions).toHaveLength(1);
+      expect(actions[0]?.taskId).toBe(taskDbId);
+      expect(actions[0]?.type).toBe('IR');
+    });
+
+    it('RAC-02: CAR with one department → 201, action row stores the department', async () => {
+      const res = await genResponseAction({ responseActionType: 'CAR', targetDepartmentIds: [departmentId] });
+      expect(res.status).toBe(201);
+      const actions = await prisma.findingResponseAction.findMany({
+        where: { findingId },
+        include: { targetDepartments: { select: { departmentId: true } } }
+      });
+      expect(actions).toHaveLength(1);
+      expect(actions[0]?.type).toBe('CAR');
+      expect(actions[0]?.targetDepartments.map((d) => d.departmentId)).toEqual([departmentId]);
+    });
+
+    it('RAC-03: QN with three departments → 201, one task, one action with three dept IDs', async () => {
+      const res = await genResponseAction({ responseActionType: 'QN', targetDepartmentIds: [departmentId, dept2, dept3] });
+      expect(res.status).toBe(201);
+      expect(res.body.createdTasks).toHaveLength(1);
+      const actions = await prisma.findingResponseAction.findMany({
+        where: { findingId },
+        include: { targetDepartments: { select: { departmentId: true }, orderBy: { departmentId: 'asc' } } }
+      });
+      expect(actions).toHaveLength(1);
+      expect(actions[0]?.targetDepartments.map((d) => d.departmentId).sort()).toEqual(
+        [departmentId, dept2, dept3].sort()
+      );
+    });
+
+    it('RAC-04: CAR + QN in one call → 201, two tasks, two action rows with correct types', async () => {
+      const res = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [
+        { templateId: allowsFindingsTemplateId, title: 'CAR Task', responseActionType: 'CAR', targetDepartmentIds: [departmentId] },
+        { templateId: allowsFindingsTemplateId, title: 'QN Task', responseActionType: 'QN', targetDepartmentIds: [dept2, dept3] }
+      ] });
+      expect(res.status).toBe(201);
+      expect(res.body.createdTasks).toHaveLength(2);
+      const actions = await prisma.findingResponseAction.findMany({ where: { findingId } });
+      expect(actions).toHaveLength(2);
+      expect(actions.map((a) => a.type).sort()).toEqual(['CAR', 'QN']);
+    });
+
+    it('RAC-05: Director can review (approve) a QN task → 200, Closed', async () => {
+      const taskId = await createQnInReview();
+      const res = await request(app).put(`/api/tasks/${taskId}/review`).set('Authorization', `Bearer ${directorToken}`).send({ action: 'approve' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Closed');
+    });
+
+    it('RAC-06: Manager cannot review a QN task → 403 with Director-approval message', async () => {
+      const taskId = await createQnInReview();
+      const res = await request(app).put(`/api/tasks/${taskId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ action: 'approve' });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/Director approval/i);
+    });
+
+    it('RAC-07: QN follow-up → resubmit → Director approval full flow → 200', async () => {
+      const taskId = await createQnInReview();
+      // Director requests follow-up (only a Director may act on a QN task).
+      const fu = await request(app).put(`/api/tasks/${taskId}/review`).set('Authorization', `Bearer ${directorToken}`).send({ action: 'follow-up', comment: 'Add more detail' });
+      expect(fu.status).toBe(200);
+      expect(fu.body.status).toBe('Follow-up Required');
+      // Assignee resubmits.
+      const resubmit = await request(app).put(`/api/tasks/${taskId}/submit`).set('Authorization', `Bearer ${staffToken}`);
+      expect(resubmit.status).toBe(200);
+      expect(resubmit.body.status).toBe('In Review');
+      // Director approves.
+      const approve = await request(app).put(`/api/tasks/${taskId}/review`).set('Authorization', `Bearer ${directorToken}`).send({ action: 'approve' });
+      expect(approve.status).toBe(200);
+      expect(approve.body.status).toBe('Closed');
+    });
+
+    it('RAC-08: invalid responseActionType → 400', async () => {
+      const res = await genResponseAction({ responseActionType: 'INVALID', targetDepartmentIds: [departmentId] });
+      expect(res.status).toBe(400);
+    });
+
+    it('RAC-09: response action with empty targetDepartmentIds → 400', async () => {
+      const res = await genResponseAction({ responseActionType: 'IR', targetDepartmentIds: [] });
+      expect(res.status).toBe(400);
+    });
+
+    it('RAC-10: CAR with two departments → 400 (single-dept type allows exactly one)', async () => {
+      const res = await genResponseAction({ responseActionType: 'CAR', targetDepartmentIds: [departmentId, dept2] });
+      expect(res.status).toBe(400);
+    });
+
+    it('RAC-11: targetDepartmentIds with non-existent IDs → 400', async () => {
+      const res = await genResponseAction({ responseActionType: 'QN', targetDepartmentIds: [999998, 999999] });
+      expect(res.status).toBe(400);
+    });
+
+    it('RAC-12: follow-up task without responseActionType → 201, null type, no action row', async () => {
+      const res = await genResponseAction({});
+      expect(res.status).toBe(201);
+      const task = await prisma.task.findUnique({ where: { id: res.body.createdTasks[0].id } });
+      expect(task?.responseActionType).toBeNull();
+      expect(task?.requiresDirectorApproval).toBe(false);
+      const actions = await prisma.findingResponseAction.findMany({ where: { findingId } });
+      expect(actions).toHaveLength(0);
+    });
+
+    it('RAC-13: GET /findings/:id returns responseActions with resolved departments and linked task status', async () => {
+      await genResponseAction({ responseActionType: 'QN', targetDepartmentIds: [departmentId, dept2] });
+      const res = await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.responseActions)).toBe(true);
+      expect(res.body.responseActions).toHaveLength(1);
+      const ra = res.body.responseActions[0];
+      expect(ra.type).toBe('QN');
+      expect(ra.targetDepartments).toHaveLength(2);
+      expect(ra.targetDepartments[0]).toHaveProperty('name');
+      expect(ra.task.status).toBe('Unassigned');
+    });
+
+    it('RAC-14: GET /tasks/:id for a QN follow-up exposes responseActionType + requiresDirectorApproval', async () => {
+      const gen = await genResponseAction({ responseActionType: 'QN', targetDepartmentIds: [departmentId] });
+      const taskDbId = gen.body.createdTasks[0].id;
+      const res = await request(app).get(`/api/tasks/${taskDbId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.responseActionType).toBe('QN');
+      expect(res.body.requiresDirectorApproval).toBe(true);
+    });
+
+    it('RAC-15: creating a response action writes a RESPONSE_ACTION_CREATED audit log for the finding', async () => {
+      await genResponseAction({ responseActionType: 'IR', targetDepartmentIds: [departmentId] });
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(findingId), actionType: 'RESPONSE_ACTION_CREATED' } });
+      expect(audit).not.toBeNull();
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
   // Group 6 — Stage 2 (removed — superseded by RCA + CAPA workflows, F-6)
   // ────────────────────────────────────────────────────────────────────────
 

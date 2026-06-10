@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { raiseFinding } from '../../api/findingApi';
-import { getDatasource } from '../../api/taskApi';
+import { getDatasource, getDivisions as getDivisionsApi } from '../../api/taskApi';
 import { listAtaChapters, listHazardTags } from '../../api/taxonomyApi';
 import { apiErrorMessage } from '../../api/errorMessage';
 import { AtaChapter, HazardTag } from '../../types';
@@ -11,12 +11,14 @@ import { X, AlertTriangle } from 'lucide-react';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
 
 interface Props {
-  taskId: number;
+  taskId?: number;
   onClose: () => void;
   onRaised: () => void;
 }
 
 export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) {
+  const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
+  const [targetDivisionId, setTargetDivisionId] = useState('');
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
   const [ataChapters, setAtaChapters] = useState<AtaChapter[]>([]);
   const [hazardTags, setHazardTags] = useState<HazardTag[]>([]);
@@ -35,7 +37,10 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
     getDatasource('departments').then(setDepartments).catch(() => {});
     listAtaChapters(true).then(setAtaChapters).catch(() => {});
     listHazardTags(true).then(setHazardTags).catch(() => {});
-  }, []);
+    if (!taskId) {
+      getDivisionsApi().then(setDivisions).catch(() => {});
+    }
+  }, [taskId]);
 
   const toggleTag = (id: number) =>
     setSelectedTagIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
@@ -43,6 +48,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
   const resolvedEventType = eventType === 'Other' ? eventTypeOther.trim() : eventType;
 
   const handleSubmit = async () => {
+    if (!taskId && !targetDivisionId) return toast.error('Division is required');
     if (!eventType) return toast.error('Event type is required');
     if (eventType === 'Other' && !eventTypeOther.trim()) return toast.error('Please specify the event type');
     if (!departmentId) return toast.error('Department is required');
@@ -51,7 +57,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
     setSubmitting(true);
     try {
       const finding = await raiseFinding({
-        taskId,
+        ...(taskId ? { taskId } : { targetDivisionId: Number(targetDivisionId) }),
         eventType: resolvedEventType,
         departmentId: Number(departmentId),
         description: description.trim(),
@@ -86,6 +92,23 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {!taskId && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                Division <span className="text-red-400">*</span>
+              </label>
+              <select
+                value={targetDivisionId}
+                onChange={(e) => setTargetDivisionId(e.target.value)}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select division…</option>
+                {divisions.map((d) => (
+                  <option key={d.value} value={d.value}>{d.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
               Event Type <span className="text-red-400">*</span>

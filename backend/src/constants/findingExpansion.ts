@@ -33,6 +33,19 @@ export const CAPA_STATUSES = ['Open', 'In Progress', 'Completed', 'Verified', 'W
 // ─── Traceability ─────────────────────────────────────────────────────────────
 export const LINK_TYPES = ['DUPLICATE', 'RELATED', 'CAUSED_BY'] as const;
 
+// ─── Response Action Types ─────────────────────────────────────────────────────
+export const RESPONSE_ACTION_TYPES = [
+  'CAR', 'NCR', 'QN', 'QR', 'IR', 'Dissemination'
+] as const;
+
+// CAR/NCR/QR/IR: one task per department. QN/Dissemination: one task for all depts.
+export const MULTI_DEPT_SINGLE_TASK_TYPES = ['QN', 'Dissemination'] as const;
+
+// QN tasks require Director-only review. Always derived server-side, never from client.
+export const DIRECTOR_APPROVAL_TYPES = ['QN'] as const;
+
+export type ResponseActionType = (typeof RESPONSE_ACTION_TYPES)[number];
+
 // ─── Trend engine config (tunable now; admin-managed in Phase 7) ──────────────
 // A finding is flagged "recurring" when this many findings (inclusive of itself)
 // share the same Department + ATA Chapter + Cause Code AND ≥1 Hazard Tag within
@@ -58,6 +71,7 @@ export const FINDING_EXPANSION_ACTIONS = {
   TAXONOMY_UPDATED: 'TAXONOMY_UPDATED',
   CAPA_LINK_ADDED: 'CAPA_LINK_ADDED',
   CAPA_LINK_REMOVED: 'CAPA_LINK_REMOVED',
+  RESPONSE_ACTION_CREATED: 'RESPONSE_ACTION_CREATED',
 } as const;
 
 export type RcaMethod = (typeof RCA_METHODS)[number];
