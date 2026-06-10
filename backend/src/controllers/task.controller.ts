@@ -641,6 +641,66 @@ export const updateTaskWp = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+// ─── PATCH /api/tasks/:id/reopen ───────────────────────────────────────────────
+// Admin/Director re-opens a Closed task. Returns it to Assigned (or Unassigned if it
+// has no assignee), clears completedAt, and leaves all TaskData/schemaSnapshot intact.
+export const reopenTask = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId } = req.user!;
+    const { reason } = req.body as { reason?: string };
+
+    if (!reason || !reason.trim()) {
+      res.status(400).json({ message: 'A reason is required to re-open a task' });
+      return;
+    }
+
+    const task = await prisma.task.findUnique({
+      where: { id, deletedAt: null },
+      include: { wp: { select: { status: true } } }
+    });
+    if (!task) {
+      res.status(404).json({ message: 'Task not found' });
+      return;
+    }
+
+    // Only 'Closed' tasks are reopenable; Rejected/Terminated keep their own paths.
+    if (task.status !== 'Closed') {
+      res.status(400).json({ message: `Only Closed tasks can be re-opened. Current status: ${task.status}` });
+      return;
+    }
+
+    if (task.wp && task.wp.status === 'Closed') {
+      res.status(400).json({ message: 'Cannot re-open a task that belongs to a Closed Work Package' });
+      return;
+    }
+
+    const newStatus = task.assignedToUserId ? 'Assigned' : 'Unassigned';
+
+    const updated = await prisma.task.update({
+      where: { id },
+      // NOTE: TaskData and schemaSnapshot are intentionally left untouched.
+      data: { status: newStatus, completedAt: null },
+      include: taskInclude()
+    });
+
+    await logAuditAndActivity(
+      task.id,
+      String(task.id),
+      'TASK_REOPENED',
+      userId,
+      `Task re-opened by Admin. Reason: ${reason.trim()}. Status: Closed → ${newStatus}`,
+      { fromStatus: 'Closed', toStatus: newStatus, reason: reason.trim() },
+      reason.trim()
+    );
+
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+  } catch (error) {
+    console.error('Error re-opening task:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // ─── PUT /api/tasks/:id/assign ────────────────────────────────────────────────
 
 export const assignTask = async (req: Request, res: Response): Promise<void> => {

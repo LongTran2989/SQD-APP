@@ -109,6 +109,10 @@ export const inactivateTask = (id: number, reason: string): Promise<TaskEnriched
 export const reactivateTask = (id: number): Promise<TaskEnriched> =>
   apiClient.put(`/tasks/${id}/reactivate`).then((r) => r.data);
 
+// Admin/Director re-opens a Closed task (back to Assigned/Unassigned).
+export const reopenTask = (id: number, reason: string): Promise<TaskEnriched> =>
+  apiClient.patch(`/tasks/${id}/reopen`, { reason }).then((r) => r.data);
+
 // ─── Deadline management ───────────────────────────────────────────────────────
 
 export const setDeadline = (id: number, deadline: string): Promise<TaskEnriched> =>

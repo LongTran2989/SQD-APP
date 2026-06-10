@@ -1151,6 +1151,89 @@ describe('Task Backend (Phase 5.2)', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // PR9 — Admin Re-open
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Admin Re-open (PR9)', () => {
+    async function makeClosedTask(withAssignee = true): Promise<number> {
+      const t = await prisma.task.create({
+        data: {
+          taskId: `TSK-RO${Date.now() % 100000}${Math.floor(Math.random() * 100)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          assignedToUserId: withAssignee ? staffId : null,
+          targetDivisionId: divisionId,
+          status: 'Closed',
+          completedAt: new Date(),
+          schemaSnapshot: [],
+          assignmentType: 'INDIVIDUAL'
+        }
+      });
+      // Attach some TaskData to assert it survives reopen.
+      await prisma.taskData.create({ data: { taskId: t.id, data: { field1: 'preserved' } } });
+      return t.id;
+    }
+
+    it('PR9-A: Admin reopens Closed → Assigned, clears completedAt, keeps TaskData', async () => {
+      const id = await makeClosedTask(true);
+      const res = await request(app)
+        .patch(`/api/tasks/${id}/reopen`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'Re-audit required' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Assigned');
+      expect(res.body.completedAt).toBeNull();
+
+      const data = await prisma.taskData.findUnique({ where: { taskId: id } });
+      expect((data?.data as any)?.field1).toBe('preserved');
+
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Task', entityId: String(id), actionType: 'TASK_REOPENED' } });
+      expect(audit).not.toBeNull();
+      const feed = await prisma.feedPost.findFirst({ where: { scope: 'TASK', scopeId: id, type: 'SYSTEM_EVENT' } });
+      expect(feed).not.toBeNull();
+    });
+
+    it('PR9-B: reopen with no assignee → Unassigned', async () => {
+      const id = await makeClosedTask(false);
+      const res = await request(app)
+        .patch(`/api/tasks/${id}/reopen`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'Reopen unassigned' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Unassigned');
+    });
+
+    it('PR9-C: missing reason → 400', async () => {
+      const id = await makeClosedTask(true);
+      const res = await request(app)
+        .patch(`/api/tasks/${id}/reopen`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({});
+      expect(res.status).toBe(400);
+    });
+
+    it('PR9-D: non-Closed task → 400', async () => {
+      const t = await prisma.task.create({
+        data: { taskId: `TSK-RO2${Date.now() % 100000}`, templateId: publishedTemplateId, issuerId: managerId, assignedToUserId: staffId, targetDivisionId: divisionId, status: 'In Progress', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' }
+      });
+      const res = await request(app)
+        .patch(`/api/tasks/${t.id}/reopen`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'x' });
+      expect(res.status).toBe(400);
+    });
+
+    it('PR9-E: non-Admin/Director → 403', async () => {
+      const id = await makeClosedTask(true);
+      const res = await request(app)
+        .patch(`/api/tasks/${id}/reopen`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ reason: 'nope' });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Group 5 — Review Actions
   // ──────────────────────────────────────────────────────────────────────────
 
