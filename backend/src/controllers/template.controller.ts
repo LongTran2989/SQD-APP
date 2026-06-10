@@ -337,19 +337,17 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
       };
 
       if (template.draftSchema) {
+        // draftSchema is always the standardized object form (PR1 normalization;
+        // legacy array form no longer exists).
         const draft = template.draftSchema as any;
-        if (Array.isArray(draft)) {
-          dataToPublish.formSchema = draft;
-        } else {
-          dataToPublish.title = draft.title;
-          dataToPublish.description = draft.description;
-          dataToPublish.formSchema = draft.formSchema;
-          dataToPublish.requiresApproval = draft.requiresApproval;
-          dataToPublish.allowsFindings = draft.allowsFindings;
-          if (draft.estimatedHours !== undefined) dataToPublish.estimatedHours = draft.estimatedHours;
-          if (draft.skillLevel !== undefined) dataToPublish.skillLevel = draft.skillLevel;
-          if (draft.type !== undefined) dataToPublish.type = draft.type;
-        }
+        dataToPublish.title = draft.title;
+        dataToPublish.description = draft.description;
+        dataToPublish.formSchema = draft.formSchema;
+        dataToPublish.requiresApproval = draft.requiresApproval;
+        dataToPublish.allowsFindings = draft.allowsFindings;
+        if (draft.estimatedHours !== undefined) dataToPublish.estimatedHours = draft.estimatedHours;
+        if (draft.skillLevel !== undefined) dataToPublish.skillLevel = draft.skillLevel;
+        if (draft.type !== undefined) dataToPublish.type = draft.type;
       } else {
         dataToPublish.formSchema = template.formSchema;
       }

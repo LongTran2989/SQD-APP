@@ -1162,7 +1162,7 @@ describe('Task Backend (Phase 5.2)', () => {
         update: { status: 'Published' },
         create: {
           templateId: 'GENERIC-ADHOC', title: 'Generic Ad-Hoc Task', status: 'Published', publishedAt: new Date(),
-          isOneOff: false, requiresApproval: false, allowsFindings: true, skillLevel: 0,
+          requiresApproval: false, allowsFindings: true, skillLevel: 0,
           formSchema: [{ id: 'instruction', type: 'textarea', label: 'Instruction / Note' }],
           ownerId: managerId, divisionId
         }

@@ -165,7 +165,6 @@ model Template {
   requiresApproval Boolean @default(false)
   allowsFindings   Boolean @default(true)
   estimatedHours   Float?
-  isOneOff         Boolean @default(false) // DEPRECATED (Phase A): no longer drives behaviour; column dropped in a later cleanup migration.
   skillLevel       Int     @default(0) // Required competency level (0-4) seeded onto tasks created from this template
   type             String?
   formSchema       Json // JSON document for active/published field definitions

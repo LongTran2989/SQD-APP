@@ -53,7 +53,6 @@ describe('Seed Data Verification', () => {
     const tpl = await prisma.template.findUnique({ where: { templateId: 'GENERIC-ADHOC' } });
     expect(tpl).not.toBeNull();
     expect(tpl?.status).toBe('Published');
-    expect(tpl?.isOneOff).toBe(false);
     expect(tpl?.requiresApproval).toBe(false);
   });
 

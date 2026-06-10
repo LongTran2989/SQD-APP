@@ -247,7 +247,6 @@ async function main() {
       where:  { templateId: 'GENERIC-ADHOC' },
       update: {
         status:           'Published',
-        isOneOff:         false,
         requiresApproval: false,
       },
       create: {
@@ -256,7 +255,6 @@ async function main() {
         description:      'System template for ad-hoc / Quick Tasks. Do not delete.',
         status:           'Published',
         publishedAt:      new Date(),
-        isOneOff:         false,
         requiresApproval: false,
         allowsFindings:   true,
         skillLevel:       0,
