@@ -18,6 +18,10 @@ export interface WpFormValues {
   timeframeFrom: string;
   timeframeTo: string;
   checkTemplateId: number | '';
+  acRegistration: string;
+  customer: string;
+  authority: string;
+  targetDepartmentId: number | '';
 }
 
 interface WorkPackageFormProps {
@@ -45,22 +49,29 @@ export default function WorkPackageForm({
   const [timeframeFrom, setTimeframeFrom] = useState(initial?.timeframeFrom ?? '');
   const [timeframeTo, setTimeframeTo] = useState(initial?.timeframeTo ?? '');
   const [checkTemplateId, setCheckTemplateId] = useState<number | ''>(initial?.checkTemplateId ?? '');
+  const [acRegistration, setAcRegistration] = useState(initial?.acRegistration ?? '');
+  const [customer, setCustomer] = useState(initial?.customer ?? '');
+  const [authority, setAuthority] = useState(initial?.authority ?? '');
+  const [targetDepartmentId, setTargetDepartmentId] = useState<number | ''>(initial?.targetDepartmentId ?? '');
 
   const [wpTypes, setWpTypes] = useState<WpType[]>([]);
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
+  const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
   const [publishedTemplates, setPublishedTemplates] = useState<Template[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [typesData, divsData, tplRes] = await Promise.all([
+        const [typesData, divsData, deptRes, tplRes] = await Promise.all([
           getWpTypes(),
           getDivisions(),
+          apiClient.get('/datasources/departments'),
           apiClient.get('/templates'),
         ]);
         setWpTypes(typesData);
         setDivisions(divsData);
+        setDepartments(deptRes.data as { value: string; label: string }[]);
         const published = (tplRes.data as Template[]).filter((t) => t.status === 'Published');
         setPublishedTemplates(published);
       } catch {
@@ -82,10 +93,14 @@ export default function WorkPackageForm({
     if (timeframeFrom >= timeframeTo) { toast.error('Start date must be before end date'); return; }
     if (type === 'CHECK' && !checkTemplateId) { toast.error('CHECK type requires a Check Template'); return; }
 
-    onSubmit({ name: name.trim(), type, divisionId, timeframeFrom, timeframeTo, checkTemplateId });
+    onSubmit({
+      name: name.trim(), type, divisionId, timeframeFrom, timeframeTo, checkTemplateId,
+      acRegistration: acRegistration.trim(), customer: customer.trim(), authority: authority.trim(), targetDepartmentId,
+    });
   };
 
   const isCheckType = type === 'CHECK';
+  const isAuditType = type === 'AUDIT';
 
   if (loadingData) {
     return (
@@ -181,6 +196,45 @@ export default function WorkPackageForm({
                 <option key={t.id} value={t.id}>
                   {t.templateId} — {t.title}
                 </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* CHECK-only context fields */}
+        {isCheckType && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-acreg">A/C Registration</label>
+              <input id="wp-acreg" type="text" value={acRegistration} onChange={(e) => setAcRegistration(e.target.value)}
+                placeholder="e.g. VN-A361"
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-customer">Customer</label>
+              <input id="wp-customer" type="text" value={customer} onChange={(e) => setCustomer(e.target.value)}
+                placeholder="e.g. Vietnam Airlines"
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-authority">Authority</label>
+              <input id="wp-authority" type="text" value={authority} onChange={(e) => setAuthority(e.target.value)}
+                placeholder="e.g. CAAV"
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm" />
+            </div>
+          </div>
+        )}
+
+        {/* AUDIT-only target department */}
+        {isAuditType && (
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-target-dept">Target Department</label>
+            <select id="wp-target-dept" value={targetDepartmentId}
+              onChange={(e) => setTargetDepartmentId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
+              <option value="">Select department...</option>
+              {departments.map((d) => (
+                <option key={d.value} value={d.value}>{d.label}</option>
               ))}
             </select>
           </div>

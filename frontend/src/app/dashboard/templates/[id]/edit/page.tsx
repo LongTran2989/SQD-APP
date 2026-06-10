@@ -32,12 +32,18 @@ export default function EditTemplatePage({ params }: { params: Promise<{ id: str
 
   const handleSave = async (payload: any, action: 'Draft' | 'Published') => {
     try {
-      await apiClient.put(`/templates/${templateId}`, payload);
+      // PR7: echo the updatedAt we last saw for optimistic concurrency (409 on conflict).
+      const updatedAt = template?.updatedAt;
+      await apiClient.put(`/templates/${templateId}`, { ...payload, updatedAt });
       if (action === 'Published') {
         try {
-          await apiClient.post(`/templates/${templateId}/publish`);
+          await apiClient.post(`/templates/${templateId}/publish`, { updatedAt });
           toast.success('Template published successfully');
         } catch (err: any) {
+          if (err.response?.status === 409) {
+            toast.error('This template was changed by someone else. Please reload and retry.');
+            throw err;
+          }
           toast.error(err.response?.data?.message || 'Draft saved, but failed to publish');
         }
       } else {
@@ -45,10 +51,35 @@ export default function EditTemplatePage({ params }: { params: Promise<{ id: str
       }
       router.push(`/dashboard/templates/${templateId}`);
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to update template');
+      if (err.response?.status === 409) {
+        toast.error('This template was modified by someone else. Please reload and try again.');
+      } else {
+        toast.error(err.response?.data?.message || 'Failed to update template');
+      }
       throw err;
     }
   };
+
+  // When a pending draft exists, edit the draft (not the live published fields).
+  const builderInitialData = (() => {
+    if (!template) return undefined;
+    if (template.hasPendingChanges && template.draftSchema) {
+      const d = template.draftSchema;
+      if (Array.isArray(d)) return { ...template, formSchema: d };
+      return {
+        ...template,
+        title: d.title ?? template.title,
+        description: d.description ?? template.description,
+        formSchema: d.formSchema ?? template.formSchema,
+        requiresApproval: d.requiresApproval ?? template.requiresApproval,
+        allowsFindings: d.allowsFindings ?? template.allowsFindings,
+        estimatedHours: d.estimatedHours ?? template.estimatedHours,
+        skillLevel: d.skillLevel ?? template.skillLevel,
+        type: d.type ?? template.type,
+      };
+    }
+    return template;
+  })();
 
   const handleDiscard = () => {
     if (window.confirm('Discard all unsaved changes?')) {
@@ -68,9 +99,9 @@ export default function EditTemplatePage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-      <TemplateBuilder 
-        initialData={template}
-        onSave={handleSave} 
+      <TemplateBuilder
+        initialData={builderInitialData}
+        onSave={handleSave}
         onDiscard={handleDiscard}
       />
     </div>

@@ -40,7 +40,7 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
   const [estimatedHours, setEstimatedHours] = useState<number | ''>(initialData?.estimatedHours || '');
   const [requiresApproval, setRequiresApproval] = useState(initialData?.requiresApproval || false);
   const [allowsFindings, setAllowsFindings] = useState(initialData?.allowsFindings ?? true);
-  const [isOneOff, setIsOneOff] = useState(initialData?.isOneOff || false);
+  const [skillLevel, setSkillLevel] = useState<number>(initialData?.skillLevel ?? 0);
 
   // Form Fields State
   const [fields, setFields] = useState<FormField[]>(initialData?.formSchema || []);
@@ -145,7 +145,7 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
       estimatedHours: estimatedHours ? Number(estimatedHours) : null,
       requiresApproval,
       allowsFindings,
-      isOneOff,
+      skillLevel: Number(skillLevel),
       formSchema: fields,
       status: action
     };
@@ -268,7 +268,20 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                   />
                   <p className="text-xs text-slate-400 mt-1">Used for future time budget tracking</p>
                 </div>
-                <div className="col-span-1 md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Skill Level</label>
+                  <select
+                    value={skillLevel}
+                    onChange={(e) => { setSkillLevel(Number(e.target.value)); markChanged(); }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    {[0, 1, 2, 3, 4].map((lvl) => (
+                      <option key={lvl} value={lvl}>Level {lvl}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-400 mt-1">Required competency (0–4) seeded onto tasks</p>
+                </div>
+                <div className="col-span-1 md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                   <label className="flex items-center gap-2 cursor-pointer group">
                     <input type="checkbox" checked={requiresApproval} onChange={(e) => { setRequiresApproval(e.target.checked); markChanged(); }} className="w-4 h-4 text-blue-600 rounded" />
                     <span className="text-sm font-medium text-slate-700 group-hover:text-blue-600" title="Tasks generated from this template require explicit reviewer approval before closing">Requires Approval</span>
@@ -276,10 +289,6 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                   <label className="flex items-center gap-2 cursor-pointer group">
                     <input type="checkbox" checked={allowsFindings} onChange={(e) => { setAllowsFindings(e.target.checked); markChanged(); }} className="w-4 h-4 text-blue-600 rounded" />
                     <span className="text-sm font-medium text-slate-700 group-hover:text-blue-600">Allows Findings</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer group">
-                    <input type="checkbox" checked={isOneOff} onChange={(e) => { setIsOneOff(e.target.checked); markChanged(); }} className="w-4 h-4 text-blue-600 rounded" />
-                    <span className="text-sm font-medium text-slate-700 group-hover:text-blue-600" title="Template will be automatically deleted after the first Task is assigned from it">Is One-off</span>
                   </label>
                 </div>
               </div>

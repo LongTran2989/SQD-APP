@@ -24,6 +24,52 @@ const prisma = new PrismaClient({ adapter });
 
 const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
 
+interface WpTypeFieldInput {
+  acRegistration?: string | null;
+  customer?: string | null;
+  authority?: string | null;
+  targetDepartmentId?: number | null;
+}
+
+/**
+ * Returns the type-specific columns to persist for a WP, keeping only the fields
+ * relevant to the type (CHECK → aircraft/customer/authority; AUDIT → department)
+ * and clearing the rest. Validates targetDepartmentId for AUDIT. On validation
+ * failure it writes the response and returns null so the caller can early-return.
+ */
+async function resolveWpTypeFields(
+  type: string,
+  input: WpTypeFieldInput,
+  res: Response
+): Promise<{ acRegistration: string | null; customer: string | null; authority: string | null; targetDepartmentId: number | null } | null> {
+  const cleared = { acRegistration: null, customer: null, authority: null, targetDepartmentId: null };
+
+  if (type === 'CHECK') {
+    return {
+      ...cleared,
+      acRegistration: input.acRegistration ?? null,
+      customer: input.customer ?? null,
+      authority: input.authority ?? null,
+    };
+  }
+
+  if (type === 'AUDIT') {
+    let deptId: number | null = null;
+    if (input.targetDepartmentId != null) {
+      const dept = await prisma.department.findUnique({ where: { id: Number(input.targetDepartmentId) } });
+      if (!dept) {
+        res.status(400).json({ message: 'targetDepartmentId references a non-existent department' });
+        return null;
+      }
+      deptId = dept.id;
+    }
+    return { ...cleared, targetDepartmentId: deptId };
+  }
+
+  // Other types (SURVEILLANCE, INVESTIGATION, OTHER): no type-specific fields.
+  return cleared;
+}
+
 interface ComputeWpStatusInput {
   id: number;
   status: string;
@@ -166,7 +212,7 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
 export const createWorkPackage = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const { name, type, divisionId, timeframeFrom, timeframeTo, checkTemplateId } = req.body;
+    const { name, type, divisionId, timeframeFrom, timeframeTo, checkTemplateId, acRegistration, customer, authority, targetDepartmentId } = req.body;
 
     if (!name || !type || !divisionId || !timeframeFrom || !timeframeTo) {
       res.status(400).json({ message: 'name, type, divisionId, timeframeFrom, and timeframeTo are required' });
@@ -179,6 +225,10 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
       res.status(400).json({ message: `Invalid WP type: ${type}. Must match an existing WpType code.` });
       return;
     }
+
+    // Resolve type-specific fields (only the ones relevant to the type are stored).
+    const typeFields = await resolveWpTypeFields(type, { acRegistration, customer, authority, targetDepartmentId }, res);
+    if (typeFields === null) return; // a validation error was already sent
 
     // Validate timeframe
     const fromDate = new Date(timeframeFrom);
@@ -240,6 +290,7 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
           timeframeTo: toDate,
           creatorId: userId,
           checkTemplateId: checkTemplateId || null,
+          ...typeFields,
           status: 'Open',
         },
         include: {
@@ -279,7 +330,7 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
     const userRole = req.user!.role;
-    const { name, timeframeFrom, timeframeTo, checkTemplateId } = req.body;
+    const { name, timeframeFrom, timeframeTo, checkTemplateId, acRegistration, customer, authority, targetDepartmentId } = req.body;
 
     const wp = await prisma.workPackage.findUnique({ where: { id, deletedAt: null } });
     if (!wp) {
@@ -292,9 +343,34 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // Only creator, Manager, Director, or Admin can update
-    if (wp.creatorId !== userId && !['Admin', 'Director', 'Manager'].includes(userRole)) {
+    const isManager = wp.creatorId === userId || ['Admin', 'Director', 'Manager'].includes(userRole);
+    // PR8: an assigned user may edit ONLY the timeframe; managers/creator/global edit everything.
+    let isAssignee = false;
+    if (!isManager) {
+      const assignment = await prisma.workPackageAssignment.findFirst({ where: { wpId: id, userId } });
+      isAssignee = !!assignment;
+    }
+
+    if (!isManager && !isAssignee) {
       res.status(403).json({ message: 'Insufficient permissions to update this Work Package' });
+      return;
+    }
+
+    // Assignees can only touch timeframe fields.
+    if (!isManager) {
+      const touchesNonTimeframe =
+        name !== undefined || checkTemplateId !== undefined || acRegistration !== undefined ||
+        customer !== undefined || authority !== undefined || targetDepartmentId !== undefined;
+      if (touchesNonTimeframe) {
+        res.status(403).json({ message: 'Assigned users may only edit the timeframe of a Work Package' });
+        return;
+      }
+    }
+
+    // Timeframe edits are blocked once the WP is Overdue (its window has lapsed).
+    const computedStatus = await computeWpStatus(wp);
+    if ((timeframeFrom !== undefined || timeframeTo !== undefined) && computedStatus === 'Overdue') {
+      res.status(400).json({ message: 'Cannot change the timeframe of an Overdue Work Package' });
       return;
     }
 
@@ -304,12 +380,19 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
     if (timeframeTo !== undefined) dataToUpdate.timeframeTo = new Date(timeframeTo);
     if (checkTemplateId !== undefined) dataToUpdate.checkTemplateId = checkTemplateId;
 
-    // Validate timeframe if both are being updated
-    if (dataToUpdate.timeframeFrom && dataToUpdate.timeframeTo) {
-      if (dataToUpdate.timeframeFrom >= dataToUpdate.timeframeTo) {
-        res.status(400).json({ message: 'timeframeFrom must be before timeframeTo' });
-        return;
-      }
+    // Type-specific fields (managers only; resolved/validated against the WP type).
+    if (isManager && (acRegistration !== undefined || customer !== undefined || authority !== undefined || targetDepartmentId !== undefined)) {
+      const typeFields = await resolveWpTypeFields(wp.type, { acRegistration, customer, authority, targetDepartmentId }, res);
+      if (typeFields === null) return;
+      Object.assign(dataToUpdate, typeFields);
+    }
+
+    // Validate the resulting timeframe ordering.
+    const effFrom = dataToUpdate.timeframeFrom ?? wp.timeframeFrom;
+    const effTo = dataToUpdate.timeframeTo ?? wp.timeframeTo;
+    if (effFrom >= effTo) {
+      res.status(400).json({ message: 'timeframeFrom must be before timeframeTo' });
+      return;
     }
 
     const updated = await prisma.workPackage.update({
@@ -320,6 +403,18 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
         creator: { select: { id: true, name: true } },
       }
     });
+
+    // Dual-write (Rule 3): audit + WP feed for a material change.
+    await prisma.auditLog.create({
+      data: {
+        actionType: 'WORK_PACKAGE_UPDATED',
+        entityType: 'WorkPackage',
+        entityId: String(id),
+        performedByUserId: userId,
+        details: { fields: Object.keys(dataToUpdate) }
+      }
+    });
+    await logWpSystemEvent(id, `Work Package "${updated.name}" updated.`, { fields: Object.keys(dataToUpdate) });
 
     res.json(updated);
   } catch (error) {

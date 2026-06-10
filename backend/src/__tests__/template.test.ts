@@ -112,17 +112,20 @@ describe('Template Builder & Management', () => {
       expect((dbRow?.formSchema as any)[0].label).toBe('Live Field');
       expect(dbRow?.draftSchema).toBeDefined();
 
-      // 3. Verify Owner sees the unpacked Draft state via API
+      // 3. Verify Owner sees the TRUE status + hasPendingChanges + the draftSchema (PR7: no masking)
       const ownerGet = await request(app).get(`/api/templates/${t.id}`).set('Authorization', `Bearer ${ownerToken}`);
-      expect(ownerGet.body.status).toBe('Draft');
-      expect(ownerGet.body.title).toBe('Draft Title');
-      expect(ownerGet.body.formSchema[0].label).toBe('Draft Field');
+      expect(ownerGet.body.status).toBe('Published');
+      expect(ownerGet.body.hasPendingChanges).toBe(true);
+      expect(ownerGet.body.title).toBe('Live Title');
+      expect(ownerGet.body.draftSchema.title).toBe('Draft Title');
+      expect(ownerGet.body.draftSchema.formSchema[0].label).toBe('Draft Field');
 
-      // 4. Verify Other User sees the Published state via API
+      // 4. Verify Other User sees the Published state and NO draftSchema
       const otherGet = await request(app).get(`/api/templates/${t.id}`).set('Authorization', `Bearer ${otherManagerToken}`);
       expect(otherGet.body.status).toBe('Published');
       expect(otherGet.body.title).toBe('Live Title');
       expect(otherGet.body.formSchema[0].label).toBe('Live Field');
+      expect(otherGet.body.hasPendingChanges).toBe(true);
       expect(otherGet.body.draftSchema).toBeUndefined(); // Stripped
 
       // 5. Verify publish clears the draftSchema
@@ -179,6 +182,47 @@ describe('Template Builder & Management', () => {
       // Old owner tries to edit
       const editRes = await request(app).put(`/api/templates/${t.id}`).set('Authorization', `Bearer ${ownerToken}`).send({ title: 'Try to edit' });
       expect(editRes.status).toBe(403);
+    });
+  });
+
+  describe('Concurrency & publish diff (PR7)', () => {
+    it('PR7-A: stale updatedAt on update → 409', async () => {
+      const div = await prisma.division.findUnique({ where: { code: 'TMP' } });
+      const t = await prisma.template.create({
+        data: { templateId: 'TMP-C1', title: 'Conc', formSchema: [{ id: '1', type: 'text', label: 'A' }], status: 'Published', publishedAt: new Date(), ownerId, divisionId: div!.id }
+      });
+      const res = await request(app)
+        .put(`/api/templates/${t.id}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'New', formSchema: [{ id: '1', type: 'text', label: 'A' }], updatedAt: new Date(Date.now() - 100000).toISOString() });
+      expect(res.status).toBe(409);
+    });
+
+    it('PR7-B: publishing an unchanged draft → 400 (no changes)', async () => {
+      const div = await prisma.division.findUnique({ where: { code: 'TMP' } });
+      const t = await prisma.template.create({
+        data: {
+          templateId: 'TMP-C2', title: 'Same', description: 'd', formSchema: [{ id: '1', type: 'text', label: 'A' }],
+          status: 'Published', publishedAt: new Date(), ownerId, divisionId: div!.id, requiresApproval: false, allowsFindings: true, skillLevel: 0,
+          // draft identical to the published state
+          draftSchema: { title: 'Same', description: 'd', formSchema: [{ id: '1', type: 'text', label: 'A' }], requiresApproval: false, allowsFindings: true, estimatedHours: null, skillLevel: 0, type: null }
+        }
+      });
+      const res = await request(app).post(`/api/templates/${t.id}/publish`).set('Authorization', `Bearer ${ownerToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/no changes/i);
+    });
+
+    it('PR7-C: transfer to a non-task-creator (Staff) → 400', async () => {
+      const div = await prisma.division.findUnique({ where: { code: 'TMP' } });
+      const staffRole = await prisma.role.upsert({ where: { name: 'Staff' }, update: {}, create: { name: 'Staff' } });
+      const staff = await prisma.user.create({ data: { name: 'TmplStaff', email: 'tmpl_staff@sqd.com', passwordHash: 'h', forcePasswordChange: false, divisionId: div!.id, roleId: staffRole.id } });
+      const t = await prisma.template.create({ data: { templateId: 'TMP-C3', title: 'T', formSchema: [], ownerId, divisionId: div!.id } });
+
+      const res = await request(app).post(`/api/templates/${t.id}/transfer`).set('Authorization', `Bearer ${ownerToken}`).send({ newOwnerId: staff.id });
+      expect(res.status).toBe(400);
+
+      await prisma.user.delete({ where: { id: staff.id } });
     });
   });
 

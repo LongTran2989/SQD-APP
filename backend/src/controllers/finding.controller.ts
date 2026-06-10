@@ -649,6 +649,8 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
       title: string;
       formSchema: Prisma.InputJsonValue;
       estimatedHours: number | null;
+      requiresApproval: boolean;
+      skillLevel: number;
       createNewWp: boolean;
       newWpName: string | null;
       wpId: number | null;
@@ -667,7 +669,7 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
       }
       const template = await prisma.template.findUnique({
         where: { id: entry.templateId },
-        select: { id: true, status: true, formSchema: true, estimatedHours: true }
+        select: { id: true, status: true, formSchema: true, estimatedHours: true, requiresApproval: true, skillLevel: true }
       });
       if (!template) {
         res.status(404).json({ message: `Template ${entry.templateId} not found` });
@@ -713,6 +715,10 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
         title,
         formSchema: template.formSchema as Prisma.InputJsonValue,
         estimatedHours: template.estimatedHours ?? null,
+        // PR3: seed the per-task approval gate + skill level from the template, so
+        // submit (which now reads task.requiresApproval) behaves as the template intends.
+        requiresApproval: template.requiresApproval,
+        skillLevel: template.skillLevel,
         createNewWp: !!entry.createNewWp,
         newWpName: entry.createNewWp ? entry.newWpName : null,
         wpId: !entry.createNewWp && entry.wpId ? entry.wpId : null,
@@ -769,6 +775,8 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
             status: 'Unassigned',
             schemaSnapshot: entry.formSchema,
             estimatedHours: entry.estimatedHours,
+            skillLevel: entry.skillLevel,
+            requiresApproval: entry.requiresApproval,
             assignmentType: 'INDIVIDUAL',
             responseActionType: entry.responseActionType,
             // Derived server-side — never trusted from the client.

@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { authenticateJWT } from '../middleware/auth.middleware';
+import { authorizeRoles } from '../middleware/rbac.middleware';
 import {
   getTasks,
   getMyTasks,
   getUnassignedTasks,
   getTaskById,
   createTask,
+  createQuickTask,
+  updateTaskWp,
+  reopenTask,
   assignTask,
   selfAssignTask,
   saveTaskData,
@@ -38,6 +42,9 @@ router.get('/unassigned', getUnassignedTasks);
 // ─── Single task ────────────────────────────────────────────────────
 router.get('/:id', getTaskById);
 router.post('/', createTask);
+router.post('/quick', createQuickTask);
+router.patch('/:id/wp', updateTaskWp);
+router.patch('/:id/reopen', authorizeRoles('Admin', 'Director'), reopenTask);
 
 // ─── Assignment ─────────────────────────────────────────────────────
 router.put('/:id/assign', assignTask);

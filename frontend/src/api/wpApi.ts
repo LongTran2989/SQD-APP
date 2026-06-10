@@ -26,6 +26,10 @@ export interface CreateWpPayload {
   timeframeFrom: string;
   timeframeTo: string;
   checkTemplateId?: number;
+  acRegistration?: string | null;
+  customer?: string | null;
+  authority?: string | null;
+  targetDepartmentId?: number | null;
 }
 
 export const createWorkPackage = (payload: CreateWpPayload): Promise<WorkPackageDetail> =>
@@ -36,6 +40,10 @@ export interface UpdateWpPayload {
   timeframeFrom?: string;
   timeframeTo?: string;
   checkTemplateId?: number | null;
+  acRegistration?: string | null;
+  customer?: string | null;
+  authority?: string | null;
+  targetDepartmentId?: number | null;
 }
 
 export const updateWorkPackage = (id: number, payload: UpdateWpPayload): Promise<WorkPackageDetail> =>

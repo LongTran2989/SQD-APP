@@ -135,6 +135,62 @@ function computeIsOverdue(task: { deadline: Date | null; status: string }): bool
   return new Date() > task.deadline;
 }
 
+export type DeadlineStatus = 'Due Soon' | 'Due Today' | 'Overdue' | null;
+
+// Window (hours) before the deadline at which a task is flagged "Due Soon".
+const DUE_SOON_WINDOW_HOURS = 72;
+
+/**
+ * Tiered deadline signal, computed on-the-fly (never stored). Returns null when
+ * there is no deadline or the task is final/inactive. "Due Today" means the
+ * deadline falls on the current calendar day (server timezone); "Overdue" means
+ * the deadline has passed; "Due Soon" means within DUE_SOON_WINDOW_HOURS.
+ */
+function computeDeadlineStatus(task: { deadline: Date | null; status: string }): DeadlineStatus {
+  if (!task.deadline) return null;
+  if (FINAL_TASK_STATUSES.includes(task.status)) return null;
+  if (task.status === 'Inactive') return null;
+
+  const now = new Date();
+  const deadline = new Date(task.deadline);
+
+  // "Due Today" takes precedence for the current calendar day: a date-only deadline
+  // is stored at midnight, so a same-day deadline would otherwise read as Overdue by
+  // the afternoon. Only a deadline on an earlier calendar day is truly Overdue.
+  const sameDay =
+    now.getFullYear() === deadline.getFullYear() &&
+    now.getMonth() === deadline.getMonth() &&
+    now.getDate() === deadline.getDate();
+  if (sameDay) return 'Due Today';
+
+  if (now > deadline) return 'Overdue';
+
+  const hoursUntil = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
+  if (hoursUntil <= DUE_SOON_WINDOW_HOURS) return 'Due Soon';
+
+  return null;
+}
+
+/**
+ * Batched "last activity" lookup: most-recent FeedPost timestamp per task.
+ * FeedPost is the single source for the activity feed (never merged with AuditLog).
+ * Returns a Map<taskId, Date>; tasks with no feed posts are simply absent.
+ */
+async function getLastActivityMap(taskIds: number[]): Promise<Map<number, Date>> {
+  const map = new Map<number, Date>();
+  if (taskIds.length === 0) return map;
+
+  const grouped = await prisma.feedPost.groupBy({
+    by: ['scopeId'],
+    where: { scope: 'TASK', scopeId: { in: taskIds } },
+    _max: { createdAt: true }
+  });
+  for (const g of grouped) {
+    if (g.scopeId != null && g._max.createdAt) map.set(g.scopeId, g._max.createdAt);
+  }
+  return map;
+}
+
 /**
  * Returns the standard task include object for consistent response shapes.
  * All scalar fields (incl. responseActionType, requiresDirectorApproval) are
@@ -195,15 +251,52 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
       };
     }
 
+    // ── Optional filters (combined with the RBAC scope via AND) ────────────────
+    const filters: any[] = [];
+
+    // statuses[] — accept ?statuses=A&statuses=B or ?statuses=A
+    const rawStatuses = req.query.statuses;
+    if (rawStatuses) {
+      const statuses = Array.isArray(rawStatuses) ? rawStatuses.map(String) : [String(rawStatuses)];
+      if (statuses.length > 0) filters.push({ status: { in: statuses } });
+    }
+
+    const issuerId = req.query.issuerId ? parseInt(String(req.query.issuerId), 10) : null;
+    if (issuerId && !Number.isNaN(issuerId)) filters.push({ issuerId });
+
+    const assignedToUserId = req.query.assignedToUserId ? parseInt(String(req.query.assignedToUserId), 10) : null;
+    if (assignedToUserId && !Number.isNaN(assignedToUserId)) filters.push({ assignedToUserId });
+
+    // Date range filters the task creation date (createdAt).
+    const createdAtFilter: { gte?: Date; lte?: Date } = {};
+    if (req.query.startDate) {
+      const d = new Date(String(req.query.startDate));
+      if (!Number.isNaN(d.getTime())) createdAtFilter.gte = d;
+    }
+    if (req.query.endDate) {
+      const d = new Date(String(req.query.endDate));
+      if (!Number.isNaN(d.getTime())) {
+        d.setHours(23, 59, 59, 999); // inclusive end-of-day
+        createdAtFilter.lte = d;
+      }
+    }
+    if (createdAtFilter.gte || createdAtFilter.lte) filters.push({ createdAt: createdAtFilter });
+
+    const finalWhere = filters.length > 0 ? { AND: [where, ...filters] } : where;
+
     const tasks = await prisma.task.findMany({
-      where,
+      where: finalWhere,
       orderBy: { updatedAt: 'desc' },
       include: taskInclude()
     });
 
+    const lastActivityMap = await getLastActivityMap(tasks.map(t => t.id));
+
     const result = tasks.map(t => ({
       ...t,
-      isOverdue: computeIsOverdue(t)
+      isOverdue: computeIsOverdue(t),
+      deadlineStatus: computeDeadlineStatus(t),
+      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt
     }));
 
     res.json(result);
@@ -233,7 +326,8 @@ export const getMyTasks = async (req: Request, res: Response): Promise<void> => 
 
     const result = tasks.map(t => ({
       ...t,
-      isOverdue: computeIsOverdue(t)
+      isOverdue: computeIsOverdue(t),
+      deadlineStatus: computeDeadlineStatus(t)
     }));
 
     res.json(result);
@@ -266,7 +360,8 @@ export const getUnassignedTasks = async (req: Request, res: Response): Promise<v
 
     const result = tasks.map(t => ({
       ...t,
-      isOverdue: computeIsOverdue(t)
+      isOverdue: computeIsOverdue(t),
+      deadlineStatus: computeDeadlineStatus(t)
     }));
 
     res.json(result);
@@ -300,7 +395,7 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
     // All authenticated users can view the task details.
     // Action endpoints (PUT/POST) remain strictly controlled.
 
-    res.json({ ...task, isOverdue: computeIsOverdue(task) });
+    res.json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
   } catch (error) {
     console.error('Error fetching task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -316,7 +411,10 @@ export interface CreateTaskParams {
   assignedToUserId?: number | null;
   deadline?: string | Date | null;
   estimatedHours?: number | null;
+  skillLevel?: number | null;
+  requiresApproval?: boolean | null;
   issuanceNote?: string | null;
+  title?: string | null;
 }
 
 /**
@@ -332,7 +430,7 @@ export async function createTaskService(
   params: CreateTaskParams
 ) {
   const { userId, role, divisionId } = actor;
-  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote } = params;
+  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote, title } = params;
 
   // RBAC: Manager, Director, Admin can create tasks.
   // Regular users assigned to a WP can create tasks inside that WP for their own division.
@@ -362,7 +460,7 @@ export async function createTaskService(
       formSchema: true,
       requiresApproval: true,
       estimatedHours: true,
-      isOneOff: true,
+      skillLevel: true,
       division: { select: { id: true, code: true } }
     }
   });
@@ -411,6 +509,7 @@ export async function createTaskService(
     data: {
       taskId: newTaskId,
       templateId,
+      title: title ?? null,
       issuerId: userId,
       assignedToUserId: assignedToUserId ?? null,
       wpId: wpId ?? null,
@@ -419,16 +518,14 @@ export async function createTaskService(
       schemaSnapshot: template.formSchema as any,
       deadline: deadline ? new Date(deadline) : null,
       estimatedHours: estimatedHours ?? template.estimatedHours ?? null,
+      // Seed per-task overrides from the template; caller may override either.
+      skillLevel: skillLevel ?? template.skillLevel ?? 0,
+      requiresApproval: requiresApproval ?? template.requiresApproval ?? true,
       issuanceNote: issuanceNote ?? null,
       assignmentType: 'INDIVIDUAL'
     },
     include: taskInclude()
   });
-
-  // Handle isOneOff — archive template if task is being assigned at creation time
-  if (template.isOneOff && assignedToUserId) {
-    await client.template.update({ where: { id: templateId }, data: { status: 'Archived' } });
-  }
 
   // Dual-write (Rule 3) — runs on the same client/tx so it is atomic with the create.
   const activityContent = assignedToUserId
@@ -465,19 +562,193 @@ export async function createTaskService(
 export const createTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId, role, divisionId } = req.user!;
-    const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote } = req.body;
+    const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote } = req.body;
 
     const task = await prisma.$transaction((tx) =>
-      createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote })
+      createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
     );
 
-    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task) });
+    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
       return;
     }
     console.error('Error creating task:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PATCH /api/tasks/:id/wp ───────────────────────────────────────────────────
+// Link an existing task to a Work Package, or clear its link (wpId: null).
+export const updateTaskWp = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+    const { wpId } = req.body as { wpId: number | null };
+
+    const task = await prisma.task.findUnique({ where: { id, deletedAt: null } });
+    if (!task) {
+      res.status(404).json({ message: 'Task not found' });
+      return;
+    }
+
+    // Only the issuer or an elevated role may re-link a task.
+    if (task.issuerId !== userId && !TASK_CREATOR_ROLES.includes(role)) {
+      res.status(403).json({ message: 'Insufficient permissions to change the work package of this task' });
+      return;
+    }
+
+    if (FINAL_TASK_STATUSES.includes(task.status) || task.status === 'Inactive') {
+      res.status(400).json({ message: `Cannot re-link a task in status: ${task.status}` });
+      return;
+    }
+
+    let newWpId: number | null = null;
+    if (wpId !== null && wpId !== undefined) {
+      const wp = await prisma.workPackage.findUnique({
+        where: { id: wpId, deletedAt: null },
+        select: { id: true, status: true }
+      });
+      if (!wp) {
+        res.status(404).json({ message: 'Work Package not found' });
+        return;
+      }
+      if (wp.status === 'Closed') {
+        res.status(400).json({ message: 'Cannot link a task to a Closed Work Package' });
+        return;
+      }
+      newWpId = wp.id;
+    }
+
+    const updated = await prisma.task.update({
+      where: { id },
+      data: { wpId: newWpId },
+      include: taskInclude()
+    });
+
+    await logAuditAndActivity(
+      task.id,
+      String(task.id),
+      'TASK_WP_LINK_CHANGED',
+      userId,
+      newWpId ? `Task linked to Work Package #${newWpId}` : 'Task unlinked from its Work Package',
+      { fromWpId: task.wpId, toWpId: newWpId }
+    );
+
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+  } catch (error) {
+    console.error('Error updating task work package:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// Stable slug of the system-seeded template that backs the Quick Task flow.
+const GENERIC_ADHOC_SLUG = 'GENERIC-ADHOC';
+
+// ─── POST /api/tasks/quick ─────────────────────────────────────────────────────
+// Streamlined ad-hoc task creation. Resolves the Generic Ad-Hoc template by slug and
+// defaults the target division to the creator's. Reuses createTaskService verbatim.
+export const createQuickTask = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role, divisionId } = req.user!;
+    const { title, issuanceNote, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, targetDivisionId } = req.body;
+
+    if (!title || !String(title).trim()) {
+      res.status(400).json({ message: 'Task title is required' });
+      return;
+    }
+
+    const template = await prisma.template.findUnique({
+      where: { templateId: GENERIC_ADHOC_SLUG },
+      select: { id: true }
+    });
+    if (!template) {
+      res.status(500).json({ message: 'Generic Ad-Hoc Task template is not seeded. Contact an administrator.' });
+      return;
+    }
+
+    const task = await prisma.$transaction((tx) =>
+      createTaskService(tx, { userId, role, divisionId }, {
+        templateId: template.id,
+        targetDivisionId: targetDivisionId ?? divisionId, // default to the creator's division
+        assignedToUserId: assignedToUserId ?? null,
+        deadline: deadline ?? null,
+        estimatedHours: estimatedHours ?? null,
+        skillLevel: skillLevel ?? null,
+        requiresApproval: requiresApproval ?? null,
+        issuanceNote: issuanceNote ?? null,
+        title: String(title).trim(),
+      })
+    );
+
+    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
+  } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
+    console.error('Error creating quick task:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PATCH /api/tasks/:id/reopen ───────────────────────────────────────────────
+// Admin/Director re-opens a Closed task. Returns it to Assigned (or Unassigned if it
+// has no assignee), clears completedAt, and leaves all TaskData/schemaSnapshot intact.
+export const reopenTask = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId } = req.user!;
+    const { reason } = req.body as { reason?: string };
+
+    if (!reason || !reason.trim()) {
+      res.status(400).json({ message: 'A reason is required to re-open a task' });
+      return;
+    }
+
+    const task = await prisma.task.findUnique({
+      where: { id, deletedAt: null },
+      include: { wp: { select: { status: true } } }
+    });
+    if (!task) {
+      res.status(404).json({ message: 'Task not found' });
+      return;
+    }
+
+    // Only 'Closed' tasks are reopenable; Rejected/Terminated keep their own paths.
+    if (task.status !== 'Closed') {
+      res.status(400).json({ message: `Only Closed tasks can be re-opened. Current status: ${task.status}` });
+      return;
+    }
+
+    if (task.wp && task.wp.status === 'Closed') {
+      res.status(400).json({ message: 'Cannot re-open a task that belongs to a Closed Work Package' });
+      return;
+    }
+
+    const newStatus = task.assignedToUserId ? 'Assigned' : 'Unassigned';
+
+    const updated = await prisma.task.update({
+      where: { id },
+      // NOTE: TaskData and schemaSnapshot are intentionally left untouched.
+      data: { status: newStatus, completedAt: null },
+      include: taskInclude()
+    });
+
+    await logAuditAndActivity(
+      task.id,
+      String(task.id),
+      'TASK_REOPENED',
+      userId,
+      `Task re-opened by Admin. Reason: ${reason.trim()}. Status: Closed → ${newStatus}`,
+      { fromStatus: 'Closed', toStatus: newStatus, reason: reason.trim() },
+      reason.trim()
+    );
+
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+  } catch (error) {
+    console.error('Error re-opening task:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -496,8 +767,7 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
     }
 
     const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      include: { template: { select: { isOneOff: true } } }
+      where: { id, deletedAt: null }
     });
 
     if (!task) {
@@ -549,14 +819,6 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       include: taskInclude()
     });
 
-    // Handle isOneOff — archive template on first assignment
-    if (task.template?.isOneOff) {
-      await prisma.template.update({
-        where: { id: task.templateId },
-        data: { status: 'Archived' }
-      });
-    }
-
     await logAuditAndActivity(
       task.id,
       String(task.id),
@@ -566,7 +828,7 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -581,8 +843,7 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
     const { userId, role, divisionId } = req.user!;
 
     const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      include: { template: { select: { isOneOff: true } } }
+      where: { id, deletedAt: null }
     });
 
     if (!task) {
@@ -611,14 +872,6 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       include: taskInclude()
     });
 
-    // Handle isOneOff — archive template on first assignment
-    if (task.template?.isOneOff) {
-      await prisma.template.update({
-        where: { id: task.templateId },
-        data: { status: 'Archived' }
-      });
-    }
-
     await logAuditAndActivity(
       task.id,
       String(task.id),
@@ -628,7 +881,7 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId: userId }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error self-assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -709,8 +962,7 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
     const { userId } = req.user!;
 
     const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      include: { template: { select: { requiresApproval: true } } }
+      where: { id, deletedAt: null }
     });
 
     if (!task) {
@@ -728,7 +980,10 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const requiresApproval = task.template?.requiresApproval ?? true;
+    // Per-task gate, seeded from the template at creation (PR3). A task that
+    // requires Director approval ALWAYS needs review — requiresApproval=false must
+    // never short-circuit (close) a task whose requiresDirectorApproval gate is on.
+    const requiresApproval = (task.requiresApproval ?? true) || task.requiresDirectorApproval;
     // OQ-3: No grace window — when requiresApproval = false, task closes immediately on submit.
     // TODO (future): Implement a TASK_APPROVAL_GRACE_MINUTES SystemSetting if grace window is required.
     const newStatus = requiresApproval ? 'In Review' : 'Closed';
@@ -761,7 +1016,7 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error submitting task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -875,7 +1130,7 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error reviewing task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -976,7 +1231,7 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error performing post-rejection action:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1068,7 +1323,7 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
       reassignTaskService(tx, { userId, role, divisionId }, { taskId: id, newAssigneeId, reason })
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -1140,7 +1395,7 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
       { previousIssuerId, newIssuerId }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error transferring issuer rights:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1210,7 +1465,7 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
       reason
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error inactivating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1266,7 +1521,7 @@ export const reactivateTask = async (req: Request, res: Response): Promise<void>
       { fromStatus: 'Inactive', toStatus: previousStatus }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error reactivating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1324,7 +1579,7 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
       { deadline: newDeadline.toISOString() }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error setting deadline:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1398,7 +1653,7 @@ export const requestDeadlineExtension = async (req: Request, res: Response): Pro
       { reason, proposedDeadline: proposedDeadline ?? null }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error requesting deadline extension:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1497,7 +1752,7 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
       { decision, newDeadline: deadlineUpdate?.toISOString() ?? null, extensionIndex }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error deciding deadline extension:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1602,7 +1857,7 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
       { previousRating, newRating: rating, isRevision }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated) });
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error rating task:', error);
     res.status(500).json({ message: 'Internal server error' });

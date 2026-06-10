@@ -3,6 +3,11 @@ export interface Role {
   name: string;
 }
 
+export interface UserPreferences {
+  taskColumns?: string[];
+  taskFilters?: Record<string, unknown>;
+}
+
 export interface User {
   id: number;
   employeeId: string;
@@ -10,6 +15,7 @@ export interface User {
   email: string;
   role: string; // The backend returns the role name as a string
   divisionId: number | null;
+  preferences?: UserPreferences | null;
 }
 
 export interface AuthResponse {
@@ -64,7 +70,7 @@ export interface Template {
   requiresApproval: boolean;
   allowsFindings: boolean;
   estimatedHours: number | null;
-  isOneOff: boolean;
+  skillLevel: number;
   type: string | null;
   
   divisionId: number;
@@ -74,6 +80,7 @@ export interface Template {
   
   formSchema: FormField[];
   draftSchema?: any;
+  hasPendingChanges?: boolean;
   revisionArchives?: any[];
   
   createdAt: string;
@@ -105,9 +112,11 @@ export interface Task {
   rejectionReason: string | null;
   rating: number | null;
   estimatedHours: number | null;
+  skillLevel: number;
   issuanceNote: string | null;
   responseActionType: ResponseActionType | null;
   requiresDirectorApproval: boolean;
+  requiresApproval: boolean;
   assignmentType: string;
   schemaSnapshot: FormField[];
   targetDivisionId: number | null;
@@ -119,8 +128,12 @@ export interface Task {
 
 // Enriched Task — returned by GET /api/tasks/:id and list endpoints
 // Includes nested joined objects from taskInclude() + computed isOverdue
+export type DeadlineStatus = 'Due Soon' | 'Due Today' | 'Overdue' | null;
+
 export interface TaskEnriched extends Task {
   isOverdue: boolean;
+  deadlineStatus: DeadlineStatus;
+  lastActivityAt?: string;
   template: { id: number; templateId: string; title: string; allowsFindings?: boolean } | null;
   issuer: { id: number; name: string } | null;
   assignedToUser: { id: number; name: string; role?: string } | null;
@@ -143,6 +156,10 @@ export interface WorkPackage {
   timeframeTo: string;
   creatorId: number;
   checkTemplateId: number | null;
+  acRegistration: string | null;
+  customer: string | null;
+  authority: string | null;
+  targetDepartmentId: number | null;
   status: WpStatus;
   inactivationLog: { reason: string; inactivatedBy: number; inactivatedAt: string } | null;
   createdAt: string;

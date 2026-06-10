@@ -17,6 +17,7 @@ model Department {
   divisions Division[]
   findings  Finding[]  @relation("FindingDepartment")
   responseActionTargets FindingResponseActionDepartment[] @relation("ResponseActionDepts")
+  targetedWorkPackages  WorkPackage[]                     @relation("WorkPackageTargetDepartment")
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 }
@@ -63,6 +64,9 @@ model User {
 
   roleId Int
   role   Role @relation(fields: [roleId], references: [id])
+
+  // Per-user UI state (table column visibility, saved filters). Persisted across devices.
+  preferences Json?
 
   assignedTasks    Task[]    @relation("TaskAssignedTo")
   reportedFindings Finding[] @relation("FindingReportedBy")
@@ -161,7 +165,7 @@ model Template {
   requiresApproval Boolean @default(false)
   allowsFindings   Boolean @default(true)
   estimatedHours   Float?
-  isOneOff         Boolean @default(false)
+  skillLevel       Int     @default(0) // Required competency level (0-4) seeded onto tasks created from this template
   type             String?
   formSchema       Json // JSON document for active/published field definitions
   draftSchema      Json? // JSON document for unpublished draft changes
@@ -225,9 +229,13 @@ model Task {
   rejectionReason    String?
   rating             Int?
   estimatedHours     Float?
+  skillLevel         Int     @default(0) // Required competency level (0-4); seeded from template, overridable per task
   issuanceNote             String?
   responseActionType       String?
   requiresDirectorApproval Boolean  @default(false)
+  // Per-task review gate; seeded from template.requiresApproval at creation, overridable.
+  // Independent of requiresDirectorApproval (the Director-only gate always wins).
+  requiresApproval         Boolean  @default(true)
   assignmentType           String   @default("INDIVIDUAL")
   schemaSnapshot     Json
 
@@ -256,6 +264,8 @@ model Task {
   @@index([status, deletedAt])
   @@index([targetDivisionId, status, deletedAt])
   @@index([templateId, status, deletedAt])
+  @@index([assignedToUserId, status, deletedAt])
+  @@index([issuerId, status, deletedAt])
   @@index([completedAt])
 }
 
@@ -602,6 +612,15 @@ model WorkPackage {
 
   checkTemplateId Int? // ID of Template to auto-generate daily CHECK tasks
 
+  // Type-specific fields (CHECK): aircraft/customer/authority context
+  acRegistration String?
+  customer       String?
+  authority      String?
+
+  // Type-specific field (AUDIT): the department being audited
+  targetDepartmentId Int?
+  targetDepartment   Department? @relation("WorkPackageTargetDepartment", fields: [targetDepartmentId], references: [id], onDelete: SetNull)
+
   status          String @default("Open") // Open, In Progress, Overdue, Closed, Inactive
   inactivationLog Json?
 
@@ -612,6 +631,8 @@ model WorkPackage {
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  @@index([targetDepartmentId])
 }
 
 model WorkPackageAssignment {

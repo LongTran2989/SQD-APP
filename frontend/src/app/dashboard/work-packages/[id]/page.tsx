@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
-import { WorkPackageDetail, WpStatus } from '../../../../types';
+import { WorkPackageDetail, WpStatus, TaskEnriched } from '../../../../types';
 import { getWorkPackageById, updateWpStatus } from '../../../../api/wpApi';
+import { getTasks, relinkTaskWp } from '../../../../api/taskApi';
 import WorkPackageStatusBadge from '../../../../components/work-packages/WorkPackageStatusBadge';
 import WorkPackageAssignmentPanel from '../../../../components/work-packages/WorkPackageAssignmentPanel';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
@@ -122,6 +123,11 @@ export default function WorkPackageDetailPage() {
   const [statusModal, setStatusModal] = useState<'Inactive' | 'Closed' | 'Open' | null>(null);
   const [statusChanging, setStatusChanging] = useState(false);
 
+  // "Add Existing Task" modal
+  const [showAddExisting, setShowAddExisting] = useState(false);
+  const [orphanTasks, setOrphanTasks] = useState<TaskEnriched[]>([]);
+  const [linkingTaskId, setLinkingTaskId] = useState<number | null>(null);
+
   const loadWp = useCallback(async () => {
     try {
       const data = await getWorkPackageById(wpId);
@@ -136,6 +142,36 @@ export default function WorkPackageDetailPage() {
   }, [wpId]);
 
   useEffect(() => { loadWp(); }, [loadWp]);
+
+  const openAddExisting = async () => {
+    if (!wp) return;
+    try {
+      const all = await getTasks();
+      // Orphaned, non-final tasks in the same division as this WP.
+      const FINAL = ['Closed', 'Rejected', 'Terminated'];
+      setOrphanTasks(
+        all.filter((t) => t.wpId === null && !FINAL.includes(t.status) && t.targetDivisionId === wp.divisionId)
+      );
+      setShowAddExisting(true);
+    } catch {
+      toast.error('Failed to load tasks');
+    }
+  };
+
+  const handleLinkExisting = async (taskId: number) => {
+    if (!wp) return;
+    setLinkingTaskId(taskId);
+    try {
+      await relinkTaskWp(taskId, wp.id);
+      toast.success('Task linked to this Work Package');
+      setShowAddExisting(false);
+      await loadWp();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to link task');
+    } finally {
+      setLinkingTaskId(null);
+    }
+  };
 
   const handleStatusChange = async (reason?: string) => {
     if (!statusModal || !wp) return;
@@ -314,13 +350,22 @@ export default function WorkPackageDetailPage() {
                 </span>
               </h3>
               {canCreateTask && (
-                <Link
-                  href={`/dashboard/tasks/new?wpId=${wp.id}`}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-lg transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Create Task
-                </Link>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={openAddExisting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Existing Task
+                  </button>
+                  <Link
+                    href={`/dashboard/tasks/new?wpId=${wp.id}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-lg transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Create Task
+                  </Link>
+                </div>
               )}
             </div>
 
@@ -397,6 +442,42 @@ export default function WorkPackageDetailPage() {
           onCancel={() => setStatusModal(null)}
           loading={statusChanging}
         />
+      )}
+
+      {showAddExisting && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h3 className="text-base font-bold text-slate-800">Add Existing Task</h3>
+              <button onClick={() => setShowAddExisting(false)} className="text-slate-400 hover:text-slate-600 text-sm">Close</button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              {orphanTasks.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-8">
+                  No unlinked tasks available in this division.
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {orphanTasks.map((t) => (
+                    <li key={t.id} className="flex items-center justify-between py-3">
+                      <div className="min-w-0">
+                        <div className="font-mono text-xs font-bold text-slate-700">{t.taskId}</div>
+                        <div className="text-sm text-slate-600 truncate">{t.template?.title ?? t.title ?? '—'}</div>
+                      </div>
+                      <button
+                        onClick={() => handleLinkExisting(t.id)}
+                        disabled={linkingTaskId === t.id}
+                        className="ml-3 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-lg disabled:opacity-50"
+                      >
+                        {linkingTaskId === t.id ? 'Linking…' : 'Link'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

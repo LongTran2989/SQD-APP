@@ -16,6 +16,7 @@ import {
   assignTask,
   transferIssuerRights,
   setDeadline,
+  reopenTask,
   getUsers,
 } from '../../api/taskApi';
 import toast from 'react-hot-toast';
@@ -246,6 +247,10 @@ export default function TaskActionBar({
   const [showSetDeadline, setShowSetDeadline] = useState(false);
   const [newDeadlineValue, setNewDeadlineValue] = useState('');
 
+  // Admin re-open (Closed task)
+  const [showReopenInput, setShowReopenInput] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+
   // Rating
   const [ratingValue, setRatingValue] = useState<number | null>(task.rating);
 
@@ -290,6 +295,9 @@ export default function TaskActionBar({
   // Set deadline: reviewer rights, not final, not inactive
   const canSetDeadline =
     isReviewer && !isFinal && !isInactive;
+  // Admin re-open: only a Closed task, only Admin/Director.
+  const canReopen =
+    task.status === 'Closed' && ['Admin', 'Director'].includes(currentUser.role);
 
   // ── Action handlers ──
 
@@ -415,6 +423,17 @@ export default function TaskActionBar({
       return r;
     });
 
+  const handleReopen = () => {
+    if (!reopenReason.trim()) { toast.error('A reason is required to re-open this task'); return; }
+    handle('reopen', async () => {
+      const r = await reopenTask(task.id, reopenReason.trim());
+      toast.success('Task re-opened');
+      setShowReopenInput(false);
+      setReopenReason('');
+      return r;
+    });
+  };
+
   const handleRate = () => {
     if (ratingValue === null) return;
     handle('rate', async () => {
@@ -486,7 +505,8 @@ export default function TaskActionBar({
     !pendingExtension &&
     !canGeneralReassign &&
     !canTransferIssuer &&
-    !canSetDeadline;
+    !canSetDeadline &&
+    !canReopen;
 
   if (noActions) return null;
 
@@ -907,6 +927,32 @@ export default function TaskActionBar({
           <ActionButton id="btn-reactivate" onClick={handleReactivate} disabled={loading === 'reactivate'} variant="success" icon={Power}>
             {loading === 'reactivate' ? 'Reactivating...' : 'Reactivate Task'}
           </ActionButton>
+        )}
+
+        {/* ── ADMIN RE-OPEN — Closed task ──────────────────── */}
+        {canReopen && (
+          <div>
+            <button
+              id="btn-toggle-reopen"
+              onClick={() => setShowReopenInput(!showReopenInput)}
+              className="text-xs text-slate-500 hover:text-blue-600 flex items-center gap-1 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Re-open task (Admin)
+              {showReopenInput ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {showReopenInput && (
+              <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-2">
+                <InlineInput label="Reason for re-opening *" value={reopenReason} onChange={setReopenReason} placeholder="Why is this Closed task being re-opened?" multiline />
+                <div className="flex gap-2">
+                  <ActionButton id="btn-confirm-reopen" onClick={handleReopen} disabled={loading === 'reopen'} variant="primary" icon={RefreshCw}>
+                    {loading === 'reopen' ? 'Re-opening...' : 'Re-open Task'}
+                  </ActionButton>
+                  <ActionButton id="btn-cancel-reopen" onClick={() => { setShowReopenInput(false); setReopenReason(''); }} variant="ghost">Cancel</ActionButton>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* ── RATING ───────────────────────────────────────── */}

@@ -138,9 +138,14 @@ export default function TemplateDetailPage({ params }: { params: Promise<{ id: s
                 <StatusIcon className="w-4 h-4" />
                 {config.label}
               </span>
-              {template.isOneOff && (
-                <span className="px-2 py-1 rounded text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200 shadow-sm">
-                  ONE-OFF
+              {template.hasPendingChanges && (
+                <span className="px-2 py-1 rounded text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200 shadow-sm">
+                  PENDING CHANGES
+                </span>
+              )}
+              {template.skillLevel > 0 && (
+                <span className="px-2 py-1 rounded text-xs font-bold bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-sm">
+                  SKILL {template.skillLevel}
                 </span>
               )}
             </div>

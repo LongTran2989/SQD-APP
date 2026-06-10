@@ -66,8 +66,52 @@ describe('User RBAC Endpoints', () => {
       .put(`/api/users/${targetUserId}/role`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ roleName: 'Manager' });
-    
+
     expect(res.status).toBe(200);
     expect(res.body.user.role.name).toBe('Manager');
+  });
+
+  // ─── PR6: self-service preferences ──────────────────────────────────────────
+  describe('Preferences (PR6)', () => {
+    it('PR6-A: deep-merge preserves untouched keys', async () => {
+      const r1 = await request(app)
+        .patch('/api/users/me/preferences')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ preferences: { taskColumns: ['status', 'deadline'] } });
+      expect(r1.status).toBe(200);
+
+      const r2 = await request(app)
+        .patch('/api/users/me/preferences')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ preferences: { taskFilters: { statuses: ['Closed'] } } });
+      expect(r2.status).toBe(200);
+      // First key survives the second save.
+      expect(r2.body.preferences.taskColumns).toEqual(['status', 'deadline']);
+      expect(r2.body.preferences.taskFilters).toEqual({ statuses: ['Closed'] });
+    });
+
+    it('PR6-B: unknown keys are rejected', async () => {
+      const res = await request(app)
+        .patch('/api/users/me/preferences')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ preferences: { evil: true } });
+      expect(res.status).toBe(400);
+    });
+
+    it('PR6-C: oversized payload rejected', async () => {
+      const huge = Array.from({ length: 5000 }, (_, i) => `col-${i}`);
+      const res = await request(app)
+        .patch('/api/users/me/preferences')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ preferences: { taskColumns: huge } });
+      expect(res.status).toBe(413);
+    });
+
+    it('PR6-D: requires authentication', async () => {
+      const res = await request(app)
+        .patch('/api/users/me/preferences')
+        .send({ preferences: { taskColumns: [] } });
+      expect(res.status).toBe(401);
+    });
   });
 });

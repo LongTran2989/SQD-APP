@@ -38,7 +38,7 @@ describe('Task Backend (Phase 5.2)', () => {
 
   let publishedTemplateId: number;  // a Published template in divisionId
   let archivedTemplateId: number;   // an Archived template
-  let oneOffTemplateId: number;     // isOneOff = true template
+  let oneOffTemplateId: number;     // formerly isOneOff; now a plain Published template (one-off behaviour removed)
 
   // ─── Setup ────────────────────────────────────────────────────────
 
@@ -111,13 +111,12 @@ describe('Task Backend (Phase 5.2)', () => {
     const oneOffTemplate = await prisma.template.create({
       data: {
         templateId: 'TSK-T-003',
-        title: 'One-Off Template',
+        title: 'Formerly One-Off Template',
         formSchema: [{ id: '1', type: 'text', label: 'Check' }],
         status: 'Published',
         publishedAt: new Date(),
         ownerId: managerId,
-        divisionId,
-        isOneOff: true
+        divisionId
       }
     });
     oneOffTemplateId = oneOffTemplate.id;
@@ -301,8 +300,8 @@ describe('Task Backend (Phase 5.2)', () => {
       await prisma.workPackage.delete({ where: { id: closedWp.id } });
     });
 
-    it('T08: isOneOff Template is archived after task assignment', async () => {
-      // Ensure the one-off template is Published
+    it('T08: template is NOT archived after task assignment (one-off behaviour removed)', async () => {
+      // Ensure the template is Published
       await prisma.template.update({ where: { id: oneOffTemplateId }, data: { status: 'Published' } });
 
       const res = await request(app)
@@ -312,11 +311,9 @@ describe('Task Backend (Phase 5.2)', () => {
 
       expect(res.status).toBe(201);
 
+      // One-off auto-archival has been removed: the template stays Published and reusable.
       const template = await prisma.template.findUnique({ where: { id: oneOffTemplateId } });
-      expect(template?.status).toBe('Archived');
-
-      // Restore for subsequent tests
-      await prisma.template.update({ where: { id: oneOffTemplateId }, data: { status: 'Published' } });
+      expect(template?.status).toBe('Published');
     });
 
     it('T09: schemaSnapshot equals template.formSchema at creation', async () => {
@@ -885,6 +882,8 @@ describe('Task Backend (Phase 5.2)', () => {
           targetDivisionId: divisionId,
           status: 'In Progress',
           schemaSnapshot: [],
+          // PR3: submit reads the per-task gate, seeded from the template at creation.
+          requiresApproval,
           assignmentType: 'INDIVIDUAL'
         }
       });
@@ -933,6 +932,366 @@ describe('Task Backend (Phase 5.2)', () => {
       const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       const submitEvent = activities.find(a => a.content.toLowerCase().includes('review') || a.content.toLowerCase().includes('submit'));
       expect(submitEvent).toBeDefined();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PR3 — Approval semantics: requiresApproval (per-task) × requiresDirectorApproval
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Approval semantics (PR3)', () => {
+    async function makeInProgressTask(opts: { requiresApproval: boolean; requiresDirectorApproval: boolean }): Promise<number> {
+      const t = await prisma.task.create({
+        data: {
+          taskId: `TSK-${String(Date.now()).slice(-6)}${Math.floor(Math.random() * 100)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          assignedToUserId: staffId,
+          targetDivisionId: divisionId,
+          status: 'In Progress',
+          schemaSnapshot: [],
+          requiresApproval: opts.requiresApproval,
+          requiresDirectorApproval: opts.requiresDirectorApproval,
+          assignmentType: 'INDIVIDUAL'
+        }
+      });
+      return t.id;
+    }
+
+    const submit = (taskId: number) =>
+      request(app).put(`/api/tasks/${taskId}/submit`).set('Authorization', `Bearer ${staffToken}`);
+
+    it('PR3-A: requiresApproval=true, director=false → In Review', async () => {
+      const id = await makeInProgressTask({ requiresApproval: true, requiresDirectorApproval: false });
+      const res = await submit(id);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('In Review');
+    });
+
+    it('PR3-B: requiresApproval=false, director=false → Closed immediately', async () => {
+      const id = await makeInProgressTask({ requiresApproval: false, requiresDirectorApproval: false });
+      const res = await submit(id);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Closed');
+    });
+
+    it('PR3-C: requiresApproval=true, director=true → In Review', async () => {
+      const id = await makeInProgressTask({ requiresApproval: true, requiresDirectorApproval: true });
+      const res = await submit(id);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('In Review');
+    });
+
+    it('PR3-D: requiresApproval=false but director=true → In Review (gate not bypassed)', async () => {
+      const id = await makeInProgressTask({ requiresApproval: false, requiresDirectorApproval: true });
+      const res = await submit(id);
+      expect(res.status).toBe(200);
+      // requiresApproval=false must NOT close a Director-gated task.
+      expect(res.body.status).toBe('In Review');
+    });
+
+    it('PR3-E: Director gate still blocks a non-Director reviewer at review time', async () => {
+      const id = await makeInProgressTask({ requiresApproval: true, requiresDirectorApproval: true });
+      await submit(id); // → In Review
+
+      const mgrReview = await request(app)
+        .put(`/api/tasks/${id}/review`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ action: 'approve' });
+      expect(mgrReview.status).toBe(403);
+
+      const dirReview = await request(app)
+        .put(`/api/tasks/${id}/review`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ action: 'approve' });
+      expect(dirReview.status).toBe(200);
+      expect(dirReview.body.status).toBe('Closed');
+    });
+
+    it('PR3-F: createTask seeds requiresApproval/skillLevel from template, honoring overrides', async () => {
+      // Template requiresApproval=true (publishedTemplateId), override to false on the task.
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          templateId: publishedTemplateId,
+          targetDivisionId: divisionId,
+          requiresApproval: false,
+          skillLevel: 3
+        });
+      expect(res.status).toBe(201);
+      const created = await prisma.task.findUnique({ where: { id: res.body.id } });
+      expect(created?.requiresApproval).toBe(false);
+      expect(created?.skillLevel).toBe(3);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PR4 — Deadline status tiers (non-breaking; isOverdue retained)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Deadline status (PR4)', () => {
+    const daysFromNow = (n: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      return d.toISOString().split('T')[0];
+    };
+
+    async function createWithDeadline(deadline?: string): Promise<string> {
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId, assignedToUserId: staffId, deadline });
+      expect(res.status).toBe(201);
+      return res.body.id;
+    }
+
+    it('PR4-A: no deadline → deadlineStatus null, isOverdue false', async () => {
+      const id = await createWithDeadline();
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBeNull();
+      expect(res.body.isOverdue).toBe(false);
+    });
+
+    it('PR4-B: deadline today → Due Today', async () => {
+      const id = await createWithDeadline(daysFromNow(0));
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBe('Due Today');
+    });
+
+    it('PR4-C: deadline within 72h → Due Soon', async () => {
+      const id = await createWithDeadline(daysFromNow(2));
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBe('Due Soon');
+    });
+
+    it('PR4-D: deadline far future → null (no badge)', async () => {
+      const id = await createWithDeadline(daysFromNow(30));
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBeNull();
+    });
+
+    it('PR4-E: deadline in the past → Overdue (and isOverdue true)', async () => {
+      const id = await createWithDeadline(daysFromNow(2));
+      // Force the deadline into the past directly (endpoint blocks past dates).
+      const past = new Date();
+      past.setDate(past.getDate() - 3);
+      await prisma.task.update({ where: { id: Number(id) }, data: { deadline: past } });
+      const res = await request(app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.body.deadlineStatus).toBe('Overdue');
+      expect(res.body.isOverdue).toBe(true);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PR5 — Filtering & WP re-linking
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Filtering & WP re-linking (PR5)', () => {
+    it('PR5-A: filter by statuses[] returns only matching statuses', async () => {
+      await prisma.task.create({ data: { taskId: `TSK-F1${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      await prisma.task.create({ data: { taskId: `TSK-F2${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, assignedToUserId: staffId, targetDivisionId: divisionId, status: 'Closed', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+
+      const res = await request(app)
+        .get('/api/tasks?statuses=Unassigned')
+        .set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.length).toBeGreaterThan(0);
+      expect(res.body.every((t: { status: string }) => t.status === 'Unassigned')).toBe(true);
+    });
+
+    it('PR5-B: filter by assignedToUserId', async () => {
+      await prisma.task.create({ data: { taskId: `TSK-F3${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, assignedToUserId: staffId, targetDivisionId: divisionId, status: 'Assigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      const res = await request(app)
+        .get(`/api/tasks?assignedToUserId=${staffId}`)
+        .set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.every((t: { assignedToUserId: number }) => t.assignedToUserId === staffId)).toBe(true);
+    });
+
+    it('PR5-C: list includes lastActivityAt', async () => {
+      const res = await request(app).get('/api/tasks').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      if (res.body.length > 0) {
+        expect(res.body[0]).toHaveProperty('lastActivityAt');
+      }
+    });
+
+    it('PR5-D: PATCH /:id/wp links a task and dual-writes', async () => {
+      const wp = await prisma.workPackage.create({ data: { wpId: `WP-PR5${Date.now() % 10000}`, name: 'Relink WP', type: 'AUDIT', divisionId, timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000), creatorId: managerId, status: 'Open' } });
+      const task = await prisma.task.create({ data: { taskId: `TSK-F4${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+
+      const res = await request(app)
+        .patch(`/api/tasks/${task.id}/wp`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ wpId: wp.id });
+      expect(res.status).toBe(200);
+      expect(res.body.wpId).toBe(wp.id);
+
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Task', entityId: String(task.id), actionType: 'TASK_WP_LINK_CHANGED' } });
+      expect(audit).not.toBeNull();
+      const feed = await prisma.feedPost.findFirst({ where: { scope: 'TASK', scopeId: task.id, type: 'SYSTEM_EVENT' } });
+      expect(feed).not.toBeNull();
+
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+
+    it('PR5-E: PATCH /:id/wp to a Closed WP → 400', async () => {
+      const wp = await prisma.workPackage.create({ data: { wpId: `WP-PR5C${Date.now() % 10000}`, name: 'Closed WP', type: 'AUDIT', divisionId, timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000), creatorId: managerId, status: 'Closed' } });
+      const task = await prisma.task.create({ data: { taskId: `TSK-F5${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+
+      const res = await request(app)
+        .patch(`/api/tasks/${task.id}/wp`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ wpId: wp.id });
+      expect(res.status).toBe(400);
+
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PR10 — Quick Task
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Quick Task (PR10)', () => {
+    beforeAll(async () => {
+      // The Quick Task flow resolves the system template by slug.
+      await prisma.template.upsert({
+        where: { templateId: 'GENERIC-ADHOC' },
+        update: { status: 'Published' },
+        create: {
+          templateId: 'GENERIC-ADHOC', title: 'Generic Ad-Hoc Task', status: 'Published', publishedAt: new Date(),
+          requiresApproval: false, allowsFindings: true, skillLevel: 0,
+          formSchema: [{ id: 'instruction', type: 'textarea', label: 'Instruction / Note' }],
+          ownerId: managerId, divisionId
+        }
+      });
+    });
+
+    afterAll(async () => {
+      // Remove tasks created from the slug template, then the template itself, so its
+      // ownerId FK does not block the suite's user cleanup.
+      const tmpl = await prisma.template.findUnique({ where: { templateId: 'GENERIC-ADHOC' } });
+      if (tmpl) {
+        await prisma.feedPost.deleteMany({ where: { scope: 'TASK', scopeId: { in: (await prisma.task.findMany({ where: { templateId: tmpl.id }, select: { id: true } })).map(t => t.id) } } });
+        await prisma.taskData.deleteMany({ where: { task: { templateId: tmpl.id } } });
+        await prisma.task.deleteMany({ where: { templateId: tmpl.id } });
+        await prisma.template.delete({ where: { id: tmpl.id } });
+      }
+    });
+
+    it('PR10-A: Manager creates a quick task; defaults division, applies title + overrides', async () => {
+      const res = await request(app)
+        .post('/api/tasks/quick')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ title: 'Fix the thing', issuanceNote: 'ASAP', requiresApproval: true, skillLevel: 2 });
+      expect(res.status).toBe(201);
+      expect(res.body.title).toBe('Fix the thing');
+      expect(res.body.targetDivisionId).toBe(divisionId);
+
+      const created = await prisma.task.findUnique({ where: { id: res.body.id } });
+      expect(created?.requiresApproval).toBe(true);
+      expect(created?.skillLevel).toBe(2);
+    });
+
+    it('PR10-B: missing title → 400', async () => {
+      const res = await request(app)
+        .post('/api/tasks/quick')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ issuanceNote: 'no title' });
+      expect(res.status).toBe(400);
+    });
+
+    it('PR10-C: Staff without WP rights cannot quick-create → 403 (no RBAC bypass)', async () => {
+      const res = await request(app)
+        .post('/api/tasks/quick')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ title: 'staff attempt' });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PR9 — Admin Re-open
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Admin Re-open (PR9)', () => {
+    async function makeClosedTask(withAssignee = true): Promise<number> {
+      const t = await prisma.task.create({
+        data: {
+          taskId: `TSK-RO${Date.now() % 100000}${Math.floor(Math.random() * 100)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          assignedToUserId: withAssignee ? staffId : null,
+          targetDivisionId: divisionId,
+          status: 'Closed',
+          completedAt: new Date(),
+          schemaSnapshot: [],
+          assignmentType: 'INDIVIDUAL'
+        }
+      });
+      // Attach some TaskData to assert it survives reopen.
+      await prisma.taskData.create({ data: { taskId: t.id, data: { field1: 'preserved' } } });
+      return t.id;
+    }
+
+    it('PR9-A: Admin reopens Closed → Assigned, clears completedAt, keeps TaskData', async () => {
+      const id = await makeClosedTask(true);
+      const res = await request(app)
+        .patch(`/api/tasks/${id}/reopen`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'Re-audit required' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Assigned');
+      expect(res.body.completedAt).toBeNull();
+
+      const data = await prisma.taskData.findUnique({ where: { taskId: id } });
+      expect((data?.data as any)?.field1).toBe('preserved');
+
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Task', entityId: String(id), actionType: 'TASK_REOPENED' } });
+      expect(audit).not.toBeNull();
+      const feed = await prisma.feedPost.findFirst({ where: { scope: 'TASK', scopeId: id, type: 'SYSTEM_EVENT' } });
+      expect(feed).not.toBeNull();
+    });
+
+    it('PR9-B: reopen with no assignee → Unassigned', async () => {
+      const id = await makeClosedTask(false);
+      const res = await request(app)
+        .patch(`/api/tasks/${id}/reopen`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'Reopen unassigned' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Unassigned');
+    });
+
+    it('PR9-C: missing reason → 400', async () => {
+      const id = await makeClosedTask(true);
+      const res = await request(app)
+        .patch(`/api/tasks/${id}/reopen`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({});
+      expect(res.status).toBe(400);
+    });
+
+    it('PR9-D: non-Closed task → 400', async () => {
+      const t = await prisma.task.create({
+        data: { taskId: `TSK-RO2${Date.now() % 100000}`, templateId: publishedTemplateId, issuerId: managerId, assignedToUserId: staffId, targetDivisionId: divisionId, status: 'In Progress', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' }
+      });
+      const res = await request(app)
+        .patch(`/api/tasks/${t.id}/reopen`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'x' });
+      expect(res.status).toBe(400);
+    });
+
+    it('PR9-E: non-Admin/Director → 403', async () => {
+      const id = await makeClosedTask(true);
+      const res = await request(app)
+        .patch(`/api/tasks/${id}/reopen`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ reason: 'nope' });
+      expect(res.status).toBe(403);
     });
   });
 

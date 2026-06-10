@@ -26,6 +26,9 @@ describe('Seed Data Verification', () => {
   });
 
   afterAll(async () => {
+    // Remove the seeded Generic Ad-Hoc template so its ownerId FK does not pin a
+    // seeded user — other suites (e.g. auth) wipe all users via deleteMany().
+    await prisma.template.deleteMany({ where: { templateId: 'GENERIC-ADHOC' } });
     await prisma.$disconnect();
   });
 
@@ -37,6 +40,20 @@ describe('Seed Data Verification', () => {
     expect(codes).toContain('QCH');
     expect(codes).toContain('QCS');
     expect(codes).toContain('KS');  // Previously 'SQ' — renamed in new seed
+  });
+
+  it('should seed the SURVEILLANCE work-package type', async () => {
+    const codes = (await prisma.wpType.findMany()).map(t => t.code);
+    expect(codes).toContain('SURVEILLANCE');
+    expect(codes).toContain('CHECK');
+    expect(codes).toContain('AUDIT');
+  });
+
+  it('should seed a Published, non-archiving Generic Ad-Hoc Task template', async () => {
+    const tpl = await prisma.template.findUnique({ where: { templateId: 'GENERIC-ADHOC' } });
+    expect(tpl).not.toBeNull();
+    expect(tpl?.status).toBe('Published');
+    expect(tpl?.requiresApproval).toBe(false);
   });
 
   it('should have all 15 departments seeded', async () => {

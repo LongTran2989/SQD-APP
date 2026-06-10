@@ -108,6 +108,7 @@ async function main() {
   const wpTypes = [
     { code: 'CHECK',         description: 'Check' },
     { code: 'AUDIT',         description: 'Audit' },
+    { code: 'SURVEILLANCE',  description: 'Surveillance' },
     { code: 'INVESTIGATION', description: 'Investigation' },
     { code: 'OTHER',         description: 'Other' },
   ];
@@ -234,6 +235,38 @@ async function main() {
     created++;
   }
   console.log(`✅ Users seeded (${created})`);
+
+  // ── GENERIC AD-HOC TASK TEMPLATE ───────────────────────────────────────────
+  // System-seeded template that backs the "Quick Task" flow. Tasks are created
+  // from this template by stable slug (GENERIC-ADHOC), never by numeric PK.
+  // Must stay Published and non-archiving. Minimal formSchema (single free-text
+  // instruction field) so ad-hoc tasks need no template builder.
+  const adHocOwner = await prisma.user.findUnique({ where: { employeeId: 'VAE00071' } });
+  if (adHocOwner) {
+    await prisma.template.upsert({
+      where:  { templateId: 'GENERIC-ADHOC' },
+      update: {
+        status:           'Published',
+        requiresApproval: false,
+      },
+      create: {
+        templateId:       'GENERIC-ADHOC',
+        title:            'Generic Ad-Hoc Task',
+        description:      'System template for ad-hoc / Quick Tasks. Do not delete.',
+        status:           'Published',
+        publishedAt:      new Date(),
+        requiresApproval: false,
+        allowsFindings:   true,
+        skillLevel:       0,
+        formSchema:       [{ id: 'instruction', type: 'textarea', label: 'Instruction / Note' }],
+        ownerId:          adHocOwner.id,
+        divisionId:       divMap['QA']!,
+      },
+    });
+    console.log('✅ Generic Ad-Hoc Task template seeded (GENERIC-ADHOC)');
+  } else {
+    console.warn('⚠️  Director VAE00071 not found — skipped Generic Ad-Hoc template seed');
+  }
 
   // ── FINDINGS TAXONOMY: ATA CHAPTERS ────────────────────────────────────────
   // ATA 100 chapter reference (common subset; admin-extendable via /api/taxonomy).

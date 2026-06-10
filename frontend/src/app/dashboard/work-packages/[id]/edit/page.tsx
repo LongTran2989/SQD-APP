@@ -56,6 +56,10 @@ export default function EditWorkPackagePage() {
         timeframeFrom: values.timeframeFrom,
         timeframeTo: values.timeframeTo,
         checkTemplateId: values.checkTemplateId ? Number(values.checkTemplateId) : null,
+        acRegistration: values.acRegistration || null,
+        customer: values.customer || null,
+        authority: values.authority || null,
+        targetDepartmentId: values.targetDepartmentId ? Number(values.targetDepartmentId) : null,
       });
       toast.success('Work Package updated');
       router.push(`/dashboard/work-packages/${wpId}`);
@@ -110,6 +114,10 @@ export default function EditWorkPackagePage() {
     timeframeFrom: toDateString(wp.timeframeFrom),
     timeframeTo: toDateString(wp.timeframeTo),
     checkTemplateId: wp.checkTemplateId ?? '',
+    acRegistration: wp.acRegistration ?? '',
+    customer: wp.customer ?? '',
+    authority: wp.authority ?? '',
+    targetDepartmentId: wp.targetDepartmentId ?? '',
   };
 
   return (

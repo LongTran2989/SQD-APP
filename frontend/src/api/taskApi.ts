@@ -3,8 +3,28 @@ import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry, Time
 
 // ─── List endpoints ────────────────────────────────────────────────────────────
 
-export const getTasks = (): Promise<TaskEnriched[]> =>
-  apiClient.get('/tasks').then((r) => r.data);
+export interface TaskFilters {
+  statuses?: string[];
+  issuerId?: number;
+  assignedToUserId?: number;
+  startDate?: string;
+  endDate?: string;
+}
+
+export const getTasks = (filters?: TaskFilters): Promise<TaskEnriched[]> => {
+  const params = new URLSearchParams();
+  if (filters?.statuses) filters.statuses.forEach((s) => params.append('statuses', s));
+  if (filters?.issuerId) params.set('issuerId', String(filters.issuerId));
+  if (filters?.assignedToUserId) params.set('assignedToUserId', String(filters.assignedToUserId));
+  if (filters?.startDate) params.set('startDate', filters.startDate);
+  if (filters?.endDate) params.set('endDate', filters.endDate);
+  const qs = params.toString();
+  return apiClient.get(`/tasks${qs ? `?${qs}` : ''}`).then((r) => r.data);
+};
+
+// Link an existing task to a Work Package, or clear it (wpId: null).
+export const relinkTaskWp = (id: number, wpId: number | null): Promise<TaskEnriched> =>
+  apiClient.patch(`/tasks/${id}/wp`, { wpId }).then((r) => r.data);
 
 export const getMyTasks = (): Promise<TaskEnriched[]> =>
   apiClient.get('/tasks/my-tasks').then((r) => r.data);
@@ -25,12 +45,27 @@ export interface CreateTaskPayload {
   assignedToUserId?: number;
   deadline?: string;
   estimatedHours?: number;
+  skillLevel?: number;
+  requiresApproval?: boolean;
   wpId?: number;
   issuanceNote?: string;
 }
 
 export const createTask = (payload: CreateTaskPayload): Promise<TaskEnriched> =>
   apiClient.post('/tasks', payload).then((r) => r.data);
+
+export interface QuickTaskPayload {
+  title: string;
+  issuanceNote?: string;
+  assignedToUserId?: number;
+  deadline?: string;
+  estimatedHours?: number;
+  skillLevel?: number;
+  requiresApproval?: boolean;
+}
+
+export const createQuickTask = (payload: QuickTaskPayload): Promise<TaskEnriched> =>
+  apiClient.post('/tasks/quick', payload).then((r) => r.data);
 
 // ─── Assignment ────────────────────────────────────────────────────────────────
 
@@ -86,6 +121,10 @@ export const inactivateTask = (id: number, reason: string): Promise<TaskEnriched
 
 export const reactivateTask = (id: number): Promise<TaskEnriched> =>
   apiClient.put(`/tasks/${id}/reactivate`).then((r) => r.data);
+
+// Admin/Director re-opens a Closed task (back to Assigned/Unassigned).
+export const reopenTask = (id: number, reason: string): Promise<TaskEnriched> =>
+  apiClient.patch(`/tasks/${id}/reopen`, { reason }).then((r) => r.data);
 
 // ─── Deadline management ───────────────────────────────────────────────────────
 

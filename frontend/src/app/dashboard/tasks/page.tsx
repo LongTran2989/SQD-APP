@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
-import { TaskEnriched, TaskStatus } from '../../../types';
-import { getTasks, getMyTasks, getUnassignedTasks, selfAssignTask } from '../../../api/taskApi';
+import { TaskEnriched, TaskStatus, DeadlineStatus } from '../../../types';
+import { getTasks, getMyTasks, getUnassignedTasks, selfAssignTask, createQuickTask } from '../../../api/taskApi';
+import { updateMyPreferences } from '../../../api/userApi';
 import TaskStatusBadge, { STATUS_CONFIG } from '../../../components/tasks/TaskStatusBadge';
 import toast from 'react-hot-toast';
 import {
@@ -15,6 +16,7 @@ import {
   AlertTriangle,
   Eye,
   Zap,
+  Columns3,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -28,6 +30,28 @@ const ALL_STATUSES: TaskStatus[] = [
   'Follow-up Required', 'Closed', 'Rejected', 'Terminated', 'Inactive',
 ];
 
+// Toggleable list columns (Actions is always shown). Order here = render order.
+const TASK_COLUMNS: { key: string; label: string }[] = [
+  { key: 'taskId', label: 'Task ID' },
+  { key: 'title', label: 'Title' },
+  { key: 'status', label: 'Status' },
+  { key: 'assignee', label: 'Assignee' },
+  { key: 'issuer', label: 'Issuer' },
+  { key: 'deadline', label: 'Deadline' },
+  { key: 'division', label: 'Division' },
+  { key: 'lastActivity', label: 'Last Activity' },
+];
+// Default-hidden columns (per plan); everything else visible by default.
+const DEFAULT_HIDDEN_COLUMNS = ['taskId', 'division'];
+const DEFAULT_VISIBLE_COLUMNS = TASK_COLUMNS.map((c) => c.key).filter((k) => !DEFAULT_HIDDEN_COLUMNS.includes(k));
+
+// Tiered deadline badge styling: increasing urgency Yellow → Orange → Red.
+const DEADLINE_BADGE: Record<Exclude<DeadlineStatus, null>, { label: string; className: string }> = {
+  'Due Soon':  { label: 'DUE SOON',  className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  'Due Today': { label: 'DUE TODAY', className: 'bg-orange-50 text-orange-700 border-orange-200' },
+  'Overdue':   { label: 'OVERDUE',   className: 'bg-red-50 text-red-600 border-red-200' },
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDeadline(deadline: string | null): string {
@@ -39,11 +63,34 @@ function formatDeadline(deadline: string | null): string {
 
 export default function TaskListPage() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, setPreferences } = useAuthStore();
+
+  // ── Column visibility (persisted to User.preferences) ──
+  const [visibleCols, setVisibleCols] = useState<string[]>(
+    user?.preferences?.taskColumns ?? DEFAULT_VISIBLE_COLUMNS
+  );
+  const [showColMenu, setShowColMenu] = useState(false);
+  const isColVisible = (key: string) => visibleCols.includes(key);
+
+  const toggleColumn = async (key: string) => {
+    const next = visibleCols.includes(key)
+      ? visibleCols.filter((k) => k !== key)
+      : [...visibleCols, key];
+    setVisibleCols(next);
+    try {
+      const { preferences } = await updateMyPreferences({ taskColumns: next });
+      setPreferences(preferences);
+    } catch {
+      toast.error('Failed to save column preferences');
+    }
+  };
 
   // ── Tab & filter state (persists within session via component state) ──
   const [activeTab, setActiveTab] = useState<ActiveTab>('all');
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
+  const [statusFilters, setStatusFilters] = useState<TaskStatus[]>([]);
+  const [assigneeFilter, setAssigneeFilter] = useState<number | ''>('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
 
@@ -51,6 +98,15 @@ export default function TaskListPage() {
   const [tasks, setTasks] = useState<TaskEnriched[]>([]);
   const [loading, setLoading] = useState(true);
   const [selfAssigning, setSelfAssigning] = useState<number | null>(null);
+
+  // Quick Task modal
+  const [showQuickTask, setShowQuickTask] = useState(false);
+  const [qtTitle, setQtTitle] = useState('');
+  const [qtNote, setQtNote] = useState('');
+  const [qtDeadline, setQtDeadline] = useState('');
+  const [qtSkillLevel, setQtSkillLevel] = useState(0);
+  const [qtRequiresApproval, setQtRequiresApproval] = useState(true);
+  const [qtSubmitting, setQtSubmitting] = useState(false);
 
   // ── Fetch on tab change ──
   const fetchTasks = useCallback(async () => {
@@ -72,9 +128,21 @@ export default function TaskListPage() {
     fetchTasks();
   }, [fetchTasks]);
 
+  // Distinct assignees present in the current list (for the assignee dropdown).
+  const assigneeOptions = Array.from(
+    new Map(tasks.filter((t) => t.assignedToUser).map((t) => [t.assignedToUser!.id, t.assignedToUser!])).values()
+  );
+
   // ── Filters ──
   const filteredTasks = tasks.filter((t) => {
-    if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+    if (statusFilters.length > 0 && !statusFilters.includes(t.status)) return false;
+    if (assigneeFilter !== '' && t.assignedToUserId !== assigneeFilter) return false;
+    if (startDate && new Date(t.createdAt) < new Date(startDate)) return false;
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      if (new Date(t.createdAt) > end) return false;
+    }
     if (overdueOnly && !t.isOverdue) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -104,11 +172,36 @@ export default function TaskListPage() {
   // ── Tab click resets status filter ──
   const handleTabChange = (tab: ActiveTab) => {
     setActiveTab(tab);
-    setStatusFilter('all');
+    setStatusFilters([]);
+    setAssigneeFilter('');
+    setStartDate('');
+    setEndDate('');
     setOverdueOnly(false);
   };
 
   const canCreateTask = user && TASK_CREATOR_ROLES.includes(user.role);
+
+  const handleQuickTaskSubmit = async () => {
+    if (!qtTitle.trim()) { toast.error('Title is required'); return; }
+    setQtSubmitting(true);
+    try {
+      const task = await createQuickTask({
+        title: qtTitle.trim(),
+        issuanceNote: qtNote.trim() || undefined,
+        deadline: qtDeadline || undefined,
+        skillLevel: qtSkillLevel,
+        requiresApproval: qtRequiresApproval,
+      });
+      toast.success(`Quick task ${task.taskId} created`);
+      setShowQuickTask(false);
+      setQtTitle(''); setQtNote(''); setQtDeadline(''); setQtSkillLevel(0); setQtRequiresApproval(true);
+      router.push(`/dashboard/tasks/${task.id}`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to create quick task');
+    } finally {
+      setQtSubmitting(false);
+    }
+  };
 
   // ─── Loading state ───────────────────────────────────────────────────────────
   return (
@@ -121,13 +214,23 @@ export default function TaskListPage() {
           <p className="text-slate-500 mt-1">Manage and track QA audit tasks</p>
         </div>
         {canCreateTask && (
-          <Link
-            href="/dashboard/tasks/new"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all"
-          >
-            <Plus className="w-5 h-5" />
-            New Task
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              id="quick-task-button"
+              onClick={() => setShowQuickTask(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl shadow-sm transition-all"
+            >
+              <Zap className="w-5 h-5" />
+              Quick Task
+            </button>
+            <Link
+              href="/dashboard/tasks/new"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all"
+            >
+              <Plus className="w-5 h-5" />
+              New Task
+            </Link>
+          </div>
         )}
       </div>
 
@@ -169,13 +272,13 @@ export default function TaskListPage() {
             />
           </div>
 
-          {/* Status filter pills */}
+          {/* Status filter pills (multi-select) */}
           <div className="flex flex-wrap items-center gap-2">
             <button
               id="status-filter-all"
-              onClick={() => setStatusFilter('all')}
+              onClick={() => setStatusFilters([])}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                statusFilter === 'all'
+                statusFilters.length === 0
                   ? 'bg-slate-800 text-white border-slate-800'
                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
@@ -184,12 +287,16 @@ export default function TaskListPage() {
             </button>
             {ALL_STATUSES.map((s) => {
               const cfg = STATUS_CONFIG[s];
-              const isActive = statusFilter === s;
+              const isActive = statusFilters.includes(s);
               return (
                 <button
                   key={s}
                   id={`status-filter-${s.replace(/\s+/g, '-').toLowerCase()}`}
-                  onClick={() => setStatusFilter(isActive ? 'all' : s)}
+                  onClick={() =>
+                    setStatusFilters((prev) =>
+                      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+                    )
+                  }
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                     isActive ? cfg.color + ' border-current' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
                   }`}
@@ -220,6 +327,66 @@ export default function TaskListPage() {
           </label>
         </div>
 
+        {/* Secondary filters: assignee + created-date range */}
+        <div className="px-4 pb-4 flex flex-col sm:flex-row gap-3 border-b border-slate-50">
+          <select
+            id="assignee-filter"
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value ? Number(e.target.value) : '')}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All assignees</option>
+            {assigneeOptions.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-slate-500" htmlFor="filter-start-date">Created</label>
+            <input
+              id="filter-start-date"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="text-slate-400 text-sm">→</span>
+            <input
+              id="filter-end-date"
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Column selector */}
+          <div className="relative sm:ml-auto">
+            <button
+              id="columns-button"
+              onClick={() => setShowColMenu((v) => !v)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:border-slate-400"
+            >
+              <Columns3 className="w-4 h-4" />
+              Columns
+            </button>
+            {showColMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2">
+                {TASK_COLUMNS.map((c) => (
+                  <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      checked={isColVisible(c.key)}
+                      onChange={() => toggleColumn(c.key)}
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Table */}
         {loading ? (
           <div className="flex items-center justify-center h-48">
@@ -244,13 +411,14 @@ export default function TaskListPage() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Task ID</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Title</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Assignee</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Issuer</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Deadline</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Division</th>
+                  {isColVisible('taskId') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Task ID</th>}
+                  {isColVisible('title') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Title</th>}
+                  {isColVisible('status') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>}
+                  {isColVisible('assignee') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Assignee</th>}
+                  {isColVisible('issuer') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Issuer</th>}
+                  {isColVisible('deadline') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Deadline</th>}
+                  {isColVisible('division') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Division</th>}
+                  {isColVisible('lastActivity') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Last Activity</th>}
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Actions</th>
                 </tr>
               </thead>
@@ -258,13 +426,16 @@ export default function TaskListPage() {
                 {filteredTasks.map((task) => (
                   <tr key={task.id} className="hover:bg-slate-50/80 transition-colors group">
                     {/* Task ID */}
+                    {isColVisible('taskId') && (
                     <td className="p-4 align-middle">
                       <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-bold font-mono border border-slate-200">
                         {task.taskId}
                       </span>
                     </td>
+                    )}
 
                     {/* Title */}
+                    {isColVisible('title') && (
                     <td className="p-4 align-middle max-w-xs">
                       <div className="font-medium text-slate-800 truncate">
                         {task.template?.title ?? '—'}
@@ -275,43 +446,66 @@ export default function TaskListPage() {
                         </div>
                       )}
                     </td>
+                    )}
 
                     {/* Status + overdue badge */}
+                    {isColVisible('status') && (
                     <td className="p-4 align-middle">
                       <div className="flex items-center gap-2 flex-wrap">
                         <TaskStatusBadge status={task.status} />
-                        {task.isOverdue && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-600 rounded-full text-[10px] font-bold border border-red-200">
+                        {task.deadlineStatus && (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${DEADLINE_BADGE[task.deadlineStatus].className}`}>
                             <AlertTriangle className="w-2.5 h-2.5" />
-                            OVERDUE
+                            {DEADLINE_BADGE[task.deadlineStatus].label}
                           </span>
                         )}
                       </div>
                     </td>
+                    )}
 
                     {/* Assignee */}
+                    {isColVisible('assignee') && (
                     <td className="p-4 align-middle text-sm text-slate-600">
                       {task.assignedToUser?.name ?? (
                         <span className="text-slate-400 italic">Unassigned</span>
                       )}
                     </td>
+                    )}
 
                     {/* Issuer */}
+                    {isColVisible('issuer') && (
                     <td className="p-4 align-middle text-sm text-slate-600">
                       {task.issuer?.name ?? '—'}
                     </td>
+                    )}
 
                     {/* Deadline */}
+                    {isColVisible('deadline') && (
                     <td className="p-4 align-middle text-sm">
-                      <span className={task.isOverdue ? 'text-red-600 font-semibold' : 'text-slate-600'}>
+                      <span className={
+                        task.deadlineStatus === 'Overdue' ? 'text-red-600 font-semibold'
+                        : task.deadlineStatus === 'Due Today' ? 'text-orange-600 font-semibold'
+                        : task.deadlineStatus === 'Due Soon' ? 'text-yellow-700 font-medium'
+                        : 'text-slate-600'
+                      }>
                         {formatDeadline(task.deadline)}
                       </span>
                     </td>
+                    )}
 
                     {/* Division */}
+                    {isColVisible('division') && (
                     <td className="p-4 align-middle text-sm text-slate-600">
                       {task.targetDivision?.name ?? '—'}
                     </td>
+                    )}
+
+                    {/* Last Activity */}
+                    {isColVisible('lastActivity') && (
+                    <td className="p-4 align-middle text-sm text-slate-500">
+                      {task.lastActivityAt ? formatDeadline(task.lastActivityAt) : '—'}
+                    </td>
+                    )}
 
                     {/* Actions */}
                     <td className="p-4 align-middle">
@@ -351,6 +545,60 @@ export default function TaskListPage() {
           </div>
         )}
       </div>
+
+      {/* Quick Task modal */}
+      {showQuickTask && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-500" /> Quick Task
+              </h3>
+              <button onClick={() => setShowQuickTask(false)} className="text-slate-400 hover:text-slate-600 text-sm">Close</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-title">Title *</label>
+                <input id="qt-title" type="text" value={qtTitle} onChange={(e) => setQtTitle(e.target.value)}
+                  placeholder="What needs doing?"
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-note">Instruction / Note</label>
+                <textarea id="qt-note" rows={3} value={qtNote} onChange={(e) => setQtNote(e.target.value)}
+                  placeholder="Optional context or guidance"
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-deadline">Deadline</label>
+                  <input id="qt-deadline" type="date" value={qtDeadline} min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setQtDeadline(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-skill">Skill Level</label>
+                  <select id="qt-skill" value={qtSkillLevel} onChange={(e) => setQtSkillLevel(Number(e.target.value))}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                    {[0, 1, 2, 3, 4].map((l) => <option key={l} value={l}>Level {l}</option>)}
+                  </select>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={qtRequiresApproval} onChange={(e) => setQtRequiresApproval(e.target.checked)} className="w-4 h-4 text-blue-600 rounded" />
+                <span className="text-sm font-medium text-slate-700">Requires Approval</span>
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
+              <button onClick={() => setShowQuickTask(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancel</button>
+              <button onClick={handleQuickTaskSubmit} disabled={qtSubmitting}
+                className="px-4 py-2 text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-xl disabled:opacity-50">
+                {qtSubmitting ? 'Creating…' : 'Issue Task'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
