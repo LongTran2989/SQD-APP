@@ -126,6 +126,7 @@ export type DeadlineStatus = 'Due Soon' | 'Due Today' | 'Overdue' | null;
 export interface TaskEnriched extends Task {
   isOverdue: boolean;
   deadlineStatus: DeadlineStatus;
+  lastActivityAt?: string;
   template: { id: number; templateId: string; title: string; allowsFindings?: boolean } | null;
   issuer: { id: number; name: string } | null;
   assignedToUser: { id: number; name: string; role?: string } | null;

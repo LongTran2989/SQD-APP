@@ -172,6 +172,26 @@ function computeDeadlineStatus(task: { deadline: Date | null; status: string }):
 }
 
 /**
+ * Batched "last activity" lookup: most-recent FeedPost timestamp per task.
+ * FeedPost is the single source for the activity feed (never merged with AuditLog).
+ * Returns a Map<taskId, Date>; tasks with no feed posts are simply absent.
+ */
+async function getLastActivityMap(taskIds: number[]): Promise<Map<number, Date>> {
+  const map = new Map<number, Date>();
+  if (taskIds.length === 0) return map;
+
+  const grouped = await prisma.feedPost.groupBy({
+    by: ['scopeId'],
+    where: { scope: 'TASK', scopeId: { in: taskIds } },
+    _max: { createdAt: true }
+  });
+  for (const g of grouped) {
+    if (g.scopeId != null && g._max.createdAt) map.set(g.scopeId, g._max.createdAt);
+  }
+  return map;
+}
+
+/**
  * Returns the standard task include object for consistent response shapes.
  * All scalar fields (incl. responseActionType, requiresDirectorApproval) are
  * returned automatically by Prisma when using `include`; only relations need
@@ -231,16 +251,52 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
       };
     }
 
+    // ── Optional filters (combined with the RBAC scope via AND) ────────────────
+    const filters: any[] = [];
+
+    // statuses[] — accept ?statuses=A&statuses=B or ?statuses=A
+    const rawStatuses = req.query.statuses;
+    if (rawStatuses) {
+      const statuses = Array.isArray(rawStatuses) ? rawStatuses.map(String) : [String(rawStatuses)];
+      if (statuses.length > 0) filters.push({ status: { in: statuses } });
+    }
+
+    const issuerId = req.query.issuerId ? parseInt(String(req.query.issuerId), 10) : null;
+    if (issuerId && !Number.isNaN(issuerId)) filters.push({ issuerId });
+
+    const assignedToUserId = req.query.assignedToUserId ? parseInt(String(req.query.assignedToUserId), 10) : null;
+    if (assignedToUserId && !Number.isNaN(assignedToUserId)) filters.push({ assignedToUserId });
+
+    // Date range filters the task creation date (createdAt).
+    const createdAtFilter: { gte?: Date; lte?: Date } = {};
+    if (req.query.startDate) {
+      const d = new Date(String(req.query.startDate));
+      if (!Number.isNaN(d.getTime())) createdAtFilter.gte = d;
+    }
+    if (req.query.endDate) {
+      const d = new Date(String(req.query.endDate));
+      if (!Number.isNaN(d.getTime())) {
+        d.setHours(23, 59, 59, 999); // inclusive end-of-day
+        createdAtFilter.lte = d;
+      }
+    }
+    if (createdAtFilter.gte || createdAtFilter.lte) filters.push({ createdAt: createdAtFilter });
+
+    const finalWhere = filters.length > 0 ? { AND: [where, ...filters] } : where;
+
     const tasks = await prisma.task.findMany({
-      where,
+      where: finalWhere,
       orderBy: { updatedAt: 'desc' },
       include: taskInclude()
     });
 
+    const lastActivityMap = await getLastActivityMap(tasks.map(t => t.id));
+
     const result = tasks.map(t => ({
       ...t,
       isOverdue: computeIsOverdue(t),
-      deadlineStatus: computeDeadlineStatus(t)
+      deadlineStatus: computeDeadlineStatus(t),
+      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt
     }));
 
     res.json(result);
@@ -517,6 +573,70 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
     console.error('Error creating task:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PATCH /api/tasks/:id/wp ───────────────────────────────────────────────────
+// Link an existing task to a Work Package, or clear its link (wpId: null).
+export const updateTaskWp = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+    const { wpId } = req.body as { wpId: number | null };
+
+    const task = await prisma.task.findUnique({ where: { id, deletedAt: null } });
+    if (!task) {
+      res.status(404).json({ message: 'Task not found' });
+      return;
+    }
+
+    // Only the issuer or an elevated role may re-link a task.
+    if (task.issuerId !== userId && !TASK_CREATOR_ROLES.includes(role)) {
+      res.status(403).json({ message: 'Insufficient permissions to change the work package of this task' });
+      return;
+    }
+
+    if (FINAL_TASK_STATUSES.includes(task.status) || task.status === 'Inactive') {
+      res.status(400).json({ message: `Cannot re-link a task in status: ${task.status}` });
+      return;
+    }
+
+    let newWpId: number | null = null;
+    if (wpId !== null && wpId !== undefined) {
+      const wp = await prisma.workPackage.findUnique({
+        where: { id: wpId, deletedAt: null },
+        select: { id: true, status: true }
+      });
+      if (!wp) {
+        res.status(404).json({ message: 'Work Package not found' });
+        return;
+      }
+      if (wp.status === 'Closed') {
+        res.status(400).json({ message: 'Cannot link a task to a Closed Work Package' });
+        return;
+      }
+      newWpId = wp.id;
+    }
+
+    const updated = await prisma.task.update({
+      where: { id },
+      data: { wpId: newWpId },
+      include: taskInclude()
+    });
+
+    await logAuditAndActivity(
+      task.id,
+      String(task.id),
+      'TASK_WP_LINK_CHANGED',
+      userId,
+      newWpId ? `Task linked to Work Package #${newWpId}` : 'Task unlinked from its Work Package',
+      { fromWpId: task.wpId, toWpId: newWpId }
+    );
+
+    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+  } catch (error) {
+    console.error('Error updating task work package:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

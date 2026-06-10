@@ -1084,6 +1084,73 @@ describe('Task Backend (Phase 5.2)', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // PR5 — Filtering & WP re-linking
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Filtering & WP re-linking (PR5)', () => {
+    it('PR5-A: filter by statuses[] returns only matching statuses', async () => {
+      await prisma.task.create({ data: { taskId: `TSK-F1${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      await prisma.task.create({ data: { taskId: `TSK-F2${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, assignedToUserId: staffId, targetDivisionId: divisionId, status: 'Closed', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+
+      const res = await request(app)
+        .get('/api/tasks?statuses=Unassigned')
+        .set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.length).toBeGreaterThan(0);
+      expect(res.body.every((t: { status: string }) => t.status === 'Unassigned')).toBe(true);
+    });
+
+    it('PR5-B: filter by assignedToUserId', async () => {
+      await prisma.task.create({ data: { taskId: `TSK-F3${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, assignedToUserId: staffId, targetDivisionId: divisionId, status: 'Assigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      const res = await request(app)
+        .get(`/api/tasks?assignedToUserId=${staffId}`)
+        .set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.every((t: { assignedToUserId: number }) => t.assignedToUserId === staffId)).toBe(true);
+    });
+
+    it('PR5-C: list includes lastActivityAt', async () => {
+      const res = await request(app).get('/api/tasks').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      if (res.body.length > 0) {
+        expect(res.body[0]).toHaveProperty('lastActivityAt');
+      }
+    });
+
+    it('PR5-D: PATCH /:id/wp links a task and dual-writes', async () => {
+      const wp = await prisma.workPackage.create({ data: { wpId: `WP-PR5${Date.now() % 10000}`, name: 'Relink WP', type: 'AUDIT', divisionId, timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000), creatorId: managerId, status: 'Open' } });
+      const task = await prisma.task.create({ data: { taskId: `TSK-F4${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+
+      const res = await request(app)
+        .patch(`/api/tasks/${task.id}/wp`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ wpId: wp.id });
+      expect(res.status).toBe(200);
+      expect(res.body.wpId).toBe(wp.id);
+
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Task', entityId: String(task.id), actionType: 'TASK_WP_LINK_CHANGED' } });
+      expect(audit).not.toBeNull();
+      const feed = await prisma.feedPost.findFirst({ where: { scope: 'TASK', scopeId: task.id, type: 'SYSTEM_EVENT' } });
+      expect(feed).not.toBeNull();
+
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+
+    it('PR5-E: PATCH /:id/wp to a Closed WP → 400', async () => {
+      const wp = await prisma.workPackage.create({ data: { wpId: `WP-PR5C${Date.now() % 10000}`, name: 'Closed WP', type: 'AUDIT', divisionId, timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000), creatorId: managerId, status: 'Closed' } });
+      const task = await prisma.task.create({ data: { taskId: `TSK-F5${Date.now() % 10000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+
+      const res = await request(app)
+        .patch(`/api/tasks/${task.id}/wp`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ wpId: wp.id });
+      expect(res.status).toBe(400);
+
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Group 5 — Review Actions
   // ──────────────────────────────────────────────────────────────────────────
 

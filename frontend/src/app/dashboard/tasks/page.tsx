@@ -50,7 +50,10 @@ export default function TaskListPage() {
 
   // ── Tab & filter state (persists within session via component state) ──
   const [activeTab, setActiveTab] = useState<ActiveTab>('all');
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
+  const [statusFilters, setStatusFilters] = useState<TaskStatus[]>([]);
+  const [assigneeFilter, setAssigneeFilter] = useState<number | ''>('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
 
@@ -79,9 +82,21 @@ export default function TaskListPage() {
     fetchTasks();
   }, [fetchTasks]);
 
+  // Distinct assignees present in the current list (for the assignee dropdown).
+  const assigneeOptions = Array.from(
+    new Map(tasks.filter((t) => t.assignedToUser).map((t) => [t.assignedToUser!.id, t.assignedToUser!])).values()
+  );
+
   // ── Filters ──
   const filteredTasks = tasks.filter((t) => {
-    if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+    if (statusFilters.length > 0 && !statusFilters.includes(t.status)) return false;
+    if (assigneeFilter !== '' && t.assignedToUserId !== assigneeFilter) return false;
+    if (startDate && new Date(t.createdAt) < new Date(startDate)) return false;
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      if (new Date(t.createdAt) > end) return false;
+    }
     if (overdueOnly && !t.isOverdue) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -111,7 +126,10 @@ export default function TaskListPage() {
   // ── Tab click resets status filter ──
   const handleTabChange = (tab: ActiveTab) => {
     setActiveTab(tab);
-    setStatusFilter('all');
+    setStatusFilters([]);
+    setAssigneeFilter('');
+    setStartDate('');
+    setEndDate('');
     setOverdueOnly(false);
   };
 
@@ -176,13 +194,13 @@ export default function TaskListPage() {
             />
           </div>
 
-          {/* Status filter pills */}
+          {/* Status filter pills (multi-select) */}
           <div className="flex flex-wrap items-center gap-2">
             <button
               id="status-filter-all"
-              onClick={() => setStatusFilter('all')}
+              onClick={() => setStatusFilters([])}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                statusFilter === 'all'
+                statusFilters.length === 0
                   ? 'bg-slate-800 text-white border-slate-800'
                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
@@ -191,12 +209,16 @@ export default function TaskListPage() {
             </button>
             {ALL_STATUSES.map((s) => {
               const cfg = STATUS_CONFIG[s];
-              const isActive = statusFilter === s;
+              const isActive = statusFilters.includes(s);
               return (
                 <button
                   key={s}
                   id={`status-filter-${s.replace(/\s+/g, '-').toLowerCase()}`}
-                  onClick={() => setStatusFilter(isActive ? 'all' : s)}
+                  onClick={() =>
+                    setStatusFilters((prev) =>
+                      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+                    )
+                  }
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                     isActive ? cfg.color + ' border-current' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
                   }`}
@@ -225,6 +247,39 @@ export default function TaskListPage() {
             <AlertTriangle className="w-3.5 h-3.5" />
             Overdue Only
           </label>
+        </div>
+
+        {/* Secondary filters: assignee + created-date range */}
+        <div className="px-4 pb-4 flex flex-col sm:flex-row gap-3 border-b border-slate-50">
+          <select
+            id="assignee-filter"
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value ? Number(e.target.value) : '')}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All assignees</option>
+            {assigneeOptions.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-slate-500" htmlFor="filter-start-date">Created</label>
+            <input
+              id="filter-start-date"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="text-slate-400 text-sm">→</span>
+            <input
+              id="filter-end-date"
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
         </div>
 
         {/* Table */}
@@ -258,6 +313,7 @@ export default function TaskListPage() {
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Issuer</th>
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Deadline</th>
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Division</th>
+                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Last Activity</th>
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Actions</th>
                 </tr>
               </thead>
@@ -323,6 +379,11 @@ export default function TaskListPage() {
                     {/* Division */}
                     <td className="p-4 align-middle text-sm text-slate-600">
                       {task.targetDivision?.name ?? '—'}
+                    </td>
+
+                    {/* Last Activity */}
+                    <td className="p-4 align-middle text-sm text-slate-500">
+                      {task.lastActivityAt ? formatDeadline(task.lastActivityAt) : '—'}
                     </td>
 
                     {/* Actions */}

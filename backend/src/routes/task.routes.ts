@@ -6,6 +6,7 @@ import {
   getUnassignedTasks,
   getTaskById,
   createTask,
+  updateTaskWp,
   assignTask,
   selfAssignTask,
   saveTaskData,
@@ -38,6 +39,7 @@ router.get('/unassigned', getUnassignedTasks);
 // ─── Single task ────────────────────────────────────────────────────
 router.get('/:id', getTaskById);
 router.post('/', createTask);
+router.patch('/:id/wp', updateTaskWp);
 
 // ─── Assignment ─────────────────────────────────────────────────────
 router.put('/:id/assign', assignTask);
