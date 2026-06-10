@@ -362,7 +362,6 @@ export async function createTaskService(
       formSchema: true,
       requiresApproval: true,
       estimatedHours: true,
-      isOneOff: true,
       division: { select: { id: true, code: true } }
     }
   });
@@ -424,11 +423,6 @@ export async function createTaskService(
     },
     include: taskInclude()
   });
-
-  // Handle isOneOff — archive template if task is being assigned at creation time
-  if (template.isOneOff && assignedToUserId) {
-    await client.template.update({ where: { id: templateId }, data: { status: 'Archived' } });
-  }
 
   // Dual-write (Rule 3) — runs on the same client/tx so it is atomic with the create.
   const activityContent = assignedToUserId
@@ -496,8 +490,7 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
     }
 
     const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      include: { template: { select: { isOneOff: true } } }
+      where: { id, deletedAt: null }
     });
 
     if (!task) {
@@ -549,14 +542,6 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       include: taskInclude()
     });
 
-    // Handle isOneOff — archive template on first assignment
-    if (task.template?.isOneOff) {
-      await prisma.template.update({
-        where: { id: task.templateId },
-        data: { status: 'Archived' }
-      });
-    }
-
     await logAuditAndActivity(
       task.id,
       String(task.id),
@@ -581,8 +566,7 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
     const { userId, role, divisionId } = req.user!;
 
     const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      include: { template: { select: { isOneOff: true } } }
+      where: { id, deletedAt: null }
     });
 
     if (!task) {
@@ -610,14 +594,6 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       data: { assignedToUserId: userId, status: 'Assigned' },
       include: taskInclude()
     });
-
-    // Handle isOneOff — archive template on first assignment
-    if (task.template?.isOneOff) {
-      await prisma.template.update({
-        where: { id: task.templateId },
-        data: { status: 'Archived' }
-      });
-    }
 
     await logAuditAndActivity(
       task.id,

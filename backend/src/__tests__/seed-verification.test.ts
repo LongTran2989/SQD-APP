@@ -26,6 +26,9 @@ describe('Seed Data Verification', () => {
   });
 
   afterAll(async () => {
+    // Remove the seeded Generic Ad-Hoc template so its ownerId FK does not pin a
+    // seeded user — other suites (e.g. auth) wipe all users via deleteMany().
+    await prisma.template.deleteMany({ where: { templateId: 'GENERIC-ADHOC' } });
     await prisma.$disconnect();
   });
 

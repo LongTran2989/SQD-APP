@@ -186,8 +186,8 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
               {selectedTemplate.requiresApproval && (
                 <span className="font-medium text-amber-600">Requires Approval</span>
               )}
-              {selectedTemplate.isOneOff && (
-                <span className="font-medium text-purple-600">One-off (auto-archived after assignment)</span>
+              {selectedTemplate.skillLevel > 0 && (
+                <span className="font-medium text-indigo-600">Skill Level {selectedTemplate.skillLevel}</span>
               )}
             </div>
           </div>

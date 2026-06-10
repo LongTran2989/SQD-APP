@@ -38,7 +38,7 @@ describe('Task Backend (Phase 5.2)', () => {
 
   let publishedTemplateId: number;  // a Published template in divisionId
   let archivedTemplateId: number;   // an Archived template
-  let oneOffTemplateId: number;     // isOneOff = true template
+  let oneOffTemplateId: number;     // formerly isOneOff; now a plain Published template (one-off behaviour removed)
 
   // ─── Setup ────────────────────────────────────────────────────────
 
@@ -111,13 +111,12 @@ describe('Task Backend (Phase 5.2)', () => {
     const oneOffTemplate = await prisma.template.create({
       data: {
         templateId: 'TSK-T-003',
-        title: 'One-Off Template',
+        title: 'Formerly One-Off Template',
         formSchema: [{ id: '1', type: 'text', label: 'Check' }],
         status: 'Published',
         publishedAt: new Date(),
         ownerId: managerId,
-        divisionId,
-        isOneOff: true
+        divisionId
       }
     });
     oneOffTemplateId = oneOffTemplate.id;
@@ -301,8 +300,8 @@ describe('Task Backend (Phase 5.2)', () => {
       await prisma.workPackage.delete({ where: { id: closedWp.id } });
     });
 
-    it('T08: isOneOff Template is archived after task assignment', async () => {
-      // Ensure the one-off template is Published
+    it('T08: template is NOT archived after task assignment (one-off behaviour removed)', async () => {
+      // Ensure the template is Published
       await prisma.template.update({ where: { id: oneOffTemplateId }, data: { status: 'Published' } });
 
       const res = await request(app)
@@ -312,11 +311,9 @@ describe('Task Backend (Phase 5.2)', () => {
 
       expect(res.status).toBe(201);
 
+      // One-off auto-archival has been removed: the template stays Published and reusable.
       const template = await prisma.template.findUnique({ where: { id: oneOffTemplateId } });
-      expect(template?.status).toBe('Archived');
-
-      // Restore for subsequent tests
-      await prisma.template.update({ where: { id: oneOffTemplateId }, data: { status: 'Published' } });
+      expect(template?.status).toBe('Published');
     });
 
     it('T09: schemaSnapshot equals template.formSchema at creation', async () => {

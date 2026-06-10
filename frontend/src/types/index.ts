@@ -64,7 +64,7 @@ export interface Template {
   requiresApproval: boolean;
   allowsFindings: boolean;
   estimatedHours: number | null;
-  isOneOff: boolean;
+  skillLevel: number;
   type: string | null;
   
   divisionId: number;

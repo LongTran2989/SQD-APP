@@ -40,7 +40,7 @@ export const getTemplates = async (req: Request, res: Response): Promise<void> =
                 requiresApproval: (t.draftSchema as any).requiresApproval,
                 allowsFindings: (t.draftSchema as any).allowsFindings,
                 estimatedHours: (t.draftSchema as any).estimatedHours,
-                isOneOff: (t.draftSchema as any).isOneOff,
+                skillLevel: (t.draftSchema as any).skillLevel,
                 type: (t.draftSchema as any).type,
               })
         };
@@ -95,7 +95,7 @@ export const getTemplateById = async (req: Request, res: Response): Promise<void
               requiresApproval: (template.draftSchema as any).requiresApproval,
               allowsFindings: (template.draftSchema as any).allowsFindings,
               estimatedHours: (template.draftSchema as any).estimatedHours,
-              isOneOff: (template.draftSchema as any).isOneOff,
+              skillLevel: (template.draftSchema as any).skillLevel,
               type: (template.draftSchema as any).type,
             })
       };
@@ -111,7 +111,7 @@ export const getTemplateById = async (req: Request, res: Response): Promise<void
 // ─── POST /api/templates ─────────────────────────────────────────────
 export const createTemplate = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { title, description, formSchema, status, requiresApproval, allowsFindings, divisionId, estimatedHours, isOneOff, type } = req.body;
+    const { title, description, formSchema, status, requiresApproval, allowsFindings, divisionId, estimatedHours, skillLevel, type } = req.body;
     const userId = req.user!.userId;
     const userRole = req.user!.role;
 
@@ -161,7 +161,7 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
           requiresApproval: requiresApproval || false,
           allowsFindings: allowsFindings !== undefined ? allowsFindings : true,
           estimatedHours: estimatedHours || null,
-          isOneOff: isOneOff || false,
+          skillLevel: skillLevel ?? 0,
           type: type || null,
           revision: 1,
           divisionId: targetDivisionId,
@@ -189,7 +189,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
     const userRole = req.user!.role;
-    const { title, description, formSchema, requiresApproval, allowsFindings, estimatedHours, isOneOff, type } = req.body;
+    const { title, description, formSchema, requiresApproval, allowsFindings, estimatedHours, skillLevel, type } = req.body;
 
     const existingTemplate = await prisma.template.findUnique({ where: { id } });
 
@@ -222,7 +222,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
         requiresApproval: requiresApproval !== undefined ? requiresApproval : existingTemplate.requiresApproval,
         allowsFindings: allowsFindings !== undefined ? allowsFindings : existingTemplate.allowsFindings,
         estimatedHours: estimatedHours !== undefined ? estimatedHours : existingTemplate.estimatedHours,
-        isOneOff: isOneOff !== undefined ? isOneOff : existingTemplate.isOneOff,
+        skillLevel: skillLevel !== undefined ? skillLevel : existingTemplate.skillLevel,
         type: type !== undefined ? type : existingTemplate.type,
       };
     } else {
@@ -232,7 +232,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
       dataToUpdate.requiresApproval = requiresApproval !== undefined ? requiresApproval : existingTemplate.requiresApproval;
       dataToUpdate.allowsFindings = allowsFindings !== undefined ? allowsFindings : existingTemplate.allowsFindings;
       if (estimatedHours !== undefined) dataToUpdate.estimatedHours = estimatedHours;
-      if (isOneOff !== undefined) dataToUpdate.isOneOff = isOneOff;
+      if (skillLevel !== undefined) dataToUpdate.skillLevel = skillLevel;
       if (type !== undefined) dataToUpdate.type = type;
     }
 
@@ -264,7 +264,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
               requiresApproval: (updatedTemplate.draftSchema as any).requiresApproval,
               allowsFindings: (updatedTemplate.draftSchema as any).allowsFindings,
               estimatedHours: (updatedTemplate.draftSchema as any).estimatedHours,
-              isOneOff: (updatedTemplate.draftSchema as any).isOneOff,
+              skillLevel: (updatedTemplate.draftSchema as any).skillLevel,
               type: (updatedTemplate.draftSchema as any).type,
             })
       };
@@ -334,7 +334,7 @@ export const publishTemplate = async (req: Request, res: Response): Promise<void
           dataToPublish.requiresApproval = draft.requiresApproval;
           dataToPublish.allowsFindings = draft.allowsFindings;
           if (draft.estimatedHours !== undefined) dataToPublish.estimatedHours = draft.estimatedHours;
-          if (draft.isOneOff !== undefined) dataToPublish.isOneOff = draft.isOneOff;
+          if (draft.skillLevel !== undefined) dataToPublish.skillLevel = draft.skillLevel;
           if (draft.type !== undefined) dataToPublish.type = draft.type;
         }
       } else {
