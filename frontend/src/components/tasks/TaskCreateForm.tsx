@@ -37,6 +37,8 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [deadline, setDeadline] = useState('');
   const [wpId, setWpId] = useState<number | ''>(prefilledWpId ?? '');
   const [issuanceNote, setIssuanceNote] = useState('');
+  const [requiresApproval, setRequiresApproval] = useState(true);
+  const [skillLevel, setSkillLevel] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
 
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -46,6 +48,14 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [loadingData, setLoadingData] = useState(true);
 
   const selectedTemplate = templates.find((t) => t.id === templateId);
+
+  // Seed per-task overrides from the chosen template; the user can still override.
+  useEffect(() => {
+    if (selectedTemplate) {
+      setRequiresApproval(selectedTemplate.requiresApproval);
+      setSkillLevel(selectedTemplate.skillLevel ?? 0);
+    }
+  }, [selectedTemplate]);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -122,6 +132,8 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
         deadline: deadline || undefined,
         wpId: wpId ? Number(wpId) : undefined,
         issuanceNote: issuanceNote.trim() || undefined,
+        requiresApproval,
+        skillLevel,
       });
       toast.success(`Task ${task.taskId} created`);
       if (onSaved) {
@@ -262,6 +274,38 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             onChange={(e) => setDeadline(e.target.value)}
             className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
           />
+        </div>
+
+        {/* Skill Level + Requires Approval */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="skill-level-select">
+              Skill Level <span className="font-normal text-slate-400">(seeded from template)</span>
+            </label>
+            <select
+              id="skill-level-select"
+              value={skillLevel}
+              onChange={(e) => setSkillLevel(Number(e.target.value))}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+            >
+              {[0, 1, 2, 3, 4].map((lvl) => (
+                <option key={lvl} value={lvl}>Level {lvl}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <label className="flex items-center gap-2 cursor-pointer group pb-2.5">
+              <input
+                type="checkbox"
+                checked={requiresApproval}
+                onChange={(e) => setRequiresApproval(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded"
+              />
+              <span className="text-sm font-medium text-slate-700 group-hover:text-blue-600" title="When unchecked, the task closes immediately on submit (unless it requires Director approval)">
+                Requires Approval
+              </span>
+            </label>
+          </div>
         </div>
 
         {/* Work Package */}

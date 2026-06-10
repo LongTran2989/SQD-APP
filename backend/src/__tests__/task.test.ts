@@ -882,6 +882,8 @@ describe('Task Backend (Phase 5.2)', () => {
           targetDivisionId: divisionId,
           status: 'In Progress',
           schemaSnapshot: [],
+          // PR3: submit reads the per-task gate, seeded from the template at creation.
+          requiresApproval,
           assignmentType: 'INDIVIDUAL'
         }
       });
@@ -930,6 +932,97 @@ describe('Task Backend (Phase 5.2)', () => {
       const activities = await prisma.feedPost.findMany({ where: { scope: 'TASK', scopeId: taskId } });
       const submitEvent = activities.find(a => a.content.toLowerCase().includes('review') || a.content.toLowerCase().includes('submit'));
       expect(submitEvent).toBeDefined();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PR3 — Approval semantics: requiresApproval (per-task) × requiresDirectorApproval
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Approval semantics (PR3)', () => {
+    async function makeInProgressTask(opts: { requiresApproval: boolean; requiresDirectorApproval: boolean }): Promise<number> {
+      const t = await prisma.task.create({
+        data: {
+          taskId: `TSK-${String(Date.now()).slice(-6)}${Math.floor(Math.random() * 100)}`,
+          templateId: publishedTemplateId,
+          issuerId: managerId,
+          assignedToUserId: staffId,
+          targetDivisionId: divisionId,
+          status: 'In Progress',
+          schemaSnapshot: [],
+          requiresApproval: opts.requiresApproval,
+          requiresDirectorApproval: opts.requiresDirectorApproval,
+          assignmentType: 'INDIVIDUAL'
+        }
+      });
+      return t.id;
+    }
+
+    const submit = (taskId: number) =>
+      request(app).put(`/api/tasks/${taskId}/submit`).set('Authorization', `Bearer ${staffToken}`);
+
+    it('PR3-A: requiresApproval=true, director=false → In Review', async () => {
+      const id = await makeInProgressTask({ requiresApproval: true, requiresDirectorApproval: false });
+      const res = await submit(id);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('In Review');
+    });
+
+    it('PR3-B: requiresApproval=false, director=false → Closed immediately', async () => {
+      const id = await makeInProgressTask({ requiresApproval: false, requiresDirectorApproval: false });
+      const res = await submit(id);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Closed');
+    });
+
+    it('PR3-C: requiresApproval=true, director=true → In Review', async () => {
+      const id = await makeInProgressTask({ requiresApproval: true, requiresDirectorApproval: true });
+      const res = await submit(id);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('In Review');
+    });
+
+    it('PR3-D: requiresApproval=false but director=true → In Review (gate not bypassed)', async () => {
+      const id = await makeInProgressTask({ requiresApproval: false, requiresDirectorApproval: true });
+      const res = await submit(id);
+      expect(res.status).toBe(200);
+      // requiresApproval=false must NOT close a Director-gated task.
+      expect(res.body.status).toBe('In Review');
+    });
+
+    it('PR3-E: Director gate still blocks a non-Director reviewer at review time', async () => {
+      const id = await makeInProgressTask({ requiresApproval: true, requiresDirectorApproval: true });
+      await submit(id); // → In Review
+
+      const mgrReview = await request(app)
+        .put(`/api/tasks/${id}/review`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ action: 'approve' });
+      expect(mgrReview.status).toBe(403);
+
+      const dirReview = await request(app)
+        .put(`/api/tasks/${id}/review`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ action: 'approve' });
+      expect(dirReview.status).toBe(200);
+      expect(dirReview.body.status).toBe('Closed');
+    });
+
+    it('PR3-F: createTask seeds requiresApproval/skillLevel from template, honoring overrides', async () => {
+      // Template requiresApproval=true (publishedTemplateId), override to false on the task.
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          templateId: publishedTemplateId,
+          targetDivisionId: divisionId,
+          requiresApproval: false,
+          skillLevel: 3
+        });
+      expect(res.status).toBe(201);
+      const created = await prisma.task.findUnique({ where: { id: res.body.id } });
+      expect(created?.requiresApproval).toBe(false);
+      expect(created?.skillLevel).toBe(3);
     });
   });
 

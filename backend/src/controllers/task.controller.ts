@@ -316,6 +316,8 @@ export interface CreateTaskParams {
   assignedToUserId?: number | null;
   deadline?: string | Date | null;
   estimatedHours?: number | null;
+  skillLevel?: number | null;
+  requiresApproval?: boolean | null;
   issuanceNote?: string | null;
 }
 
@@ -332,7 +334,7 @@ export async function createTaskService(
   params: CreateTaskParams
 ) {
   const { userId, role, divisionId } = actor;
-  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote } = params;
+  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote } = params;
 
   // RBAC: Manager, Director, Admin can create tasks.
   // Regular users assigned to a WP can create tasks inside that WP for their own division.
@@ -362,6 +364,7 @@ export async function createTaskService(
       formSchema: true,
       requiresApproval: true,
       estimatedHours: true,
+      skillLevel: true,
       division: { select: { id: true, code: true } }
     }
   });
@@ -418,6 +421,9 @@ export async function createTaskService(
       schemaSnapshot: template.formSchema as any,
       deadline: deadline ? new Date(deadline) : null,
       estimatedHours: estimatedHours ?? template.estimatedHours ?? null,
+      // Seed per-task overrides from the template; caller may override either.
+      skillLevel: skillLevel ?? template.skillLevel ?? 0,
+      requiresApproval: requiresApproval ?? template.requiresApproval ?? true,
       issuanceNote: issuanceNote ?? null,
       assignmentType: 'INDIVIDUAL'
     },
@@ -459,10 +465,10 @@ export async function createTaskService(
 export const createTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId, role, divisionId } = req.user!;
-    const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote } = req.body;
+    const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote } = req.body;
 
     const task = await prisma.$transaction((tx) =>
-      createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, issuanceNote })
+      createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
     );
 
     res.status(201).json({ ...task, isOverdue: computeIsOverdue(task) });
@@ -685,8 +691,7 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
     const { userId } = req.user!;
 
     const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      include: { template: { select: { requiresApproval: true } } }
+      where: { id, deletedAt: null }
     });
 
     if (!task) {
@@ -704,7 +709,10 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const requiresApproval = task.template?.requiresApproval ?? true;
+    // Per-task gate, seeded from the template at creation (PR3). A task that
+    // requires Director approval ALWAYS needs review — requiresApproval=false must
+    // never short-circuit (close) a task whose requiresDirectorApproval gate is on.
+    const requiresApproval = (task.requiresApproval ?? true) || task.requiresDirectorApproval;
     // OQ-3: No grace window — when requiresApproval = false, task closes immediately on submit.
     // TODO (future): Implement a TASK_APPROVAL_GRACE_MINUTES SystemSetting if grace window is required.
     const newStatus = requiresApproval ? 'In Review' : 'Closed';

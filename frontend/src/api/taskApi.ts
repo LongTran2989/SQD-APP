@@ -25,6 +25,8 @@ export interface CreateTaskPayload {
   assignedToUserId?: number;
   deadline?: string;
   estimatedHours?: number;
+  skillLevel?: number;
+  requiresApproval?: boolean;
   wpId?: number;
   issuanceNote?: string;
 }
