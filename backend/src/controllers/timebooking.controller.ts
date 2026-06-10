@@ -10,7 +10,7 @@ const prisma = new PrismaClient({ adapter });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
+const FINAL_TASK_STATUSES = ['In Review', 'Closed', 'Rejected', 'Terminated'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

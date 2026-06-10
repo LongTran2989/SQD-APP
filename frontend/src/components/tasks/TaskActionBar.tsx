@@ -563,26 +563,32 @@ export default function TaskActionBar({
 
         {/* ── ASSIGNEE actions ─────────────────────────────── */}
         {isEditable && isAssignee && (
-          <div className="flex flex-wrap gap-2">
-            <ActionButton
-              id="btn-save-progress"
-              onClick={onSaveProgress}
-              disabled={savingProgress}
-              variant="ghost"
-              icon={CheckCircle2}
-            >
-              {savingProgress ? 'Saving...' : 'Save Progress'}
-            </ActionButton>
-            <ActionButton
-              id="btn-submit"
-              onClick={onSubmitTask}
-              disabled={savingProgress || loading === 'submit'}
-              variant="primary"
-              icon={Send}
-            >
-              {loading === 'submit' ? 'Submitting...' : 'Submit'}
-            </ActionButton>
-          </div>
+          <>
+            <div className="flex flex-wrap gap-2">
+              <ActionButton
+                id="btn-save-progress"
+                onClick={onSaveProgress}
+                disabled={savingProgress}
+                variant="ghost"
+                icon={CheckCircle2}
+              >
+                {savingProgress ? 'Saving...' : 'Save Progress'}
+              </ActionButton>
+              <ActionButton
+                id="btn-submit"
+                onClick={onSubmitTask}
+                disabled={savingProgress || loading === 'submit'}
+                variant="primary"
+                icon={Send}
+              >
+                {loading === 'submit' ? 'Submitting...' : 'Submit'}
+              </ActionButton>
+            </div>
+            <div className="w-full mt-2 text-xs text-amber-600 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+              <span>After submitting, <a href="#time-booking-section" className="font-bold underline hover:text-amber-800 transition-colors">Please perform final time booking!</a></span>
+            </div>
+          </>
         )}
 
         {/* Deadline extension request — assignee only, has deadline, not final */}

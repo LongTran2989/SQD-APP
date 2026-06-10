@@ -253,6 +253,16 @@ export default function TaskDetailPage() {
         </div>
       )}
 
+      {task.status === 'In Review' && !task.timeBooking && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+          <Clock className="w-4 h-4 flex-shrink-0" />
+          <a href="#time-booking-section" className="font-bold underline hover:text-amber-800 transition-colors">
+            Please perform final time booking!
+          </a>
+          <span>Your manager needs this before rating the task.</span>
+        </div>
+      )}
+
       {/* Time booking required banner — Closed tasks with no booking block manager rating */}
       {task.status === 'Closed' && !task.timeBooking && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
@@ -289,8 +299,8 @@ export default function TaskDetailPage() {
             />
           )}
 
-          {/* Work Log — incremental time entries during active task lifecycle */}
-          {['Assigned', 'In Progress', 'Follow-up Required', 'In Review'].includes(task.status) && (
+          {/* Work Log — visible for all post-assignment statuses for historical tracking */}
+          {task.status !== 'Unassigned' && task.status !== 'Inactive' && (
             <TimeEntryPanel
               task={task}
               currentUser={user}
@@ -298,13 +308,11 @@ export default function TaskDetailPage() {
             />
           )}
 
-          {/* Time Booking — available only once task reaches a final state */}
-          {['Closed', 'Rejected', 'Terminated'].includes(task.status) && (
-            <TimeBookingPanel
-              task={task}
-              currentUser={user}
-              onBookingChange={loadTask}
-            />
+          {/* Time Booking — available from In Review onwards */}
+          {['In Review', 'Closed', 'Rejected', 'Terminated'].includes(task.status) && (
+            <div id="time-booking-section">
+              <TimeBookingPanel task={task} currentUser={user} onBookingChange={loadTask} />
+            </div>
           )}
 
           {/* Linked Findings — findings raised on this task */}
