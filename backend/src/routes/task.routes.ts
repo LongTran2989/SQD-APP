@@ -7,6 +7,7 @@ import {
   getUnassignedTasks,
   getTaskById,
   createTask,
+  createQuickTask,
   updateTaskWp,
   reopenTask,
   assignTask,
@@ -41,6 +42,7 @@ router.get('/unassigned', getUnassignedTasks);
 // ─── Single task ────────────────────────────────────────────────────
 router.get('/:id', getTaskById);
 router.post('/', createTask);
+router.post('/quick', createQuickTask);
 router.patch('/:id/wp', updateTaskWp);
 router.patch('/:id/reopen', authorizeRoles('Admin', 'Director'), reopenTask);
 

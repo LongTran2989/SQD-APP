@@ -414,6 +414,7 @@ export interface CreateTaskParams {
   skillLevel?: number | null;
   requiresApproval?: boolean | null;
   issuanceNote?: string | null;
+  title?: string | null;
 }
 
 /**
@@ -429,7 +430,7 @@ export async function createTaskService(
   params: CreateTaskParams
 ) {
   const { userId, role, divisionId } = actor;
-  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote } = params;
+  const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote, title } = params;
 
   // RBAC: Manager, Director, Admin can create tasks.
   // Regular users assigned to a WP can create tasks inside that WP for their own division.
@@ -508,6 +509,7 @@ export async function createTaskService(
     data: {
       taskId: newTaskId,
       templateId,
+      title: title ?? null,
       issuerId: userId,
       assignedToUserId: assignedToUserId ?? null,
       wpId: wpId ?? null,
@@ -637,6 +639,56 @@ export const updateTaskWp = async (req: Request, res: Response): Promise<void> =
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error updating task work package:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// Stable slug of the system-seeded template that backs the Quick Task flow.
+const GENERIC_ADHOC_SLUG = 'GENERIC-ADHOC';
+
+// ─── POST /api/tasks/quick ─────────────────────────────────────────────────────
+// Streamlined ad-hoc task creation. Resolves the Generic Ad-Hoc template by slug and
+// defaults the target division to the creator's. Reuses createTaskService verbatim.
+export const createQuickTask = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role, divisionId } = req.user!;
+    const { title, issuanceNote, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, targetDivisionId } = req.body;
+
+    if (!title || !String(title).trim()) {
+      res.status(400).json({ message: 'Task title is required' });
+      return;
+    }
+
+    const template = await prisma.template.findUnique({
+      where: { templateId: GENERIC_ADHOC_SLUG },
+      select: { id: true }
+    });
+    if (!template) {
+      res.status(500).json({ message: 'Generic Ad-Hoc Task template is not seeded. Contact an administrator.' });
+      return;
+    }
+
+    const task = await prisma.$transaction((tx) =>
+      createTaskService(tx, { userId, role, divisionId }, {
+        templateId: template.id,
+        targetDivisionId: targetDivisionId ?? divisionId, // default to the creator's division
+        assignedToUserId: assignedToUserId ?? null,
+        deadline: deadline ?? null,
+        estimatedHours: estimatedHours ?? null,
+        skillLevel: skillLevel ?? null,
+        requiresApproval: requiresApproval ?? null,
+        issuanceNote: issuanceNote ?? null,
+        title: String(title).trim(),
+      })
+    );
+
+    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
+  } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
+    console.error('Error creating quick task:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

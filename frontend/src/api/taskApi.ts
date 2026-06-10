@@ -54,6 +54,19 @@ export interface CreateTaskPayload {
 export const createTask = (payload: CreateTaskPayload): Promise<TaskEnriched> =>
   apiClient.post('/tasks', payload).then((r) => r.data);
 
+export interface QuickTaskPayload {
+  title: string;
+  issuanceNote?: string;
+  assignedToUserId?: number;
+  deadline?: string;
+  estimatedHours?: number;
+  skillLevel?: number;
+  requiresApproval?: boolean;
+}
+
+export const createQuickTask = (payload: QuickTaskPayload): Promise<TaskEnriched> =>
+  apiClient.post('/tasks/quick', payload).then((r) => r.data);
+
 // ─── Assignment ────────────────────────────────────────────────────────────────
 
 export const selfAssignTask = (id: number): Promise<TaskEnriched> =>

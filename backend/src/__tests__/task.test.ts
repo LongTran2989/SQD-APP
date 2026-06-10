@@ -1151,6 +1151,68 @@ describe('Task Backend (Phase 5.2)', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // PR10 — Quick Task
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Quick Task (PR10)', () => {
+    beforeAll(async () => {
+      // The Quick Task flow resolves the system template by slug.
+      await prisma.template.upsert({
+        where: { templateId: 'GENERIC-ADHOC' },
+        update: { status: 'Published' },
+        create: {
+          templateId: 'GENERIC-ADHOC', title: 'Generic Ad-Hoc Task', status: 'Published', publishedAt: new Date(),
+          isOneOff: false, requiresApproval: false, allowsFindings: true, skillLevel: 0,
+          formSchema: [{ id: 'instruction', type: 'textarea', label: 'Instruction / Note' }],
+          ownerId: managerId, divisionId
+        }
+      });
+    });
+
+    afterAll(async () => {
+      // Remove tasks created from the slug template, then the template itself, so its
+      // ownerId FK does not block the suite's user cleanup.
+      const tmpl = await prisma.template.findUnique({ where: { templateId: 'GENERIC-ADHOC' } });
+      if (tmpl) {
+        await prisma.feedPost.deleteMany({ where: { scope: 'TASK', scopeId: { in: (await prisma.task.findMany({ where: { templateId: tmpl.id }, select: { id: true } })).map(t => t.id) } } });
+        await prisma.taskData.deleteMany({ where: { task: { templateId: tmpl.id } } });
+        await prisma.task.deleteMany({ where: { templateId: tmpl.id } });
+        await prisma.template.delete({ where: { id: tmpl.id } });
+      }
+    });
+
+    it('PR10-A: Manager creates a quick task; defaults division, applies title + overrides', async () => {
+      const res = await request(app)
+        .post('/api/tasks/quick')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ title: 'Fix the thing', issuanceNote: 'ASAP', requiresApproval: true, skillLevel: 2 });
+      expect(res.status).toBe(201);
+      expect(res.body.title).toBe('Fix the thing');
+      expect(res.body.targetDivisionId).toBe(divisionId);
+
+      const created = await prisma.task.findUnique({ where: { id: res.body.id } });
+      expect(created?.requiresApproval).toBe(true);
+      expect(created?.skillLevel).toBe(2);
+    });
+
+    it('PR10-B: missing title → 400', async () => {
+      const res = await request(app)
+        .post('/api/tasks/quick')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ issuanceNote: 'no title' });
+      expect(res.status).toBe(400);
+    });
+
+    it('PR10-C: Staff without WP rights cannot quick-create → 403 (no RBAC bypass)', async () => {
+      const res = await request(app)
+        .post('/api/tasks/quick')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ title: 'staff attempt' });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // PR9 — Admin Re-open
   // ──────────────────────────────────────────────────────────────────────────
 
