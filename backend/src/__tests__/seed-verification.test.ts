@@ -39,6 +39,21 @@ describe('Seed Data Verification', () => {
     expect(codes).toContain('KS');  // Previously 'SQ' — renamed in new seed
   });
 
+  it('should seed the SURVEILLANCE work-package type', async () => {
+    const codes = (await prisma.wpType.findMany()).map(t => t.code);
+    expect(codes).toContain('SURVEILLANCE');
+    expect(codes).toContain('CHECK');
+    expect(codes).toContain('AUDIT');
+  });
+
+  it('should seed a Published, non-archiving Generic Ad-Hoc Task template', async () => {
+    const tpl = await prisma.template.findUnique({ where: { templateId: 'GENERIC-ADHOC' } });
+    expect(tpl).not.toBeNull();
+    expect(tpl?.status).toBe('Published');
+    expect(tpl?.isOneOff).toBe(false);
+    expect(tpl?.requiresApproval).toBe(false);
+  });
+
   it('should have all 15 departments seeded', async () => {
     const departments = await prisma.department.findMany();
     const names = departments.map(d => d.name);
