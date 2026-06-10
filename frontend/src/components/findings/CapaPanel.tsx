@@ -1,12 +1,18 @@
 'use client';
 
-import { useState } from 'react';
-import { FindingDetail, CapaAction, CapaType, CapaLinkRole, CapaTaskLink } from '../../types';
+import { useState, useEffect } from 'react';
+import { FindingDetail, CapaAction, CapaType, CapaLinkRole, CapaTaskLink, TaskEnriched, WorkPackageEnriched } from '../../types';
 import { createCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink, CapaPayload } from '../../api/findingApi';
+import { getTasks } from '../../api/taskApi';
+import { getWorkPackages } from '../../api/wpApi';
+import SearchableSelect from '../ui/SearchableSelect';
+import CreateTaskModal from '../tasks/CreateTaskModal';
+import CreateWpModal from '../work-packages/CreateWpModal';
 import { CapaTypeBadge, CapaStatusBadge } from './FindingBadges';
 import toast from 'react-hot-toast';
 import { apiErrorMessage } from '../../api/errorMessage';
 import { ShieldCheck, Plus, Trash2, CheckCircle2, Ban, Link2 } from 'lucide-react';
+import Link from 'next/link';
 
 interface Props {
   finding: FindingDetail;
@@ -147,8 +153,18 @@ function CapaLinkedItemsList({
           <span className="inline-flex items-center gap-1">
             <Link2 className="w-3 h-3" />
             <span className="font-medium text-slate-400 uppercase">{link.role}</span>
-            {link.task && <span>{link.task.taskId} <span className="text-slate-300">({link.task.status})</span></span>}
-            {link.wp && <span>{link.wp.wpId} <span className="text-slate-300">({link.wp.status})</span></span>}
+            {link.task && (
+              <Link href={`/dashboard/tasks/${link.task.id}`} className="text-blue-600 hover:underline">
+                {link.task.taskId}
+              </Link>
+            )}
+            {link.task && <span className="text-slate-300">({link.task.status})</span>}
+            {link.wp && (
+              <Link href={`/dashboard/work-packages/${link.wp.id}`} className="text-blue-600 hover:underline">
+                {link.wp.wpId}
+              </Link>
+            )}
+            {link.wp && <span className="text-slate-300">({link.wp.status})</span>}
           </span>
           {isMgrDir && (
             <button onClick={() => doRemove(link.id)} disabled={busy} className="text-slate-300 hover:text-red-400">
@@ -163,7 +179,7 @@ function CapaLinkedItemsList({
         </button>
       )}
       {addingLink && (
-        <CapaLinkForm findingId={findingId} capaId={capaId}
+        <CapaLinkForm findingId={findingId} capaId={capaId} existingItems={items}
           onCancel={() => setAddingLink(false)}
           onSaved={() => { setAddingLink(false); onChanged(); }} />
       )}
@@ -172,18 +188,49 @@ function CapaLinkedItemsList({
 }
 
 function CapaLinkForm({
-  findingId, capaId, onCancel, onSaved
+  findingId, capaId, existingItems, onCancel, onSaved
 }: {
-  findingId: number; capaId: number; onCancel: () => void; onSaved: () => void;
+  findingId: number; capaId: number; existingItems: CapaTaskLink[]; onCancel: () => void; onSaved: () => void;
 }) {
   const [role, setRole] = useState<CapaLinkRole>('EXECUTION');
   const [refType, setRefType] = useState<'task' | 'wp'>('task');
   const [refId, setRefId] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [tasks, setTasks] = useState<TaskEnriched[]>([]);
+  const [wps, setWps] = useState<WorkPackageEnriched[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [showWpModal, setShowWpModal] = useState(false);
+
+  useEffect(() => {
+    Promise.all([getTasks(), getWorkPackages()])
+      .then(([t, w]) => { setTasks(t); setWps(w); })
+      .finally(() => setLoadingOptions(false));
+  }, []);
+
+  // Clear selection when switching between task / wp
+  const handleRefTypeChange = (val: 'task' | 'wp') => {
+    setRefType(val);
+    setRefId('');
+  };
+
+  const taskOptions = tasks.map((t) => ({
+    value: String(t.id),
+    label: `${t.taskId} — ${t.template?.title ?? 'No template'} (${t.status})`,
+  }));
+  const wpOptions = wps
+    .filter((w) => !['Closed', 'Inactive'].includes(w.computedStatus))
+    .map((w) => ({ value: String(w.id), label: `${w.wpId} — ${w.name} (${w.computedStatus})` }));
+  const currentOptions = refType === 'task' ? taskOptions : wpOptions;
+
   const submit = async () => {
     const id = Number(refId);
-    if (!id) return toast.error('Enter a valid numeric ID');
+    if (!id) return toast.error('Select a Task or WP first');
+    const alreadyLinked = existingItems.some((l) =>
+      refType === 'task' ? l.taskId === id : l.wpId === id
+    );
+    if (alreadyLinked) return toast.error('This item is already linked to this CAPA');
     setSaving(true);
     try {
       await addCapaLink(findingId, capaId, {
@@ -201,25 +248,74 @@ function CapaLinkForm({
   };
 
   return (
-    <div className="flex items-center gap-2 mt-1">
-      <select value={role} onChange={(e) => setRole(e.target.value as CapaLinkRole)}
-        className="text-xs border border-slate-200 rounded px-2 py-1">
-        <option value="EXECUTION">Execution</option>
-        <option value="EFFECTIVENESS">Effectiveness</option>
-        <option value="SUPPORTING">Supporting</option>
-      </select>
-      <select value={refType} onChange={(e) => setRefType(e.target.value as 'task' | 'wp')}
-        className="text-xs border border-slate-200 rounded px-2 py-1">
-        <option value="task">Task ID</option>
-        <option value="wp">WP ID</option>
-      </select>
-      <input value={refId} onChange={(e) => setRefId(e.target.value)}
-        placeholder="DB numeric ID" className="text-xs border border-slate-200 rounded px-2 py-1 w-24" />
-      <button onClick={submit} disabled={saving}
-        className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-50">
-        {saving ? '…' : 'Add'}
-      </button>
-      <button onClick={onCancel} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+    <div className="mt-2 space-y-2">
+      {/* Row 1: role, type, create shortcuts */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={role} onChange={(e) => setRole(e.target.value as CapaLinkRole)}
+          className="text-xs border border-slate-200 rounded px-2 py-1">
+          <option value="EXECUTION">Execution</option>
+          <option value="EFFECTIVENESS">Effectiveness</option>
+          <option value="SUPPORTING">Supporting</option>
+        </select>
+        <select value={refType} onChange={(e) => handleRefTypeChange(e.target.value as 'task' | 'wp')}
+          className="text-xs border border-slate-200 rounded px-2 py-1">
+          <option value="task">Task</option>
+          <option value="wp">Work Package</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => setShowTaskModal(true)}
+          className="text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap"
+        >
+          + New Task
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowWpModal(true)}
+          className="text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap"
+        >
+          + New WP
+        </button>
+      </div>
+
+      {/* Row 2: searchable dropdown + submit controls */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <SearchableSelect
+            options={currentOptions}
+            value={refId}
+            onChange={setRefId}
+            placeholder={loadingOptions ? 'Loading…' : `Search ${refType === 'task' ? 'tasks' : 'work packages'}…`}
+            disabled={loadingOptions}
+          />
+        </div>
+        <button onClick={submit} disabled={saving}
+          className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-50 whitespace-nowrap">
+          {saving ? '…' : 'Add'}
+        </button>
+        <button onClick={onCancel} className="text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap">Cancel</button>
+      </div>
+
+      {showTaskModal && (
+        <CreateTaskModal
+          onClose={() => setShowTaskModal(false)}
+          onSaved={(id) => {
+            setShowTaskModal(false);
+            setRefId(String(id));
+            getTasks().then(setTasks);
+          }}
+        />
+      )}
+      {showWpModal && (
+        <CreateWpModal
+          onClose={() => setShowWpModal(false)}
+          onSaved={(id) => {
+            setShowWpModal(false);
+            setRefId(String(id));
+            getWorkPackages().then(setWps);
+          }}
+        />
+      )}
     </div>
   );
 }
