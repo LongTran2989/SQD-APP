@@ -32,6 +32,12 @@ const OVER_BUDGET_OPTIONS = [
   { value: 'OTHER', label: 'Other' },
 ];
 
+// Statuses where new sessions may still be logged. Mirrors the backend gate in
+// timebooking.controller.ts (createTimeEntry), which blocks entries once a task
+// reaches In Review or any final/inactive state. The history list stays visible
+// for all statuses — only the entry form is gated.
+const LOGGABLE_STATUSES = ['Assigned', 'In Progress', 'Follow-up Required'];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatHours(h: number): string {
@@ -148,6 +154,7 @@ export default function TimeEntryPanel({ task, currentUser, onEntryAdded }: Prop
   const [overBudgetNote, setOverBudgetNote] = useState('');
 
   const isAssignee = task.assignedToUserId === currentUser.id;
+  const canLogEntries = LOGGABLE_STATUSES.includes(task.status);
 
   // Fetch user list once (for collaborator search)
   useEffect(() => {
@@ -313,8 +320,8 @@ export default function TimeEntryPanel({ task, currentUser, onEntryAdded }: Prop
         </div>
       </div>
 
-      {/* ── Entry form (assignee only) ─────────────────────────────────────── */}
-      {isAssignee && (
+      {/* ── Entry form (assignee only, active statuses only) ───────────────── */}
+      {isAssignee && canLogEntries && (
         <div className="space-y-4 mt-5 pt-5 border-t border-slate-100">
           {/* Session hours + notes */}
           <div>
