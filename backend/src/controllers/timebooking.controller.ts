@@ -84,10 +84,10 @@ export const createTimeBooking = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // Must be in a final state
+    // Must be In Review or a final state
     if (!FINAL_TASK_STATUSES.includes(task.status)) {
       res.status(400).json({
-        message: `Time booking is only available when a task is Closed, Rejected, or Terminated. Current status: ${task.status}.`
+        message: `Time booking is only available when a task is In Review, Closed, Rejected, or Terminated. Current status: ${task.status}.`
       });
       return;
     }

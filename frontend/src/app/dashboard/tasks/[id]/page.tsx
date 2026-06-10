@@ -259,7 +259,7 @@ export default function TaskDetailPage() {
           <a href="#time-booking-section" className="font-bold underline hover:text-amber-800 transition-colors">
             Please perform final time booking!
           </a>
-          <span>Your manager needs this before rating the task.</span>
+          <span>Submit it now so your manager can rate the task once it is approved.</span>
         </div>
       )}
 
