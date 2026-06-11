@@ -8,6 +8,7 @@ import { getDatasource } from '../../api/taskApi';
 import { apiClient } from '../../api/client';
 import toast from 'react-hot-toast';
 import { X, Plus, Trash2, ListPlus } from 'lucide-react';
+import { MULTI_DEPT_SINGLE_TASK_TYPES } from '../../constants/findingExpansion';
 
 interface Props {
   findingId: number;
@@ -81,7 +82,7 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
         if (r.targetDepartmentIds.length === 0) {
           return toast.error(`Select at least one department for ${r.responseActionType}`);
         }
-        if (!['QN', 'Dissemination'].includes(r.responseActionType) && r.targetDepartmentIds.length > 1) {
+        if (!MULTI_DEPT_SINGLE_TASK_TYPES.includes(r.responseActionType) && r.targetDepartmentIds.length > 1) {
           return toast.error(`${r.responseActionType}: add one row per department for multiple targets`);
         }
       }
@@ -171,9 +172,9 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">
                     Target Department(s) *
-                    {!['QN', 'Dissemination'].includes(row.responseActionType) && ' (one per row for multiple depts)'}
+                    {!MULTI_DEPT_SINGLE_TASK_TYPES.includes(row.responseActionType) && ' (one per row for multiple depts)'}
                   </label>
-                  {!['QN', 'Dissemination'].includes(row.responseActionType) ? (
+                  {!MULTI_DEPT_SINGLE_TASK_TYPES.includes(row.responseActionType) ? (
                     <select
                       value={row.targetDepartmentIds[0] ?? ''}
                       onChange={(e) => updateRow(row._key, {

@@ -10,6 +10,7 @@ import {
   DIRECTOR_APPROVAL_TYPES, FINDING_EXPANSION_ACTIONS
 } from '../constants/findingExpansion';
 import { HttpError, isHttpError } from '../utils/httpError';
+import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -97,6 +98,48 @@ async function ensureDueDateBreachLogged(
   return true;
 }
 
+/**
+ * Batched variant of ensureDueDateBreachLogged for list endpoints. Detects which
+ * findings are breached, writes a one-time DUE_DATE_BREACHED audit row for any
+ * that lack one (two queries total — one findMany + one createMany — instead of
+ * up to 2 per finding), and returns the Set of currently-breached finding ids.
+ */
+async function ensureDueDateBreachesLogged(
+  findings: { id: number; dueDate: Date | null; status: string }[],
+  performedByUserId: number
+): Promise<Set<number>> {
+  const breached = findings.filter(computeDueDateBreached);
+  const breachedIds = new Set(breached.map((f) => f.id));
+  if (breachedIds.size === 0) return breachedIds;
+
+  try {
+    const existing = await prisma.auditLog.findMany({
+      where: {
+        entityType: 'Finding',
+        actionType: 'DUE_DATE_BREACHED',
+        entityId: { in: breached.map((f) => String(f.id)) }
+      },
+      select: { entityId: true }
+    });
+    const alreadyLogged = new Set(existing.map((e) => e.entityId));
+    const toLog = breached.filter((f) => !alreadyLogged.has(String(f.id)));
+    if (toLog.length > 0) {
+      await prisma.auditLog.createMany({
+        data: toLog.map((f) => ({
+          actionType: 'DUE_DATE_BREACHED',
+          entityType: 'Finding',
+          entityId: String(f.id),
+          performedByUserId,
+          details: { dueDate: f.dueDate } as any
+        }))
+      });
+    }
+  } catch (err) {
+    console.error('[ensureDueDateBreachesLogged] batch breach-log failed:', err);
+  }
+  return breachedIds;
+}
+
 async function getUserName(userId: number): Promise<string> {
   const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
   return u?.name ?? `User ${userId}`;
@@ -143,8 +186,8 @@ async function validateTaxonomyFields(
 /** Replaces a finding's hazard-tag set wholesale inside an open transaction. */
 async function replaceHazardTags(tx: Prisma.TransactionClient, findingId: number, tagIds: number[]): Promise<void> {
   await tx.findingHazardTag.deleteMany({ where: { findingId } });
-  for (const hazardTagId of tagIds) {
-    await tx.findingHazardTag.create({ data: { findingId, hazardTagId } });
+  if (tagIds.length > 0) {
+    await tx.findingHazardTag.createMany({ data: tagIds.map((hazardTagId) => ({ findingId, hazardTagId })) });
   }
 }
 
@@ -339,19 +382,15 @@ export const listFindings = async (req: Request, res: Response): Promise<void> =
       })
     ]);
 
-    // Flag (and one-time-log) due-date breaches, then shape the response.
-    const data = await Promise.all(
-      findings.map(async (f) => {
-        const dueDateBreached = await ensureDueDateBreachLogged(f, user.userId);
-        return {
-          ...f,
-          sourceTask: f.sourceTask
-            ? { id: f.sourceTask.id, taskId: f.sourceTask.taskId, title: f.sourceTask.title ?? f.sourceTask.template?.title ?? null, status: f.sourceTask.status }
-            : null,
-          dueDateBreached
-        };
-      })
-    );
+    // Flag (and one-time-log) due-date breaches in a single batch, then shape the response.
+    const breachedIds = await ensureDueDateBreachesLogged(findings, user.userId);
+    const data = findings.map((f) => ({
+      ...f,
+      sourceTask: f.sourceTask
+        ? { id: f.sourceTask.id, taskId: f.sourceTask.taskId, title: f.sourceTask.title ?? f.sourceTask.template?.title ?? null, status: f.sourceTask.status }
+        : null,
+      dueDateBreached: breachedIds.has(f.id)
+    }));
 
     res.json({ findings: data, total, page, pageSize });
   } catch (error) {
@@ -661,16 +700,24 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
     }
     const prepared: PreparedTask[] = [];
 
+    // Batch-fetch every referenced template once (instead of one findUnique per
+    // row), keyed by id for O(1) lookup inside the validation loop below.
+    const templateIds = [...new Set(
+      tasks.map((e: { templateId?: unknown }) => e?.templateId).filter((tid: unknown): tid is number => typeof tid === 'number')
+    )];
+    const templateRows = await prisma.template.findMany({
+      where: { id: { in: templateIds } },
+      select: { id: true, status: true, formSchema: true, estimatedHours: true, requiresApproval: true, skillLevel: true }
+    });
+    const templateMap = new Map(templateRows.map((t) => [t.id, t]));
+
     for (const entry of tasks) {
       const title = typeof entry?.title === 'string' ? entry.title.trim() : '';
       if (!entry?.templateId || !title) {
         res.status(400).json({ message: 'Each task requires templateId and a non-empty title' });
         return;
       }
-      const template = await prisma.template.findUnique({
-        where: { id: entry.templateId },
-        select: { id: true, status: true, formSchema: true, estimatedHours: true, requiresApproval: true, skillLevel: true }
-      });
+      const template = templateMap.get(entry.templateId);
       if (!template) {
         res.status(404).json({ message: `Template ${entry.templateId} not found` });
         return;
@@ -974,8 +1021,6 @@ export const advanceFinding = async (req: Request, res: Response): Promise<void>
 
 // ─── GET /api/findings/admin/stuck ────────────────────────────────────────────
 
-const TASK_FINAL_STATES = ['Closed', 'Rejected', 'Terminated'];
-
 export const getStuckFindings = async (req: Request, res: Response): Promise<void> => {
   try {
     const { role } = req.user!;
@@ -1002,7 +1047,7 @@ export const getStuckFindings = async (req: Request, res: Response): Promise<voi
     const stuck = candidates.filter(
       (f) =>
         f.followUpTasks.length > 0 &&
-        f.followUpTasks.every((t) => TASK_FINAL_STATES.includes(t.status))
+        f.followUpTasks.every((t) => FINAL_TASK_STATUSES.includes(t.status))
     );
 
     res.json(stuck);
@@ -1041,7 +1086,7 @@ export const forcePendingVerification = async (req: Request, res: Response): Pro
       res.status(400).json({ message: 'Finding must be In Progress to be force-advanced' });
       return;
     }
-    const nonFinal = finding.followUpTasks.filter((t) => !TASK_FINAL_STATES.includes(t.status));
+    const nonFinal = finding.followUpTasks.filter((t) => !FINAL_TASK_STATUSES.includes(t.status));
     if (nonFinal.length > 0) {
       res.status(400).json({ message: 'Not all follow-up tasks are in a final state' });
       return;
