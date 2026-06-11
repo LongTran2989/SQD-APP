@@ -47,7 +47,20 @@ function deepEqualCanonical(a: unknown, b: unknown): boolean {
 // ─── GET /api/templates ──────────────────────────────────────────────
 export const getTemplates = async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.user!.userId;
+    const userRole = req.user!.role;
+    const divisionId = req.user!.divisionId;
+    const isAdminOrDirector = ['Admin', 'Director'].includes(userRole);
+
+    // Division scoping: Director/Admin see all templates; everyone else (Manager,
+    // Group Leader, Staff) is restricted to their own division plus the shared
+    // system ad-hoc template. Mirrors the write-side rule in createTemplate.
+    const where = isAdminOrDirector
+      ? {}
+      : { OR: [{ divisionId }, { templateId: 'GENERIC-ADHOC' }] };
+
     const templates = await prisma.template.findMany({
+      where,
       orderBy: { updatedAt: 'desc' },
       include: {
         division: { select: { name: true, code: true } },
@@ -55,10 +68,6 @@ export const getTemplates = async (req: Request, res: Response): Promise<void> =
         owner: { select: { id: true, name: true } },
       }
     });
-
-    const userId = req.user!.userId;
-    const userRole = req.user!.role;
-    const isAdminOrDirector = ['Admin', 'Director'].includes(userRole);
 
     const mappedTemplates = templates.map(t => {
       const canSeeDraft = t.ownerId === userId || isAdminOrDirector;
@@ -148,17 +157,23 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
       if (divRaw.length === 0) throw new Error('Division not found');
       const division = divRaw[0]!;
 
-      // Find the highest sequence number for this division
-      const lastTemplate = await tx.template.findFirst({
-        where: { divisionId: targetDivisionId },
-        orderBy: { id: 'desc' },
+      // Find the highest sequence number for this division (exclude system templates like GENERIC-ADHOC).
+      // Use findMany + JS max rather than findFirst + id:desc — insertion order doesn't equal
+      // sequence order if any template was ever recreated, and parseInt on a malformed suffix
+      // (e.g. 'NaN') would otherwise silently re-generate the same broken ID.
+      const divTemplates = await tx.template.findMany({
+        where: {
+          divisionId: targetDivisionId,
+          templateId: { startsWith: `${division.code}-` },
+        },
         select: { templateId: true }
       });
 
       let nextSeq = 1;
-      if (lastTemplate?.templateId) {
-        const parts = lastTemplate.templateId.split('-');
-        nextSeq = parseInt(parts[parts.length - 1] as string) + 1;
+      for (const t of divTemplates) {
+        const suffix = t.templateId.split('-').pop() ?? '';
+        const num = parseInt(suffix, 10);
+        if (!isNaN(num) && num >= nextSeq) nextSeq = num + 1;
       }
 
       const generatedTemplateId = `${division.code}-${String(nextSeq).padStart(3, '0')}`;

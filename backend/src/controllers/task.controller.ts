@@ -221,12 +221,13 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
     if (role === 'Director' || role === 'Admin') {
       // System-wide visibility
     } else if (role === 'Manager') {
-      // All tasks in their division + all tasks they issued anywhere
+      // Tasks in their division (by target or by assigned user) + tasks they issued anywhere
       where = {
         deletedAt: null,
         OR: [
           { targetDivisionId: divisionId },
-          { issuerId: userId }
+          { issuerId: userId },
+          { assignedToUser: { divisionId: divisionId } }
         ]
       };
     } else {
@@ -514,7 +515,9 @@ export async function createTaskService(
       wpId: wpId ?? null,
       targetDivisionId,
       status: initialStatus,
-      schemaSnapshot: template.formSchema as any,
+      schemaSnapshot: (template.formSchema as any[]).map((f: any) =>
+        f.fieldId ? f : { ...f, fieldId: crypto.randomUUID() }
+      ) as any,
       deadline: deadline ? new Date(deadline) : null,
       estimatedHours: estimatedHours ?? template.estimatedHours ?? null,
       // Seed per-task overrides from the template; caller may override either.

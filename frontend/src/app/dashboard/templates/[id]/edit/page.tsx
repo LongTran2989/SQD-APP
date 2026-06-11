@@ -34,10 +34,13 @@ export default function EditTemplatePage({ params }: { params: Promise<{ id: str
     try {
       // PR7: echo the updatedAt we last saw for optimistic concurrency (409 on conflict).
       const updatedAt = template?.updatedAt;
-      await apiClient.put(`/templates/${templateId}`, { ...payload, updatedAt });
+      const putRes = await apiClient.put(`/templates/${templateId}`, { ...payload, updatedAt });
+      // The PUT advances updatedAt in the DB — use the fresh value for publish so the
+      // stale-check doesn't fire on the immediately-following publish call.
+      const freshUpdatedAt = putRes.data?.updatedAt ?? updatedAt;
       if (action === 'Published') {
         try {
-          await apiClient.post(`/templates/${templateId}/publish`, { updatedAt });
+          await apiClient.post(`/templates/${templateId}/publish`, { updatedAt: freshUpdatedAt });
           toast.success('Template published successfully');
         } catch (err: any) {
           if (err.response?.status === 409) {

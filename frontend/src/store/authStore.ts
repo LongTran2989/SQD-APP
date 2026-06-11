@@ -17,7 +17,14 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       token: null,
       isAuthenticated: false,
-      login: (user, token) => set({ user, token, isAuthenticated: true }),
+      login: (user, token) => {
+        // Drop any leftover session first so a stale token from a previous
+        // account (same tab, no logout) can never coexist with the new user.
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('auth-storage');
+        }
+        set({ user, token, isAuthenticated: true });
+      },
       logout: () => set({ user: null, token: null, isAuthenticated: false }),
       setPreferences: (preferences) =>
         set((state) => (state.user ? { user: { ...state.user, preferences } } : {})),

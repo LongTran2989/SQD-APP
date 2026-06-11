@@ -6,22 +6,22 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "test": "dotenv -e .env.test -- jest --runInBand",
-    "test:setup": "dotenv -e .env.test -- npx prisma db push --accept-data-loss"
+    "test:setup": "dotenv -e .env.test -- node node_modules/prisma/build/index.js db push --accept-data-loss"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@prisma/adapter-pg": "^7.8.0",
-    "@prisma/client": "^7.8.0",
+    "@prisma/adapter-pg": "^6.19.3",
+    "@prisma/client": "^6.19.3",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
-    "prisma": "^7.8.0"
+    "prisma": "^6.19.3"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
@@ -41,6 +41,6 @@
     "typescript": "^6.0.3"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "node_modules/.bin/ts-node prisma/seed.ts"
   }
 }

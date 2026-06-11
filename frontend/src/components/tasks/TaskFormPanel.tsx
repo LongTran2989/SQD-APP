@@ -307,8 +307,8 @@ export default function TaskFormPanel({
       )}
 
       <div className="p-6 space-y-6">
-        {schemaSnapshot.map((field) => (
-          <div key={field.fieldId} className="space-y-1.5">
+        {schemaSnapshot.map((field, idx) => (
+          <div key={field.fieldId ?? `field-${idx}`} className="space-y-1.5">
             <label
               htmlFor={`field-${field.fieldId}`}
               className="block text-sm font-semibold text-slate-700"
