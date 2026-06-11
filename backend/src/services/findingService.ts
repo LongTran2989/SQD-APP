@@ -2,14 +2,15 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createFeedPost } from './feedService';
+import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-// Shared with task.controller — kept here to avoid a circular import between
-// task.controller and finding.controller.
-export const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
+// Re-exported for back-compat with any module importing it from here; the
+// authoritative definition now lives in constants/taskStatus.
+export { FINAL_TASK_STATUSES };
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 

@@ -25,3 +25,8 @@ export const LINK_TYPE_OPTIONS: { value: FindingLinkType; label: string }[] = [
   { value: 'DUPLICATE', label: 'Duplicate of' },
   { value: 'CAUSED_BY', label: 'Caused by' },
 ];
+
+// Response-action types that may target MULTIPLE departments from a single task
+// row (all others require exactly one department per row). Must mirror the
+// backend MULTI_DEPT_SINGLE_TASK_TYPES — keep the two in sync.
+export const MULTI_DEPT_SINGLE_TASK_TYPES: string[] = ['QN', 'Dissemination'];

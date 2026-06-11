@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -9,7 +10,6 @@ const prisma = new PrismaClient({ adapter });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
 const ANALYTICS_ROLES = ['Manager', 'Director', 'Admin'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

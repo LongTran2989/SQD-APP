@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { generateDailyCheckTasks } from '../services/wpCheckService';
 import { createFeedPost } from '../services/feedService';
+import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 
 // Emits a WP-scope SYSTEM_EVENT alongside the existing AuditLog write. Mirrors
 // the task feed's logTaskActivity: best-effort, never throws, authorId stays
@@ -21,8 +22,6 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 // ─── Helpers ─────────────────────────────────────────────────────────
-
-const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
 
 interface WpTypeFieldInput {
   acRegistration?: string | null;

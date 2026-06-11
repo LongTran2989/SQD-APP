@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
@@ -73,6 +73,20 @@ export default function TaskListPage() {
   const [showColMenu, setShowColMenu] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const isColVisible = (key: string) => visibleCols.includes(key);
+
+  // Close either dropdown when the user clicks outside of it.
+  const colMenuRef = useRef<HTMLDivElement>(null);
+  const statusMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showColMenu && !showStatusMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (colMenuRef.current && !colMenuRef.current.contains(target)) setShowColMenu(false);
+      if (statusMenuRef.current && !statusMenuRef.current.contains(target)) setShowStatusMenu(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showColMenu, showStatusMenu]);
 
   const toggleColumn = async (key: string) => {
     const next = visibleCols.includes(key)
@@ -276,7 +290,7 @@ export default function TaskListPage() {
           </div>
 
           {/* Status filter dropdown (multi-select) */}
-          <div className="relative">
+          <div className="relative" ref={statusMenuRef}>
             <button
               id="status-filter-button"
               onClick={() => setShowStatusMenu((v) => !v)}
@@ -387,7 +401,7 @@ export default function TaskListPage() {
           </div>
 
           {/* Column selector */}
-          <div className="relative sm:ml-auto">
+          <div className="relative sm:ml-auto" ref={colMenuRef}>
             <button
               id="columns-button"
               onClick={() => setShowColMenu((v) => !v)}

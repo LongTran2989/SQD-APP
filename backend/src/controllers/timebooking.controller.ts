@@ -10,7 +10,11 @@ const prisma = new PrismaClient({ adapter });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const FINAL_TASK_STATUSES = ['In Review', 'Closed', 'Rejected', 'Terminated'];
+// Statuses at which a task is eligible for time booking. Deliberately BROADER
+// than the authoritative FINAL_TASK_STATUSES (constants/taskStatus) — booking
+// opens once a task reaches review, so 'In Review' is included here. Do not
+// conflate this with the "task is final/done" set.
+const TIME_BOOKING_ELIGIBLE_STATUSES = ['In Review', 'Closed', 'Rejected', 'Terminated'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,29 +47,30 @@ async function logActivityAndAudit(
   content: string,
   metadata: Record<string, unknown>
 ): Promise<void> {
-  await prisma.auditLog.create({
-    data: {
-      actionType,
-      entityType: 'TimeBooking',
-      entityId: taskEntityId,
-      performedByUserId,
-      comment: null,
-      details: metadata as any
-    }
-  });
-
-  try {
-    await createFeedPost(prisma, {
+  // The two writes are independent — run them in parallel. The feed post is
+  // best-effort (non-fatal), so swallow its error without failing the audit write.
+  await Promise.all([
+    prisma.auditLog.create({
+      data: {
+        actionType,
+        entityType: 'TimeBooking',
+        entityId: taskEntityId,
+        performedByUserId,
+        comment: null,
+        details: metadata as any
+      }
+    }),
+    createFeedPost(prisma, {
       type: 'SYSTEM_EVENT',
       scope: 'TASK',
       scopeId: taskId,
       content,
       metadata,
       authorId: null
-    });
-  } catch (err) {
-    console.error(`[TimeBooking] logActivity failed for taskId=${taskId}:`, err);
-  }
+    }).catch((err) => {
+      console.error(`[TimeBooking] logActivity failed for taskId=${taskId}:`, err);
+    })
+  ]);
 }
 
 // ─── POST /api/tasks/:id/time-booking ────────────────────────────────────────
@@ -85,7 +90,7 @@ export const createTimeBooking = async (req: Request, res: Response): Promise<vo
     }
 
     // Must be In Review or a final state
-    if (!FINAL_TASK_STATUSES.includes(task.status)) {
+    if (!TIME_BOOKING_ELIGIBLE_STATUSES.includes(task.status)) {
       res.status(400).json({
         message: `Time booking is only available when a task is In Review, Closed, Rejected, or Terminated. Current status: ${task.status}.`
       });
@@ -281,7 +286,9 @@ export const createTimeEntry = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    if (FINAL_TASK_STATUSES.includes(task.status) || task.status === 'Unassigned' || task.status === 'Inactive') {
+    // Incremental session entries are only for active tasks — once a task reaches
+    // the booking/closeout phase (In Review or final) or is not yet active, block.
+    if (TIME_BOOKING_ELIGIBLE_STATUSES.includes(task.status) || task.status === 'Unassigned' || task.status === 'Inactive') {
       res.status(400).json({ message: 'Time entries can only be logged on active tasks.' });
       return;
     }

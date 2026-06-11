@@ -5,6 +5,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
 import { createFeedPost } from '../services/feedService';
 import { HttpError, isHttpError } from '../utils/httpError';
+import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -13,8 +14,6 @@ const prisma = new PrismaClient({ adapter });
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const FINAL_TASK_STATUSES = ['Closed', 'Rejected', 'Terminated'];
 
 // Roles that can CREATE tasks (configurable in Phase 7 via PrivilegeConfig)
 const TASK_CREATOR_ROLES = ['Manager', 'Director', 'Admin'];
