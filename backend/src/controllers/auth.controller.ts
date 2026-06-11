@@ -22,6 +22,28 @@ const DUMMY_PASSWORD_HASH = bcrypt.hashSync('invalid-account-placeholder', 10);
 const hashResetToken = (token: string): string =>
   crypto.createHash('sha256').update(token).digest('hex');
 
+// The JWT is delivered as an httpOnly cookie so it is not readable by JS (an XSS
+// cannot exfiltrate it). SameSite=Strict mitigates CSRF for same-site
+// deployments. The token is also still returned in the JSON body for API/header
+// clients (and the test suite). See plan Phase 6.
+const AUTH_COOKIE_NAME = 'token';
+const AUTH_COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 day — matches token TTL
+
+const authCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const,
+  path: '/'
+});
+
+const setAuthCookie = (res: Response, token: string): void => {
+  res.cookie(AUTH_COOKIE_NAME, token, { ...authCookieOptions(), maxAge: AUTH_COOKIE_MAX_AGE_MS });
+};
+
+const clearAuthCookie = (res: Response): void => {
+  res.clearCookie(AUTH_COOKIE_NAME, authCookieOptions());
+};
+
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { employeeId, password } = req.body;
@@ -69,6 +91,11 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const token = jwt.sign(payload, JWT_SECRET, {
       expiresIn: '1d'
     });
+
+    // Set the httpOnly cookie in both flows: the forced-change session is gated
+    // to /update-password by the middleware, so the cookie alone carries the
+    // forced session (no JS-readable temp token needed).
+    setAuthCookie(res, token);
 
     if (user.forcePasswordChange) {
       res.status(202).json({
@@ -122,6 +149,8 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
         performedByUserId: userId
       }
     });
+
+    clearAuthCookie(res);
 
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
@@ -242,6 +271,9 @@ export const updatePassword = async (req: Request, res: Response): Promise<void>
     const token = jwt.sign(payload, JWT_SECRET, {
       expiresIn: '1d'
     });
+
+    // Refresh the cookie with the new session (forcePasswordChange now false).
+    setAuthCookie(res, token);
 
     res.json({
       message: 'Password updated successfully',

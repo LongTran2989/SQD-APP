@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
@@ -15,12 +15,9 @@ export default function UpdatePasswordPage() {
   const router = useRouter();
   const login = useAuthStore((state) => state.login);
 
-  useEffect(() => {
-    const tempToken = sessionStorage.getItem('temp-auth-token');
-    if (!tempToken) {
-      router.push('/login');
-    }
-  }, [router]);
+  // No client-side guard token: the forced-change session lives in the httpOnly
+  // cookie. If the cookie is missing/invalid, the update-password request below
+  // returns 401 and the response interceptor redirects to /login.
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,20 +40,14 @@ export default function UpdatePasswordPage() {
 
     setLoading(true);
     try {
-      const tempToken = sessionStorage.getItem('temp-auth-token');
+      // Auth is carried by the httpOnly cookie (withCredentials); the backend
+      // refreshes the cookie with the new session on success.
+      const response = await apiClient.post('/auth/update-password', { oldPassword, newPassword });
 
-      const response = await apiClient.post('/auth/update-password',
-        { oldPassword, newPassword },
-        { headers: { Authorization: `Bearer ${tempToken}` } }
-      );
-      
-      const { token, user } = response.data;
-      
-      // Clean up temp token
-      sessionStorage.removeItem('temp-auth-token');
-      
-      // Log the user in officially
-      login(user, token);
+      const { user } = response.data;
+
+      // Log the user in officially.
+      login(user);
       router.push('/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.message || 'An error occurred updating your password.');

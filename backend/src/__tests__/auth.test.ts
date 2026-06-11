@@ -311,6 +311,44 @@ describe('Authentication & Session Management Endpoints', () => {
     });
   });
 
+  describe('Cookie-based auth', () => {
+    // The JWT is delivered as an httpOnly cookie and accepted on subsequent
+    // requests without an Authorization header.
+    it('sets an httpOnly auth cookie on login and accepts it for authenticated requests', async () => {
+      await prisma.user.create({
+        data: {
+          employeeId: 'TST-COOKIE',
+          name: 'Cookie User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-COOKIE', password: 'password123' });
+      expect(loginRes.status).toBe(200);
+
+      const setCookie = loginRes.headers['set-cookie'];
+      expect(setCookie).toBeDefined();
+      const cookieHeaders = Array.isArray(setCookie) ? setCookie : [setCookie as unknown as string];
+      const tokenCookie = cookieHeaders.find((c) => c.startsWith('token='));
+      expect(tokenCookie).toBeDefined();
+      expect(tokenCookie!.toLowerCase()).toContain('httponly');
+
+      // The cookie alone (no Authorization header) authenticates a request.
+      const cookieValue = tokenCookie!.split(';')[0];
+      const res = await request(app).get('/api/templates').set('Cookie', cookieValue);
+      expect(res.status).not.toBe(401);
+
+      // Logout clears the cookie.
+      const logoutRes = await request(app).post('/api/auth/logout').set('Cookie', cookieValue);
+      expect(logoutRes.status).toBe(200);
+      const clearCookie = logoutRes.headers['set-cookie'];
+      expect(clearCookie).toBeDefined();
+    });
+  });
+
   describe('Session lifecycle & revocation', () => {
     const setEnforceSingleSession = (value: 'true' | 'false') =>
       prisma.systemSetting.upsert({

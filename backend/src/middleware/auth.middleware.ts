@@ -33,13 +33,21 @@ declare global {
 export const authenticateJWT = (req: Request, res: Response, next: NextFunction): void => {
   const authHeader = req.headers.authorization;
 
+  // Prefer the Authorization header (API/header clients, test suite); fall back
+  // to the httpOnly auth cookie (browser clients). The header value, once
+  // present, must be well-formed.
+  let token: string | undefined;
   if (authHeader) {
-    const token = authHeader.split(' ')[1];
+    token = authHeader.split(' ')[1];
     if (!token) {
       res.status(401).json({ message: 'Unauthorized: Malformed token' });
       return;
     }
+  } else {
+    token = (req as Request & { cookies?: Record<string, string> }).cookies?.token;
+  }
 
+  if (token) {
     jwt.verify(token, JWT_SECRET, async (err, decoded) => {
       if (err) {
         res.status(401).json({ message: 'Unauthorized: Invalid token' });

@@ -22,18 +22,18 @@ export default function LoginPage() {
 
     try {
       const response = await apiClient.post('/auth/login', { employeeId, password });
-      
-      // If backend returns 202, it means forcePasswordChange is true
+
+      // If backend returns 202, forcePasswordChange is true. The backend has set
+      // the httpOnly auth cookie; the middleware restricts that session to
+      // /update-password, so no JS-readable temporary token is needed.
       if (response.status === 202 && response.data.requirePasswordChange) {
-        // We store the temporary token in sessionStorage just for the update screen
-        sessionStorage.setItem('temp-auth-token', response.data.token);
         router.push('/update-password');
         return;
       }
 
-      const { token, user } = response.data;
-      
-      login(user, token);
+      const { user } = response.data;
+
+      login(user);
       router.push('/dashboard');
     } catch (err: any) {
       if (err.response?.status === 401) {
