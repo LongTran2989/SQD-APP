@@ -132,17 +132,27 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password, name, roleName, divisionId } = req.body;
+    const { employeeId, email, password, name, roleName, divisionId } = req.body;
 
-    if (!email || !password || !name || !roleName || !divisionId) {
-      res.status(400).json({ message: 'All fields are required' });
+    // employeeId is the login identifier (login authenticates by employeeId), so
+    // it is required for a usable account. email is optional (used for reset).
+    if (!employeeId || !password || !name || !roleName || !divisionId) {
+      res.status(400).json({ message: 'employeeId, password, name, roleName and divisionId are required' });
       return;
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email, deletedAt: null } });
-    if (existingUser) {
+    const existingById = await prisma.user.findUnique({ where: { employeeId, deletedAt: null } });
+    if (existingById) {
       res.status(400).json({ message: 'User already exists' });
       return;
+    }
+
+    if (email) {
+      const existingByEmail = await prisma.user.findUnique({ where: { email, deletedAt: null } });
+      if (existingByEmail) {
+        res.status(400).json({ message: 'User already exists' });
+        return;
+      }
     }
 
     const role = await prisma.role.findUnique({ where: { name: roleName } });
@@ -153,10 +163,13 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
+    // forcePasswordChange defaults to true in the schema, so a newly registered
+    // user is required to change the temporary password on first login.
     const newUser = await prisma.user.create({
       data: {
+        employeeId,
         name,
-        email,
+        email: email ?? null,
         passwordHash,
         divisionId,
         roleId: role.id

@@ -262,6 +262,55 @@ describe('Authentication & Session Management Endpoints', () => {
     });
   });
 
+  describe('Registration', () => {
+    // Protects against: registering a user without an employeeId, who could then
+    // never log in (login authenticates by employeeId).
+    it('should register a user with an employeeId who can then log in (forced change)', async () => {
+      const admin = await prisma.user.create({
+        data: {
+          employeeId: 'TST-ADMIN',
+          name: 'Reg Admin',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+      const adminToken = jwt.sign({ userId: admin.id, role: 'Admin', divisionId }, process.env.JWT_SECRET as string);
+
+      const regRes = await request(app)
+        .post('/api/auth/register')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ employeeId: 'TST-NEWBIE', password: 'temppass123', name: 'New Bie', roleName: 'Admin', divisionId });
+      expect(regRes.status).toBe(201);
+
+      // The new user is forced to change the temporary password on first login (202).
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-NEWBIE', password: 'temppass123' });
+      expect(loginRes.status).toBe(202);
+      expect(loginRes.body.requirePasswordChange).toBe(true);
+    });
+
+    it('should reject registration without an employeeId', async () => {
+      const admin = await prisma.user.create({
+        data: {
+          employeeId: 'TST-ADMIN2',
+          name: 'Reg Admin 2',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+      const adminToken = jwt.sign({ userId: admin.id, role: 'Admin', divisionId }, process.env.JWT_SECRET as string);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ password: 'temppass123', name: 'No Id', roleName: 'Admin', divisionId });
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe('Session lifecycle & revocation', () => {
     const setEnforceSingleSession = (value: 'true' | 'false') =>
       prisma.systemSetting.upsert({
