@@ -3,12 +3,17 @@ import app from '../index';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+
+// Reset tokens are stored hashed (SHA-256) — seed the hash, send the raw value.
+const hashResetToken = (token: string): string =>
+  crypto.createHash('sha256').update(token).digest('hex');
 
 describe('Authentication & Session Management Endpoints', () => {
   let divisionId: number;
@@ -71,10 +76,38 @@ describe('Authentication & Session Management Endpoints', () => {
       const user = await prisma.user.findUnique({ where: { email: 'forgot@sqd.com' } });
       expect(user?.resetPasswordToken).not.toBeNull();
       expect(user?.resetPasswordExpires).not.toBeNull();
+      // Token must be persisted as a SHA-256 hash (64 hex chars), never plaintext.
+      expect(user?.resetPasswordToken).toMatch(/^[a-f0-9]{64}$/);
     });
   });
 
   describe('Auth Edge Cases & Boundaries', () => {
+    // Protects against: user enumeration — unknown user and wrong password must
+    // be indistinguishable (same status + same generic message).
+    it('should return an identical generic 401 for unknown user and wrong password', async () => {
+      await prisma.user.create({
+        data: {
+          employeeId: 'TST-ENUM',
+          name: 'Enum User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const unknownRes = await request(app)
+        .post('/api/auth/login')
+        .send({ employeeId: 'NO-SUCH-USER', password: 'whatever' });
+      const wrongPassRes = await request(app)
+        .post('/api/auth/login')
+        .send({ employeeId: 'TST-ENUM', password: 'wrongpassword' });
+
+      expect(unknownRes.status).toBe(401);
+      expect(wrongPassRes.status).toBe(401);
+      expect(unknownRes.body.message).toBe(wrongPassRes.body.message);
+    });
+
     // Protects against: Using old or modified JWTs to bypass authentication
     it('should return 401 for tampered JWT', async () => {
       const res = await request(app)
@@ -145,7 +178,7 @@ describe('Authentication & Session Management Endpoints', () => {
           employeeId: 'TST-EXPIRED',
           name: 'Expired Token User',
           passwordHash: 'hash',
-          resetPasswordToken: 'expired-token-123',
+          resetPasswordToken: hashResetToken('expired-token-123'),
           resetPasswordExpires: pastDate,
           divisionId,
           roleId: adminRoleId
@@ -168,7 +201,7 @@ describe('Authentication & Session Management Endpoints', () => {
           employeeId: 'TST-REUSE',
           name: 'Reuse Token User',
           passwordHash: 'hash',
-          resetPasswordToken: 'valid-token-123',
+          resetPasswordToken: hashResetToken('valid-token-123'),
           resetPasswordExpires: futureDate,
           divisionId,
           roleId: adminRoleId

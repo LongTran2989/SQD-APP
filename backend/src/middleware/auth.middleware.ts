@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { JWT_SECRET } from '../config/env';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -34,9 +35,7 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
       return;
     }
 
-    const secret = (process.env.JWT_SECRET || 'fallback_secret') as string;
-    
-    jwt.verify(token, secret, async (err, decoded) => {
+    jwt.verify(token, JWT_SECRET, async (err, decoded) => {
       if (err) {
         res.status(401).json({ message: 'Unauthorized: Invalid token' });
         return;

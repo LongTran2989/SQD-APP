@@ -5,10 +5,22 @@ import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import crypto from 'crypto';
+import { JWT_SECRET } from '../config/env';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+
+// A constant, valid bcrypt hash used to perform a "dummy" comparison when a
+// login is attempted for an unknown user. This keeps the found / not-found code
+// paths roughly constant-time, defeating user enumeration via response timing.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('invalid-account-placeholder', 10);
+
+// Reset tokens are persisted only as a SHA-256 hash so a database leak does not
+// expose usable reset links. The raw token is sent to the user; we hash on the
+// way in (store) and again on the way back (verify). See CLAUDE_HANDOVER.md §11, Fix 5.
+const hashResetToken = (token: string): string =>
+  crypto.createHash('sha256').update(token).digest('hex');
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -25,6 +37,9 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     });
 
     if (!user) {
+      // Perform a dummy comparison so the unknown-user path costs roughly the
+      // same as the wrong-password path (prevents timing-based user enumeration).
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
       res.status(401).json({ message: 'Invalid credentials' });
       return;
     }
@@ -38,7 +53,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     const sessionId = crypto.randomUUID();
 
-    const updatedUser = await prisma.user.update({
+    await prisma.user.update({
       where: { id: user.id },
       data: { activeSessionId: sessionId }
     });
@@ -51,7 +66,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       sessionId
     };
 
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', {
+    const token = jwt.sign(payload, JWT_SECRET, {
       expiresIn: '1d'
     });
 
@@ -154,7 +169,7 @@ export const updatePassword = async (req: Request, res: Response): Promise<void>
       sessionId
     };
 
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', {
+    const token = jwt.sign(payload, JWT_SECRET, {
       expiresIn: '1d'
     });
 
@@ -188,13 +203,15 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
     // Only act if the account exists and has an email address configured.
     // Intentionally no early return on missing user — prevents email enumeration.
     if (user && user.email) {
+      // The raw token goes to the user; only its hash is persisted so a DB leak
+      // does not expose usable reset links.
       const resetToken = crypto.randomBytes(32).toString('hex');
       const resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
 
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          resetPasswordToken: resetToken,
+          resetPasswordToken: hashResetToken(resetToken),
           resetPasswordExpires
         }
       });
@@ -226,7 +243,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
 
     const user = await prisma.user.findFirst({
       where: {
-        resetPasswordToken: token,
+        resetPasswordToken: hashResetToken(token),
         resetPasswordExpires: { gt: new Date() }, // Ensures token is not expired
         deletedAt: null
       }
