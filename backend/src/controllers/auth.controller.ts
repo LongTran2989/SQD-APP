@@ -97,6 +97,39 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = (req as any).user?.userId;
+
+    if (!userId) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
+    // Revoke the server-side session so the bearer token can no longer be used
+    // (single-session check will now fail). Without this, logout is client-only
+    // and a captured token stays valid until expiry.
+    await prisma.user.update({
+      where: { id: userId },
+      data: { activeSessionId: null }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actionType: 'LOGOUT',
+        entityType: 'User',
+        entityId: String(userId),
+        performedByUserId: userId
+      }
+    });
+
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password, name, roleName, divisionId } = req.body;
@@ -286,7 +319,10 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
         passwordHash,
         forcePasswordChange: false,
         resetPasswordToken: null,
-        resetPasswordExpires: null
+        resetPasswordExpires: null,
+        // Evict any live session so a reset (e.g. after a compromise) actually
+        // kicks out an attacker holding a still-valid token.
+        activeSessionId: null
       }
     });
 

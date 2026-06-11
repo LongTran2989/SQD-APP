@@ -9,6 +9,11 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
+// The only route a forced-password-change user may reach (relative to the
+// /api/auth router mount). Kept as a named constant rather than a bare string
+// compare scattered in the gate.
+const UPDATE_PASSWORD_PATH = '/update-password';
+
 export interface AuthPayload {
   userId: number;
   role: string;
@@ -41,15 +46,14 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
         return;
       }
       const authPayload = decoded as AuthPayload;
-      
+
       // Enforce password change policy
-      if (authPayload.forcePasswordChange && req.path !== '/update-password') {
+      if (authPayload.forcePasswordChange && req.path !== UPDATE_PASSWORD_PATH) {
         res.status(403).json({ message: 'Forbidden: Password change required' });
         return;
       }
-      
+
       try {
-        // Enforce Single Session Policy
         const enforceSetting = await prisma.systemSetting.findUnique({
           where: { key: 'ENFORCE_SINGLE_SESSION' }
         });
@@ -57,17 +61,29 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
         // Default to ON if setting is missing or true
         const isEnforced = !enforceSetting || enforceSetting.value === 'true';
 
-        if (isEnforced) {
-          const user = await prisma.user.findUnique({
-            where: { id: authPayload.userId, deletedAt: null },
-            select: { activeSessionId: true }
-          });
+        // Always revalidate the account against the DB — independent of the
+        // single-session toggle — so a soft-deleted / disabled user cannot keep
+        // riding a still-valid token, and so authorization claims are never
+        // trusted from a (up-to-1-day-stale) token. Single-session comparison
+        // stays behind the toggle so test JWTs without a session still work.
+        const user = await prisma.user.findUnique({
+          where: { id: authPayload.userId, deletedAt: null },
+          select: { activeSessionId: true, divisionId: true, role: { select: { name: true } } }
+        });
 
-          if (!user || user.activeSessionId !== authPayload.sessionId) {
-            res.status(401).json({ message: 'Session expired. You logged in from another location.' });
-            return;
-          }
+        if (!user) {
+          res.status(401).json({ message: 'Unauthorized: account is no longer active' });
+          return;
         }
+
+        if (isEnforced && user.activeSessionId !== authPayload.sessionId) {
+          res.status(401).json({ message: 'Session expired. You logged in from another location.' });
+          return;
+        }
+
+        // DB is the source of truth for authorization claims (role/division).
+        authPayload.role = user.role.name;
+        authPayload.divisionId = user.divisionId;
       } catch (dbErr) {
         console.error('Session validation error:', dbErr);
         res.status(500).json({ message: 'Internal server error during session validation' });

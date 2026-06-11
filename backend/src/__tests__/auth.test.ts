@@ -261,4 +261,110 @@ describe('Authentication & Session Management Endpoints', () => {
       expect(res2.body.message).toMatch(/invalid/i);
     });
   });
+
+  describe('Session lifecycle & revocation', () => {
+    const setEnforceSingleSession = (value: 'true' | 'false') =>
+      prisma.systemSetting.upsert({
+        where: { key: 'ENFORCE_SINGLE_SESSION' },
+        update: { value },
+        create: { key: 'ENFORCE_SINGLE_SESSION', value }
+      });
+
+    // Protects against: a logged-out (or captured) token staying valid because
+    // logout was only client-side. Logout must clear activeSessionId server-side.
+    it('should revoke the server-side session on logout when single-session is enforced', async () => {
+      await setEnforceSingleSession('true');
+      try {
+        await prisma.user.create({
+          data: {
+            employeeId: 'TST-LOGOUT',
+            name: 'Logout User',
+            passwordHash: await bcrypt.hash('password123', 10),
+            forcePasswordChange: false,
+            divisionId,
+            roleId: adminRoleId
+          }
+        });
+
+        const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-LOGOUT', password: 'password123' });
+        expect(loginRes.status).toBe(200);
+        const token = loginRes.body.token;
+
+        // Token is valid → logout succeeds.
+        const first = await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
+        expect(first.status).toBe(200);
+
+        // activeSessionId is cleared in the DB.
+        const user = await prisma.user.findUnique({ where: { employeeId: 'TST-LOGOUT' } });
+        expect(user?.activeSessionId).toBeNull();
+
+        // The same token is now rejected (session revoked).
+        const second = await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
+        expect(second.status).toBe(401);
+      } finally {
+        await setEnforceSingleSession('false');
+      }
+    });
+
+    // Protects against: a soft-deleted / disabled user riding a still-valid token
+    // when single-session enforcement is OFF (the revocation must not depend on
+    // the toggle).
+    it('should reject a soft-deleted user\'s token even when single-session is off', async () => {
+      // Global setup leaves the toggle at 'false'; assert that explicitly here.
+      await setEnforceSingleSession('false');
+
+      const user = await prisma.user.create({
+        data: {
+          employeeId: 'TST-SOFTDEL',
+          name: 'Soft Deleted User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-SOFTDEL', password: 'password123' });
+      expect(loginRes.status).toBe(200);
+      const token = loginRes.body.token;
+
+      // Valid session works with the toggle off.
+      const before = await request(app).get('/api/templates').set('Authorization', `Bearer ${token}`);
+      expect(before.status).not.toBe(401);
+
+      // Soft-delete the account.
+      await prisma.user.update({ where: { id: user.id }, data: { deletedAt: new Date() } });
+
+      // The token is now rejected despite enforcement being off.
+      const after = await request(app).get('/api/templates').set('Authorization', `Bearer ${token}`);
+      expect(after.status).toBe(401);
+    });
+
+    // Protects against: a password reset failing to evict a live (possibly
+    // attacker-held) session.
+    it('should clear the active session on password reset', async () => {
+      await prisma.user.create({
+        data: {
+          employeeId: 'TST-RESETSESS',
+          name: 'Reset Session User',
+          email: 'resetsess@sqd.com',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          activeSessionId: 'live-session-uuid',
+          resetPasswordToken: hashResetToken('reset-token-xyz'),
+          resetPasswordExpires: new Date(Date.now() + 3600000),
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .send({ token: 'reset-token-xyz', newPassword: 'freshpassword789' });
+      expect(res.status).toBe(200);
+
+      const user = await prisma.user.findUnique({ where: { employeeId: 'TST-RESETSESS' } });
+      expect(user?.activeSessionId).toBeNull();
+    });
+  });
 });
