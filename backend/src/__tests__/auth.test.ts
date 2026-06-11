@@ -160,13 +160,52 @@ describe('Authentication & Session Management Endpoints', () => {
       const res = await request(app)
         .post('/api/auth/update-password')
         .set('Authorization', `Bearer ${token}`)
-        .send({ newPassword: 'newpassword456' });
-      
+        .send({ oldPassword: 'password123', newPassword: 'newpassword456' });
+
       expect(res.status).toBe(200);
 
       // Verify flag is cleared
       const updatedUser = await prisma.user.findUnique({ where: { employeeId: 'TST-FORCE2' } });
       expect(updatedUser?.forcePasswordChange).toBe(false);
+    });
+
+    // Protects against: account takeover via a borrowed/stolen session changing
+    // the password without knowing the current one.
+    it('should reject update-password with a wrong current password (403)', async () => {
+      await prisma.user.create({
+        data: {
+          employeeId: 'TST-OLDPW',
+          name: 'Old Password User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-OLDPW', password: 'password123' });
+      const token = loginRes.body.token;
+
+      // Wrong current password → 403
+      const wrongRes = await request(app)
+        .post('/api/auth/update-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ oldPassword: 'not-the-password', newPassword: 'brandnewpass789' });
+      expect(wrongRes.status).toBe(403);
+
+      // Missing current password → 400
+      const missingRes = await request(app)
+        .post('/api/auth/update-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ newPassword: 'brandnewpass789' });
+      expect(missingRes.status).toBe(400);
+
+      // Correct current password → 200
+      const okRes = await request(app)
+        .post('/api/auth/update-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ oldPassword: 'password123', newPassword: 'brandnewpass789' });
+      expect(okRes.status).toBe(200);
     });
 
     // Protects against: Infinite validity of reset tokens

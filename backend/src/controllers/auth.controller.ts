@@ -139,11 +139,35 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
 export const updatePassword = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { newPassword } = req.body;
+    const { oldPassword, newPassword } = req.body;
     const userId = (req as any).user?.userId;
 
     if (!newPassword || !userId) {
       res.status(400).json({ message: 'New password is required' });
+      return;
+    }
+
+    if (!oldPassword) {
+      res.status(400).json({ message: 'Current password is required' });
+      return;
+    }
+
+    // Verify the current password before allowing a change. This applies even
+    // to the forced-first-login flow: the user typed the temporary password at
+    // login, so proving possession of it (not merely holding a token) is
+    // required. Prevents account takeover from a borrowed/stolen session.
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId, deletedAt: null }
+    });
+
+    if (!existingUser) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    const isValidCurrentPassword = await bcrypt.compare(oldPassword, existingUser.passwordHash);
+    if (!isValidCurrentPassword) {
+      res.status(403).json({ message: 'Current password is incorrect' });
       return;
     }
 
