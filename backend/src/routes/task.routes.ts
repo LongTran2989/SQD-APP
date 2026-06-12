@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateJWT } from '../middleware/auth.middleware';
-import { authorizeRoles } from '../middleware/rbac.middleware';
+import { requirePrivilege } from '../middleware/rbac.middleware';
 import {
   getTasks,
   getMyTasks,
@@ -44,7 +44,7 @@ router.get('/:id', getTaskById);
 router.post('/', createTask);
 router.post('/quick', createQuickTask);
 router.patch('/:id/wp', updateTaskWp);
-router.patch('/:id/reopen', authorizeRoles('Admin', 'Director'), reopenTask);
+router.patch('/:id/reopen', requirePrivilege('task:reopen'), reopenTask);
 
 // ─── Assignment ─────────────────────────────────────────────────────
 router.put('/:id/assign', assignTask);

@@ -21,6 +21,7 @@ import bcrypt from 'bcrypt';
 import { readFileSync } from 'fs';
 import path from 'path';
 import 'dotenv/config';
+import { seedPrivileges } from '../src/seeds/seed-privileges';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -39,6 +40,10 @@ async function main() {
   ]);
   const roleMap = Object.fromEntries(roles.map(r => [r.name, r.id]));
   console.log(`✅ Roles seeded (${roles.length})`);
+
+  // ── PRIVILEGES (Phase 7) ─────────────────────────────────────────────────────
+  const privilegeCount = await seedPrivileges(prisma);
+  console.log(`✅ Privilege configs seeded (${privilegeCount})`);
 
   // ── DEPARTMENTS ────────────────────────────────────────────────────────────
   const departmentNames = [

@@ -23,6 +23,27 @@ export interface AuthResponse {
   user: User;
 }
 
+// ─── Privilege Management (Phase 7) ───────────────────────────────────────────
+
+export interface PrivilegeCatalogItem {
+  key: string;
+  group: string;
+  label: string;
+}
+
+// Effective permission map for a single role (key → granted).
+export type PrivilegeMap = Record<string, boolean>;
+
+export interface RolePrivileges {
+  roleName: string;
+  permissions: PrivilegeMap;
+}
+
+export interface PrivilegeMatrix {
+  catalog: PrivilegeCatalogItem[];
+  roles: RolePrivileges[];
+}
+
 // ── Task status — exactly the 10 DB statuses (isOverdue is a separate boolean)
 export type TaskStatus =
   | 'Unassigned'

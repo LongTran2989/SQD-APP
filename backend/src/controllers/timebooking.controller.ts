@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createFeedPost } from '../services/feedService';
+import { hasPrivilege } from '../utils/privilegeAccess';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -194,11 +195,10 @@ export const updateTimeBooking = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // Assignee, Admin, or Director may update
+    // Assignee (relationship) or a privileged override role may update
     const canEdit =
       task.assignedToUserId === userId ||
-      role === 'Admin' ||
-      role === 'Director';
+      hasPrivilege(req.user!, 'timebooking:override');
     if (!canEdit) {
       res.status(403).json({ message: 'Only the task assignee, an Admin, or a Director can update a time booking.' });
       return;

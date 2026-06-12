@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
-import { assertManagerDivisionScope, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
+import { assertManagerDivisionScope, isFindingReviewer } from '../utils/findingAccess';
 import { LINK_TYPES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -57,7 +57,7 @@ export const createFindingLink = async (req: Request, res: Response): Promise<vo
     const { userId, role } = req.user!;
     const { relatedFindingId, linkType, note } = req.body;
 
-    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+    if (!isFindingReviewer(req.user!)) {
       res.status(403).json({ message: 'Only a Manager or Director can link findings' });
       return;
     }
@@ -126,7 +126,7 @@ export const deleteFindingLink = async (req: Request, res: Response): Promise<vo
     const linkId = parseInt(req.params.linkId as string, 10);
     const { userId, role } = req.user!;
 
-    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+    if (!isFindingReviewer(req.user!)) {
       res.status(403).json({ message: 'Only a Manager or Director can remove a finding link' });
       return;
     }

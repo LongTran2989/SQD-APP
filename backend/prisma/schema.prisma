@@ -43,9 +43,10 @@ model Division {
 // -----------------------------------------------------------------------
 
 model Role {
-  id    Int    @id @default(autoincrement())
-  name  String @unique // e.g. Director, Manager, Group Leader, Staff
-  users User[]
+  id              Int              @id @default(autoincrement())
+  name            String           @unique // e.g. Director, Manager, Group Leader, Staff
+  users           User[]
+  privilegeConfig PrivilegeConfig? // Phase 7 — DB-driven role permission map
 }
 
 model User {
@@ -751,6 +752,7 @@ model TimeEntry {
 model PrivilegeConfig {
   id          Int      @id @default(autoincrement())
   roleId      Int      @unique
+  role        Role     @relation(fields: [roleId], references: [id])
   permissions Json // Granular permissions map
   updatedAt   DateTime @updatedAt
 }
