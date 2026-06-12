@@ -227,7 +227,7 @@ async function main() {
         name:                u.name,
         ...(u.phone !== undefined && { phone: u.phone }),
         passwordHash:        hashCache[u.password]!,
-        forcePasswordChange: false,
+        forcePasswordChange: true,
         divisionId:          divMap[u.division]!,
         roleId:              roleMap[u.role]!,
       },

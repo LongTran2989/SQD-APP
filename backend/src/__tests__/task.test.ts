@@ -325,7 +325,9 @@ describe('Task Backend (Phase 5.2)', () => {
         .send({ templateId: publishedTemplateId, targetDivisionId: divisionId });
 
       expect(res.status).toBe(201);
-      expect(JSON.stringify(res.body.schemaSnapshot)).toBe(JSON.stringify(template!.formSchema));
+      // createTaskService injects a fieldId UUID into each field; strip it before comparing
+      const snapshotStripped = res.body.schemaSnapshot.map(({ fieldId: _id, ...rest }: any) => rest);
+      expect(JSON.stringify(snapshotStripped)).toBe(JSON.stringify(template!.formSchema));
     });
 
     it('T10: estimatedHours inherited from Template when not overridden', async () => {

@@ -77,19 +77,19 @@ describe('Escalation core (Phase 3)', () => {
     staffToken = jwt.sign({ userId: staff.id, role: 'Staff', divisionId: divAId }, secret);
 
     const template = await prisma.template.create({
-      data: { templateId: 'ESC-001', title: 'Esc Template', status: 'Published', formSchema: { fields: [] }, divisionId: divAId, ownerId: director.id },
+      data: { templateId: 'ESC-001', title: 'Esc Template', status: 'Published', formSchema: [], divisionId: divAId, ownerId: director.id },
     });
     templateAId = template.id;
 
     // Finding-eligible template (allowsFindings) for the RAISE_FINDING action.
     const findingTemplate = await prisma.template.create({
-      data: { templateId: 'ESC-002', title: 'Esc Finding Template', status: 'Published', formSchema: { fields: [] }, divisionId: divAId, ownerId: director.id, allowsFindings: true },
+      data: { templateId: 'ESC-002', title: 'Esc Finding Template', status: 'Published', formSchema: [], divisionId: divAId, ownerId: director.id, allowsFindings: true },
     });
     findingTemplateId = findingTemplate.id;
 
     // Template that explicitly disallows findings (allowsFindings defaults to true).
     const noFindingTemplate = await prisma.template.create({
-      data: { templateId: 'ESC-003', title: 'Esc No-Finding Template', status: 'Published', formSchema: { fields: [] }, divisionId: divAId, ownerId: director.id, allowsFindings: false },
+      data: { templateId: 'ESC-003', title: 'Esc No-Finding Template', status: 'Published', formSchema: [], divisionId: divAId, ownerId: director.id, allowsFindings: false },
     });
 
     const wpA = await prisma.workPackage.create({
