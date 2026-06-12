@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-10 (rev 9). Supersedes all previous versions.*
+*Last updated: 2026-06-12 (rev 10). Supersedes all previous versions.*
 
 ---
 
@@ -17,6 +17,16 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 ## 2. CURRENT IMPLEMENTATION STATUS
 
 ### Completed
+- **Auth Security Hardening** (✅ **COMPLETE**, 2026-06 — branch `claude/amazing-ritchie-soasus`, NOT yet merged to `main`)
+  > **6 phases, all independently green. 370 backend tests (367 passing + 3 pre-existing unrelated failures). Frontend `tsc`/`next build` clean. No schema change.**
+  - Implements all of **§11** (Fixes 1/3/4/5; Fix 2 already done) plus session-lifecycle and transport hardening. See §11 for the per-fix detail and §12 for the deployment requirements introduced.
+  - **Phase 1** — `config/env.ts` (JWT secret required, no fallback); constant-time login (dummy bcrypt on unknown-user path); reset tokens stored/compared as SHA-256.
+  - **Phase 2** — `updatePassword` requires + verifies `oldPassword` (403/400); eliminated the `temp-auth-token` ghost in the store (later removed entirely in Phase 6).
+  - **Phase 3** — `POST /api/auth/logout` clears `activeSessionId` (+ `LOGOUT` AuditLog); `resetPassword` clears the session; middleware always revalidates the account (`deletedAt`) and sources `role`/`divisionId` from the DB regardless of `ENFORCE_SINGLE_SESSION`.
+  - **Phase 4** — `express-rate-limit` on `/login`, `/forgot-password`, `/reset-password` (test-safe skip).
+  - **Phase 5** — `register` persists a unique `employeeId` so a created user can log in.
+  - **Phase 6** — JWT delivered as an httpOnly `SameSite=Strict` cookie (header still accepted for API/tests); CORS locked to `FRONTEND_ORIGIN` with credentials; token no longer in JS-readable storage. Added `cookie-parser`.
+  - **Also fixed** (unblocks the production frontend build): the two pre-existing `ReviewPanel.tsx` / `RichTextEditor.tsx` (Tiptap v3 `setContent`) type errors.
 - **Phase 1 & 2** — Backend foundation, PostgreSQL schema, JWT auth, bcrypt, RBAC middleware
 - **Phase 3** — Next.js app shell, sidebar (role-aware), header, auth UI (`/login`, `/update-password`, `/forgot-password`)
 - **Phase 4.1** — App shell, professional light theme (Tailwind 4, slate-50 / blue-600)
@@ -248,6 +258,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
 ### Test Suite
+- **370 backend tests on branch `claude/amazing-ritchie-soasus` (Auth Security Hardening, 2026-06): 367 passing + 3 pre-existing unrelated failures** (`seed-verification` login `202` vs `200`; `task` T09 `schemaSnapshot` `fieldId`; `escalation` CREATE_TASK — all predate this branch, none in the auth flow). +18 new auth/session/rate-limit tests. **Frontend `tsc --noEmit` and `next build` are now fully clean (exit 0)** — the two long-standing `ReviewPanel.tsx`/`RichTextEditor.tsx` type errors were fixed (Next 16 build type-checks strictly). No schema change.
 - **360 backend tests on branch `claude/relaxed-lamport-vf1sim` (Task/Template/WP Workflow Overhaul, 2026-06-10): 359 passing + 1 pre-existing unrelated failure** (`seed-verification` login `202` vs `200` — seed `forcePasswordChange: false` from commit `369d12c`, predates this branch). Frontend: `tsc --noEmit` clean on all changed files (two pre-existing errors in `ReviewPanel.tsx`/`RichTextEditor.tsx` untouched); lint at baseline (no new errors introduced).
 - **322 integration tests passing** on branch `claude/compassionate-gauss-335xa3` (Finding Response Actions, 2026-06-09). **262** on `claude/eloquent-feynman-G4thG` (Feed & Escalation full history page, 2026-06-05). **260** on `claude/sqd-feed-escalation-plan-4dYZa` (Phases 1–5). `main` is at **211** (Feed Phases 1–2). Pre-feed baseline was **187** (Phase 6, 2026-06-01). Frontend lint at baseline **70 errors / 23 warnings (zero new)**; `tsc --noEmit` clean (except legacy `clean.ts`); `next build` exit 0.
 - Run via `npm run test` inside `/backend`
@@ -1220,41 +1231,47 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 
 ---
 
-## 11. DEFERRED SECURITY FIXES — Authentication (Approved Plan, Not Yet Implemented)
+## 11. AUTHENTICATION SECURITY FIXES — IMPLEMENTED
 
-Audited on **2026-05-29**. These are known vulnerabilities to be fixed before any production deployment.
+Audited on **2026-05-29**; the deferred fixes below — plus a broader session/
+transport hardening — were **implemented 2026-06** on branch
+`claude/amazing-ritchie-soasus` (6 phases, all backend tests green). See
+**Section 12** for the deployment requirements this introduced.
 
-### Fix 1 — `updatePassword` requires current password (CRITICAL)
+### Fix 1 — `updatePassword` requires current password (CRITICAL) — ✅ DONE
 **File:** `backend/src/controllers/auth.controller.ts`
-**Problem:** `PUT /api/auth/update-password` does NOT verify the user's current password before setting a new one. Any valid session token can silently change the password.
-**Fix:** Require `oldPassword` in request body. Call `bcrypt.compare(oldPassword, user.passwordHash)` — reject with `403` if it fails.
+**Problem:** `POST /api/auth/update-password` did NOT verify the user's current password before setting a new one. Any valid session token could silently change the password.
+**Fix:** Requires `oldPassword`; `bcrypt.compare(oldPassword, user.passwordHash)` → `403` on mismatch / `400` if missing. Applied in all cases, including the forced-first-login flow. **Status:** Completed (Phase 2).
 
-### Fix 2 — User enumeration via `forgotPassword` (RESOLVED 2026-05-30)
+### Fix 2 — User enumeration via `forgotPassword` (RESOLVED 2026-05-30) — ✅ DONE
 **File:** `backend/src/controllers/auth.controller.ts`
-**Problem:** `/forgot-password` returns `404` when the email is not found, allowing an attacker to enumerate valid user emails.
-**Fix:** Always return `200 OK` with a generic message (`"If an account exists, a reset link has been generated."`) regardless of whether the email exists.
-**Status:** Completed during Phase 5.5 prerequisite audit fixes.
+**Problem:** `/forgot-password` returned `404` when the email was not found, allowing enumeration.
+**Fix:** Always returns `200 OK` with a generic message. **Status:** Completed during Phase 5.5 prerequisite audit fixes. (Login also made constant-time via a dummy `bcrypt.compare` on the unknown-user path — Phase 1.)
 
-### Fix 3 — No rate limiting on `/login` and `/forgot-password` (MODERATE)
-**File:** Add `backend/src/middleware/rateLimit.middleware.ts` + update `backend/src/routes/auth.routes.ts`
+### Fix 3 — No rate limiting on `/login` and `/forgot-password` (MODERATE) — ✅ DONE
+**Files:** `backend/src/middleware/rateLimit.middleware.ts` + `backend/src/routes/auth.routes.ts`
 **Problem:** No brute-force protection on login or password-reset endpoints.
-**Fix:** Install `express-rate-limit`. Apply a limiter (e.g., max 5 requests / 15 min per IP) to `/login` and `/forgot-password`.
+**Fix:** Added `express-rate-limit`; `createAuthRateLimiter` (5 req / 15 min per IP, independent buckets) applied to `/login`, `/forgot-password`, and `/reset-password`. Skipped under `NODE_ENV=test` and via `DISABLE_RATE_LIMIT`. **Status:** Completed (Phase 4).
 
-### Fix 4 — JWT secret fallback to `'fallback_secret'` (MODERATE)
-**Files:** `auth.controller.ts`, `auth.middleware.ts`
-**Problem:** Both files use `process.env.JWT_SECRET || 'fallback_secret'`. A misconfigured production environment would silently use a well-known weak secret, allowing token forgery.
-**Fix:** Remove the fallback. Throw an explicit startup error if `JWT_SECRET` is undefined.
+### Fix 4 — JWT secret fallback to `'fallback_secret'` (MODERATE) — ✅ DONE
+**Files:** `backend/src/config/env.ts`, `auth.controller.ts`, `auth.middleware.ts`
+**Problem:** Both files used `process.env.JWT_SECRET || 'fallback_secret'`, risking token forgery in a misconfigured environment.
+**Fix:** Centralized in `config/env.ts`, which **throws at startup** if `JWT_SECRET` is unset (no fallback). **Status:** Completed (Phase 1).
 
-### Fix 5 — Reset token stored in plaintext (LOW)
+### Fix 5 — Reset token stored in plaintext (LOW) — ✅ DONE
 **File:** `backend/src/controllers/auth.controller.ts`
-**Problem:** The password reset token is stored as plaintext in the DB. If the DB is compromised, all active reset tokens are exposed.
-**Fix:** Hash the token via `crypto.createHash('sha256')` before storing. Hash the incoming token before comparing during reset.
+**Problem:** The reset token was stored plaintext; a DB leak exposed usable links.
+**Fix:** Stored and compared as `crypto.createHash('sha256')` hashes; the raw token is only emailed. **Status:** Completed (Phase 1).
 
-### Impact on Test Suite
-- `auth.test.ts` will need to be updated to cover:
-  - The `oldPassword` requirement in `updatePassword`
-  - The `200` (not `404`) response from `forgotPassword`
-  - Rate-limiting behaviour (or mock the limiter in tests)
+### Additional hardening (beyond the original 5) — ✅ DONE
+- **Server-side session revocation (Phase 3):** new `POST /api/auth/logout` clears `activeSessionId` (+ `LOGOUT` AuditLog); `resetPassword` also clears `activeSessionId` to evict live sessions. Logout was previously client-only.
+- **Revocation decoupled from the single-session toggle (Phase 3):** `auth.middleware` now always revalidates the account (`deletedAt: null`) and sources `role`/`divisionId` from the DB on every request, regardless of `ENFORCE_SINGLE_SESSION`; only the `activeSessionId` comparison stays behind the toggle. Soft-deleted users can no longer ride a valid token.
+- **JWT moved to an httpOnly cookie (Phase 6):** delivered as `httpOnly`, `SameSite=Strict`, `Secure`-in-prod cookie (set on login/update-password, cleared on logout); middleware accepts cookie OR `Authorization` header (header still works for API/tests). Token is no longer in JS-readable storage (XSS cannot exfiltrate it). CORS locked to `FRONTEND_ORIGIN` with `credentials:true`. The frontend `sessionStorage` temp-auth-token (an account-takeover vector on shared devices) was eliminated.
+- **`register` fixed (Phase 5):** now persists a unique `employeeId` (login identifier) so a created user can actually sign in; email optional.
+
+### Impact on Test Suite — applied
+- `auth.test.ts` covers: `oldPassword` 403/400/200, no-enumeration parity, reset-token hashing, logout revocation, soft-deleted-token rejection with the toggle off, reset clears session, cookie-based auth, and register→login. New `rateLimit.test.ts` covers the limiter. No schema change was required (all columns already existed).
+
 
 ---
 
