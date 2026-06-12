@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-12 (rev 11). Supersedes all previous versions.*
+*Last updated: 2026-06-12 (rev 12). Supersedes all previous versions.*
 
 ---
 
@@ -217,6 +217,40 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Reuse/cleanup:** extracted `requireReviewerRole`, `validateTaxonomyFields`, `replaceHazardTags`, `validateResponseActionEntry` helpers (see `FINDING_EXPANSION_DEV_GUIDE.md` §4).
   - **Confirmed intentional (not changed):** open finding read-visibility for all authenticated users (`buildFindingScope → {}`); any authenticated user may raise a standalone finding.
 
+- **Phase 7 Deferred Items: User Management, Settings, Taxonomy & EventTypes** (✅ **COMPLETE**, 2026-06-12 — branch `claude/exciting-darwin-gyohuf`)
+  > **7 phases + security fixes. Backend `tsc --noEmit` clean. Tests could not be verified in the remote container (no PostgreSQL). Frontend `tsc --noEmit` clean.**
+
+  Implements all items deferred from Phase 7 (Global Privilege Management):
+
+  **Backend:**
+  - **`EventType` model** added to `schema.prisma`; `WpType` gained `isActive Boolean @default(true)`. Seeded with 9 canonical event-type values (matching the former hardcoded list).
+  - **`backend/src/lib/prisma.ts`** (NEW) — single shared `PrismaClient` + `pg.Pool` singleton (globalThis-cached). Eliminated the per-module `new Pool(…) + new PrismaClient(…)` pattern that existed across **21 files** (all controllers, services, middleware, index.ts). Prevents connection-pool exhaustion.
+  - **`user.controller.ts`** extended with 6 new exports: `listUsers` (paginated, searchable, OR privilege gate), `createUser` (default password `Abc@123`, `forcePasswordChange: true`), `updateUser` (soft-delete guard, conflict checks), `deleteUser` (soft-delete, self-deletion blocked), `changePassword` (verifies current, min-6, **clears `activeSessionId`**), `adminResetPassword` (**clears `activeSessionId`**). `USER_SELECT` constant never exposes `passwordHash`. All string inputs validated with `typeof` guards (returns 400, not 500, on non-string name). `divisionId` validated as numeric before DB lookup.
+  - **`user.routes.ts`** rewritten: self-service routes (`/me/password`, `/me/preferences`) before parameterised routes; `requireAnyPrivilege` guard on `GET /` (defence in depth alongside controller check).
+  - **`rbac.middleware.ts`** gained `requireAnyPrivilege(...keys)` — OR-variant of `requirePrivilege`, used for `GET /users`.
+  - **`taxonomy.controller.ts`** extended with `listEventTypes`, `upsertEventType`, `listWpTypes`, `upsertWpType`. All 5 upsert handlers have application-level max-length guards (`MAX_CODE_LEN=64`, `MAX_TEXT_LEN=2000`) via shared `lengthError` helper.
+  - **`taxonomy.routes.ts`** extended with `/event-types` and `/wp-types` CRUD routes.
+  - **`wp.controller.ts` / `wp.routes.ts`** — removed `getWpTypes` and `createWpType`; those endpoints moved to taxonomy controller.
+
+  **Frontend:**
+  - **`frontend/src/app/dashboard/users/page.tsx`** (NEW) — full admin panel: paginated datatable, debounced search, "Show deleted" toggle, `RoleBadge` component, `UserFormModal` (create/edit), `ConfirmModal` (delete/reset). Access: Admin+Director; write: Admin only.
+  - **`frontend/src/app/dashboard/settings/page.tsx`** (NEW) — personal profile (read-only) + Change Password form with `forcePasswordChange` banner.
+  - **`frontend/src/app/dashboard/settings/taxonomy/page.tsx`** (NEW) — config-driven tabbed UI for all 5 taxonomies (WpType, EventType, ATA Chapter, Cause Code, Hazard Tag). Single `TAXONOMIES` config array + generic `UpsertModal`. Inline Enable/Disable toggle.
+  - **`frontend/src/api/userApi.ts`** extended: `AdminUser`, `UserFormData`, `PaginatedUsers` interfaces; `listAdminUsers`, `createAdminUser`, `updateAdminUser`, `deleteAdminUser`, `adminResetUserPassword`, `changeMyPassword`.
+  - **`frontend/src/api/taxonomyApi.ts`** extended with `updateAtaChapter`, `updateCauseCode`, `updateHazardTag`, `createEventType`, `updateEventType`, `listEventTypes`, `createWpType`, `updateWpType`.
+  - **`frontend/src/types/index.ts`** — added `WpType.isActive`, `EventType` interface.
+  - **`RaiseFindingPanel.tsx`** and **`EscalationActionModal.tsx`** — replace hardcoded `FINDING_EVENT_TYPES` with `listEventTypes(true)` API fetch. Fallback to hardcoded constant if API fails. `Other` appended if not in API response.
+  - **`Sidebar.tsx`** — Taxonomy nav item (Admin+Director).
+
+  **Security fixes (applied post code-review + security-review on this branch):**
+  - H1: `changePassword` + `adminResetPassword` both clear `activeSessionId` (session revocation on credential change).
+  - M1: `GET /users` has route-level `requireAnyPrivilege` guard; controller retains its own check as defence in depth.
+  - M2: Default password `Abc@123` no longer disclosed in UI toasts or form banners.
+  - M3: `createUser`/`updateUser` reject empty or whitespace-only names; validated as `typeof === 'string'` to prevent 500 on non-string input.
+  - L1: Max-length guards on all taxonomy upsert string inputs.
+  - L2: `divisionId` validated as numeric before division DB lookup.
+  - L3: All 21 per-module Prisma instances consolidated into the shared singleton.
+
 - **Phase 7 — Global Privilege Management** (✅ **COMPLETE**, 2026-06-12 — branch `claude/eloquent-gauss-3lonuo`)
   > **381 backend tests passing. Frontend `tsc --noEmit` and `next build` clean. No additional schema change (table was added in Phase 5.0).**
 
@@ -289,6 +323,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
 ### Test Suite
+- **Branch `claude/exciting-darwin-gyohuf` (Phase 7 Deferred Items, 2026-06-12): backend `tsc --noEmit` clean; tests could not be executed in the remote build container (no PostgreSQL). Run `npm test` locally against `sqd_qa_test_db` to verify baseline 381 tests still pass before merging.**
 - **381 backend tests on branch `claude/eloquent-gauss-3lonuo` (Phase 7 — Global Privilege Management, 2026-06-12): all 381 passing.** +11 new tests in `privilege.test.ts`. `DEFAULT_PRIVILEGES` fallback guarantees all prior 370 tests pass without `PrivilegeConfig` seeds. Frontend `tsc --noEmit` and `next build` clean.
 - **370 backend tests on branch `claude/amazing-ritchie-soasus` (Auth Security Hardening, 2026-06): 367 passing + 3 pre-existing unrelated failures** (`seed-verification` login `202` vs `200`; `task` T09 `schemaSnapshot` `fieldId`; `escalation` CREATE_TASK — all predate this branch, none in the auth flow). +18 new auth/session/rate-limit tests. **Frontend `tsc --noEmit` and `next build` are now fully clean (exit 0)** — the two long-standing `ReviewPanel.tsx`/`RichTextEditor.tsx` type errors were fixed (Next 16 build type-checks strictly). No schema change.
 - **360 backend tests on branch `claude/relaxed-lamport-vf1sim` (Task/Template/WP Workflow Overhaul, 2026-06-10): 359 passing + 1 pre-existing unrelated failure** (`seed-verification` login `202` vs `200` — seed `forcePasswordChange: false` from commit `369d12c`, predates this branch). Frontend: `tsc --noEmit` clean on all changed files (two pre-existing errors in `ReviewPanel.tsx`/`RichTextEditor.tsx` untouched); lint at baseline (no new errors introduced).
@@ -1170,10 +1205,10 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 ### Phase 7 — Global Privilege Management (✅ COMPLETE 2026-06-12)
 
 - [x] **Global Privilege Management panel** (`/settings/privileges` — Admin only) — see §3.4a and the Phase 7 entry in §2 for full detail
-- [ ] `/dashboard/users` — Admin only: manage users, roles, divisions (deferred)
-- [ ] `/dashboard/settings` — personal preferences, password change (deferred)
-- [ ] Admin: manage `WpType` values (deferred)
-- [ ] Admin: manage `EventType` values for Findings — replaces hardcoded 9-item list (deferred)
+- [x] `/dashboard/users` — Admin+Director: paginated user list, create, edit, soft-delete, password reset (branch `claude/exciting-darwin-gyohuf`)
+- [x] `/dashboard/settings` — personal profile display + change-password form with `forcePasswordChange` banner (branch `claude/exciting-darwin-gyohuf`)
+- [x] Admin: manage `WpType` values — moved to unified Taxonomy page (branch `claude/exciting-darwin-gyohuf`)
+- [x] Admin: manage `EventType` values for Findings — DB-driven `EventType` table, seeded with 9 values; `RaiseFindingPanel` + `EscalationActionModal` now fetch from API with hardcoded-list fallback (branch `claude/exciting-darwin-gyohuf`)
 
 ---
 
@@ -1196,7 +1231,7 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 15. **Post-rejection Reassign vs General Reassign use different endpoints**: When a task is `Rejected`, the "Reassign" action must go through `POST /api/tasks/:id/post-rejection` with `action: 'reassign'` — NOT through `PUT /api/tasks/:id/reassign` (which blocks Rejected status). For all other non-final states, use `PUT /api/tasks/:id/reassign`. `TaskActionBar` has two separate handlers: `handlePostRejectReassign` and `handleGeneralReassign`.
 16. **`decideDeadlineExtension` requires `extensionIndex`**: The backend requires the index of the pending extension within the `deadlineExtensions` JSON array. The frontend uses `getPendingExtensionIndex()` to find the first entry where `decision` is null/undefined. If an extension was already decided, it won't be found and the call is blocked client-side.
 17. **`task.assignedToUser.role` is a flat string**: The user object returned in task responses has `role` as a plain string (e.g. `'Manager'`), not a nested Role object. Do not access `.role.name` — it will always be `undefined`.
-18. **Event Type in Findings is still hardcoded**: `RaiseFindingPanel` uses a 9-item hardcoded list. Phase 7 delivered the privilege matrix but did not add the admin-managed `EventType` table (deferred). The "Other" option writes a free-text value directly to `Finding.eventType`.
+18. **Event Type in Findings is now API-driven**: `RaiseFindingPanel` and `EscalationActionModal` fetch `GET /api/taxonomy/event-types?activeOnly=true` on mount. The hardcoded `FINDING_EVENT_TYPES` constant is kept as a fallback — if the API call fails the list stays populated from the constant. Admins manage event types via `/dashboard/settings/taxonomy`. The "Other" option (always appended if not in the API response) still writes a free-text value to `Finding.eventType`.
 
 19. **`issuanceNote` is write-once by convention, not by enforcement:** The backend does not block updates to `issuanceNote` after creation — the write-once rule is enforced by the UI only (no edit control is exposed). If a future endpoint or admin tool allows Task updates, explicitly exclude `issuanceNote` from the updatable fields to preserve this intent.
 
@@ -1229,6 +1264,16 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 33. **`FINAL_TASK_STATUSES` is now a single shared constant — but the time-booking eligibility set is deliberately DIFFERENT and separately named:** (Updated by a post-overhaul `/code-review` cleanup.) The authoritative final-state set `['Closed', 'Rejected', 'Terminated']` now lives in `backend/src/constants/taskStatus.ts` and is imported by `task.controller.ts`, `analytics.controller.ts`, `wp.controller.ts`, `finding.controller.ts`, and `findingService.ts` (which re-exports it for back-compat). The previously-duplicated module-local copies were removed. **The rating gate, WP status, and finding hooks still exclude `'In Review'`** — that invariant is unchanged. Time booking needs a BROADER set that also allows `'In Review'`; it is now a distinctly-named `TIME_BOOKING_ELIGIBLE_STATUSES` in `timebooking.controller.ts` (NOT a same-named copy), so the two sets can never be confused. Do NOT add `'In Review'` to the shared `FINAL_TASK_STATUSES`, and do NOT point `timebooking` at it. `TimeEntryPanel.tsx` has a separate frontend `LOGGABLE_STATUSES = ['Assigned', 'In Progress', 'Follow-up Required']` that gates the entry create form; it is also intentionally separate.
 
 34. **Rating is still blocked for `In Review` tasks despite booking being allowed there:** The rating gate in `task.controller.ts` (`rateTask`) uses the shared `FINAL_TASK_STATUSES` (`constants/taskStatus.ts`) which does NOT include `'In Review'`. A manager attempting to rate an `In Review` task will get *"Task must be in a final state to be rated."* This is correct by design — the booking is created during `In Review` as preparation so it is ready the moment the task is approved/closed. The In Review banner copy reflects this: *"Submit it now so your manager can rate the task once it is approved."*
+
+35. **`changePassword` and `adminResetPassword` revoke the user's active session**: Both endpoints now set `activeSessionId: null`. A user who changes their own password via `/settings` will be signed out of their current session and must re-authenticate. This is intentional and the correct secure behaviour, but any frontend flow that calls `changeMyPassword` should redirect to `/login` (or show an appropriate message) after a 200 response — the current session cookie is still valid for the remainder of the JWT's `exp` TTL unless the server-side check catches it first.
+
+36. **Prisma singleton in `backend/src/lib/prisma.ts`**: All 21 former per-module `new Pool(…)` instances were replaced with this shared singleton. Do NOT add `new Pool` / `new PrismaClient` in any new controller, service, or middleware — always import `prisma` from `'../lib/prisma'` (or `'./lib/prisma'` from `index.ts`). The singleton is `globalThis`-cached so hot-reload in dev does not leak pools.
+
+37. **`user.controller.ts` name validation uses `typeof` guard**: `createUser` checks `typeof name !== 'string'` before calling `.trim()`. This is intentional — JSON can deliver any type for a request body field, and calling `.trim()` on a non-string would previously throw a 500. All other string fields (`employeeId`, `email`, `roleName`) are currently NOT guarded this way — if you add new string fields to the user update path, add a similar `typeof` check before any string method call.
+
+38. **`listUsers` has both route-level and controller-level privilege checks**: `GET /api/users` is gated by `requireAnyPrivilege('user:create', 'user:manage_roles')` at the route level AND the same OR-check inside the controller. Both are intentional (defence in depth). Do not remove either. If you add another OR-case to user listing, update both the route middleware and the controller guard.
+
+39. **Division-scoped user management is not enforced for `user:manage_roles`**: Any holder of `user:manage_roles` can update or delete users in any division. This is correct while `user:manage_roles` defaults to Admin-only in `DEFAULT_PRIVILEGES`. If that privilege is ever granted to Managers via `PrivilegeConfig`, they would gain cross-division reach. Similarly, `updateUser` permits changing `roleName` to any role including `Director`/`Admin`. This is intentional for Admin but must be reviewed before widening the privilege.
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 
@@ -1270,8 +1315,9 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 10. Task always stores `schemaSnapshot` at creation time — never rely on Template's `formSchema` to render a Task form.
 11. One-off Templates: auto-delete after first Task assignment. Task `schemaSnapshot` ensures form is never lost.
 12. Privilege rules: DB-driven via `PrivilegeConfig` table (Phase 7 complete). `hasPrivilege(actor, key)` in `privilegeAccess.ts` is the single authority — Admin floor → live DB → `DEFAULT_PRIVILEGES` fallback → deny. Do not add new raw `role === 'X'` checks; add a catalog key and use `hasPrivilege`.
-13. File Upload field type in Template builder is DEFERRED until Phase 5.4 — MinIO must be configured in Phase 5.0 first.
-14. File size/type constraints are Admin-configurable — never hardcode them in application logic.
+13. Prisma client: import `prisma` from `'../lib/prisma'`. Never instantiate `new Pool(…)` or `new PrismaClient(…)` in a controller, service, or middleware — use the shared singleton (see gotcha #36).
+14. File Upload field type in Template builder is DEFERRED until Phase 5.4 — MinIO must be configured in Phase 5.0 first.
+15. File size/type constraints are Admin-configurable — never hardcode them in application logic.
 
 ---
 

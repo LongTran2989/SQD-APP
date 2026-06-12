@@ -83,7 +83,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
   try {
     const { employeeId, name, email, phone, roleName, divisionId } = req.body;
 
-    if (!name || !name.trim() || !roleName || !divisionId) {
+    if (typeof name !== 'string' || !name.trim() || !roleName || !divisionId) {
       res.status(400).json({ message: 'name, roleName, and divisionId are required' });
       return;
     }
@@ -166,8 +166,8 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
     const updateData: Record<string, unknown> = {};
 
     if (name !== undefined) {
-      if (!name.trim()) {
-        res.status(400).json({ message: 'name cannot be empty' });
+      if (typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ message: 'name must be a non-empty string' });
         return;
       }
       updateData.name = name.trim();
