@@ -191,6 +191,14 @@ export interface WpType {
   id: number;
   code: string;
   description: string | null;
+  isActive?: boolean;
+}
+
+export interface EventType {
+  id: number;
+  code: string;
+  description: string | null;
+  isActive: boolean;
 }
 
 // Enriched WP returned by GET /api/work-packages (list)
