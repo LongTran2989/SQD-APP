@@ -118,7 +118,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
               <button
                 type="button"
                 onClick={() => {
-                  setCorrectSeverity(finding.severity);
+                  setCorrectSeverity(finding.severity ?? '');
                   setShowCorrectModal(true);
                 }}
                 className="text-xs text-blue-600 hover:text-blue-700 font-semibold transition-colors"

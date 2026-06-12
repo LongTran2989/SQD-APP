@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import { ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export default function UpdatePasswordPage() {
+  const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -14,16 +15,18 @@ export default function UpdatePasswordPage() {
   const router = useRouter();
   const login = useAuthStore((state) => state.login);
 
-  useEffect(() => {
-    const tempToken = sessionStorage.getItem('temp-auth-token');
-    if (!tempToken) {
-      router.push('/login');
-    }
-  }, [router]);
+  // No client-side guard token: the forced-change session lives in the httpOnly
+  // cookie. If the cookie is missing/invalid, the update-password request below
+  // returns 401 and the response interceptor redirects to /login.
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!oldPassword) {
+      setError('Please enter your current password.');
+      return;
+    }
 
     if (newPassword !== confirmPassword) {
       setError('Passwords do not match.');
@@ -37,20 +40,14 @@ export default function UpdatePasswordPage() {
 
     setLoading(true);
     try {
-      const tempToken = sessionStorage.getItem('temp-auth-token');
-      
-      const response = await apiClient.post('/auth/update-password', 
-        { newPassword },
-        { headers: { Authorization: `Bearer ${tempToken}` } }
-      );
-      
-      const { token, user } = response.data;
-      
-      // Clean up temp token
-      sessionStorage.removeItem('temp-auth-token');
-      
-      // Log the user in officially
-      login(user, token);
+      // Auth is carried by the httpOnly cookie (withCredentials); the backend
+      // refreshes the cookie with the new session on success.
+      const response = await apiClient.post('/auth/update-password', { oldPassword, newPassword });
+
+      const { user } = response.data;
+
+      // Log the user in officially.
+      login(user);
       router.push('/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.message || 'An error occurred updating your password.');
@@ -78,6 +75,18 @@ export default function UpdatePasswordPage() {
         )}
 
         <form onSubmit={handleUpdate} className="space-y-5">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Current Password</label>
+            <input
+              type="password"
+              required
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              placeholder="••••••••"
+              value={oldPassword}
+              onChange={(e) => setOldPassword(e.target.value)}
+            />
+          </div>
+
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">New Password</label>
             <input

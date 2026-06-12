@@ -8,28 +8,10 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Auth rides an httpOnly cookie set by the backend; send it on every request.
+  // The token is never read by JS, so an XSS cannot exfiltrate it.
+  withCredentials: true,
 });
-
-apiClient.interceptors.request.use(
-  (config) => {
-    // In browser context, get token from sessionStorage
-    if (typeof window !== 'undefined') {
-      const authStorage = sessionStorage.getItem('auth-storage');
-      if (authStorage) {
-        try {
-          const { state } = JSON.parse(authStorage);
-          if (state.token) {
-            config.headers.Authorization = `Bearer ${state.token}`;
-          }
-        } catch (e) {
-          console.error('Failed to parse auth storage token', e);
-        }
-      }
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
 
 apiClient.interceptors.response.use(
   (response) => response,

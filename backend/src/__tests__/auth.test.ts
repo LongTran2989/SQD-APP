@@ -3,12 +3,17 @@ import app from '../index';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+
+// Reset tokens are stored hashed (SHA-256) — seed the hash, send the raw value.
+const hashResetToken = (token: string): string =>
+  crypto.createHash('sha256').update(token).digest('hex');
 
 describe('Authentication & Session Management Endpoints', () => {
   let divisionId: number;
@@ -71,10 +76,38 @@ describe('Authentication & Session Management Endpoints', () => {
       const user = await prisma.user.findUnique({ where: { email: 'forgot@sqd.com' } });
       expect(user?.resetPasswordToken).not.toBeNull();
       expect(user?.resetPasswordExpires).not.toBeNull();
+      // Token must be persisted as a SHA-256 hash (64 hex chars), never plaintext.
+      expect(user?.resetPasswordToken).toMatch(/^[a-f0-9]{64}$/);
     });
   });
 
   describe('Auth Edge Cases & Boundaries', () => {
+    // Protects against: user enumeration — unknown user and wrong password must
+    // be indistinguishable (same status + same generic message).
+    it('should return an identical generic 401 for unknown user and wrong password', async () => {
+      await prisma.user.create({
+        data: {
+          employeeId: 'TST-ENUM',
+          name: 'Enum User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const unknownRes = await request(app)
+        .post('/api/auth/login')
+        .send({ employeeId: 'NO-SUCH-USER', password: 'whatever' });
+      const wrongPassRes = await request(app)
+        .post('/api/auth/login')
+        .send({ employeeId: 'TST-ENUM', password: 'wrongpassword' });
+
+      expect(unknownRes.status).toBe(401);
+      expect(wrongPassRes.status).toBe(401);
+      expect(unknownRes.body.message).toBe(wrongPassRes.body.message);
+    });
+
     // Protects against: Using old or modified JWTs to bypass authentication
     it('should return 401 for tampered JWT', async () => {
       const res = await request(app)
@@ -127,13 +160,52 @@ describe('Authentication & Session Management Endpoints', () => {
       const res = await request(app)
         .post('/api/auth/update-password')
         .set('Authorization', `Bearer ${token}`)
-        .send({ newPassword: 'newpassword456' });
-      
+        .send({ oldPassword: 'password123', newPassword: 'newpassword456' });
+
       expect(res.status).toBe(200);
 
       // Verify flag is cleared
       const updatedUser = await prisma.user.findUnique({ where: { employeeId: 'TST-FORCE2' } });
       expect(updatedUser?.forcePasswordChange).toBe(false);
+    });
+
+    // Protects against: account takeover via a borrowed/stolen session changing
+    // the password without knowing the current one.
+    it('should reject update-password with a wrong current password (403)', async () => {
+      await prisma.user.create({
+        data: {
+          employeeId: 'TST-OLDPW',
+          name: 'Old Password User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-OLDPW', password: 'password123' });
+      const token = loginRes.body.token;
+
+      // Wrong current password → 403
+      const wrongRes = await request(app)
+        .post('/api/auth/update-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ oldPassword: 'not-the-password', newPassword: 'brandnewpass789' });
+      expect(wrongRes.status).toBe(403);
+
+      // Missing current password → 400
+      const missingRes = await request(app)
+        .post('/api/auth/update-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ newPassword: 'brandnewpass789' });
+      expect(missingRes.status).toBe(400);
+
+      // Correct current password → 200
+      const okRes = await request(app)
+        .post('/api/auth/update-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ oldPassword: 'password123', newPassword: 'brandnewpass789' });
+      expect(okRes.status).toBe(200);
     });
 
     // Protects against: Infinite validity of reset tokens
@@ -145,7 +217,7 @@ describe('Authentication & Session Management Endpoints', () => {
           employeeId: 'TST-EXPIRED',
           name: 'Expired Token User',
           passwordHash: 'hash',
-          resetPasswordToken: 'expired-token-123',
+          resetPasswordToken: hashResetToken('expired-token-123'),
           resetPasswordExpires: pastDate,
           divisionId,
           roleId: adminRoleId
@@ -168,7 +240,7 @@ describe('Authentication & Session Management Endpoints', () => {
           employeeId: 'TST-REUSE',
           name: 'Reuse Token User',
           passwordHash: 'hash',
-          resetPasswordToken: 'valid-token-123',
+          resetPasswordToken: hashResetToken('valid-token-123'),
           resetPasswordExpires: futureDate,
           divisionId,
           roleId: adminRoleId
@@ -187,6 +259,199 @@ describe('Authentication & Session Management Endpoints', () => {
         .send({ token: 'valid-token-123', newPassword: 'evennewerpassword' });
       expect(res2.status).toBe(400);
       expect(res2.body.message).toMatch(/invalid/i);
+    });
+  });
+
+  describe('Registration', () => {
+    // Protects against: registering a user without an employeeId, who could then
+    // never log in (login authenticates by employeeId).
+    it('should register a user with an employeeId who can then log in (forced change)', async () => {
+      const admin = await prisma.user.create({
+        data: {
+          employeeId: 'TST-ADMIN',
+          name: 'Reg Admin',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+      const adminToken = jwt.sign({ userId: admin.id, role: 'Admin', divisionId }, process.env.JWT_SECRET as string);
+
+      const regRes = await request(app)
+        .post('/api/auth/register')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ employeeId: 'TST-NEWBIE', password: 'temppass123', name: 'New Bie', roleName: 'Admin', divisionId });
+      expect(regRes.status).toBe(201);
+
+      // The new user is forced to change the temporary password on first login (202).
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-NEWBIE', password: 'temppass123' });
+      expect(loginRes.status).toBe(202);
+      expect(loginRes.body.requirePasswordChange).toBe(true);
+    });
+
+    it('should reject registration without an employeeId', async () => {
+      const admin = await prisma.user.create({
+        data: {
+          employeeId: 'TST-ADMIN2',
+          name: 'Reg Admin 2',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+      const adminToken = jwt.sign({ userId: admin.id, role: 'Admin', divisionId }, process.env.JWT_SECRET as string);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ password: 'temppass123', name: 'No Id', roleName: 'Admin', divisionId });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('Cookie-based auth', () => {
+    // The JWT is delivered as an httpOnly cookie and accepted on subsequent
+    // requests without an Authorization header.
+    it('sets an httpOnly auth cookie on login and accepts it for authenticated requests', async () => {
+      await prisma.user.create({
+        data: {
+          employeeId: 'TST-COOKIE',
+          name: 'Cookie User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-COOKIE', password: 'password123' });
+      expect(loginRes.status).toBe(200);
+
+      const setCookie = loginRes.headers['set-cookie'];
+      expect(setCookie).toBeDefined();
+      const cookieHeaders = Array.isArray(setCookie) ? setCookie : [setCookie as unknown as string];
+      const tokenCookie = cookieHeaders.find((c) => c.startsWith('token='));
+      expect(tokenCookie).toBeDefined();
+      expect(tokenCookie!.toLowerCase()).toContain('httponly');
+
+      // The cookie alone (no Authorization header) authenticates a request.
+      const cookieValue = tokenCookie!.split(';')[0];
+      const res = await request(app).get('/api/templates').set('Cookie', cookieValue);
+      expect(res.status).not.toBe(401);
+
+      // Logout clears the cookie.
+      const logoutRes = await request(app).post('/api/auth/logout').set('Cookie', cookieValue);
+      expect(logoutRes.status).toBe(200);
+      const clearCookie = logoutRes.headers['set-cookie'];
+      expect(clearCookie).toBeDefined();
+    });
+  });
+
+  describe('Session lifecycle & revocation', () => {
+    const setEnforceSingleSession = (value: 'true' | 'false') =>
+      prisma.systemSetting.upsert({
+        where: { key: 'ENFORCE_SINGLE_SESSION' },
+        update: { value },
+        create: { key: 'ENFORCE_SINGLE_SESSION', value }
+      });
+
+    // Protects against: a logged-out (or captured) token staying valid because
+    // logout was only client-side. Logout must clear activeSessionId server-side.
+    it('should revoke the server-side session on logout when single-session is enforced', async () => {
+      await setEnforceSingleSession('true');
+      try {
+        await prisma.user.create({
+          data: {
+            employeeId: 'TST-LOGOUT',
+            name: 'Logout User',
+            passwordHash: await bcrypt.hash('password123', 10),
+            forcePasswordChange: false,
+            divisionId,
+            roleId: adminRoleId
+          }
+        });
+
+        const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-LOGOUT', password: 'password123' });
+        expect(loginRes.status).toBe(200);
+        const token = loginRes.body.token;
+
+        // Token is valid → logout succeeds.
+        const first = await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
+        expect(first.status).toBe(200);
+
+        // activeSessionId is cleared in the DB.
+        const user = await prisma.user.findUnique({ where: { employeeId: 'TST-LOGOUT' } });
+        expect(user?.activeSessionId).toBeNull();
+
+        // The same token is now rejected (session revoked).
+        const second = await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
+        expect(second.status).toBe(401);
+      } finally {
+        await setEnforceSingleSession('false');
+      }
+    });
+
+    // Protects against: a soft-deleted / disabled user riding a still-valid token
+    // when single-session enforcement is OFF (the revocation must not depend on
+    // the toggle).
+    it('should reject a soft-deleted user\'s token even when single-session is off', async () => {
+      // Global setup leaves the toggle at 'false'; assert that explicitly here.
+      await setEnforceSingleSession('false');
+
+      const user = await prisma.user.create({
+        data: {
+          employeeId: 'TST-SOFTDEL',
+          name: 'Soft Deleted User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-SOFTDEL', password: 'password123' });
+      expect(loginRes.status).toBe(200);
+      const token = loginRes.body.token;
+
+      // Valid session works with the toggle off.
+      const before = await request(app).get('/api/templates').set('Authorization', `Bearer ${token}`);
+      expect(before.status).not.toBe(401);
+
+      // Soft-delete the account.
+      await prisma.user.update({ where: { id: user.id }, data: { deletedAt: new Date() } });
+
+      // The token is now rejected despite enforcement being off.
+      const after = await request(app).get('/api/templates').set('Authorization', `Bearer ${token}`);
+      expect(after.status).toBe(401);
+    });
+
+    // Protects against: a password reset failing to evict a live (possibly
+    // attacker-held) session.
+    it('should clear the active session on password reset', async () => {
+      await prisma.user.create({
+        data: {
+          employeeId: 'TST-RESETSESS',
+          name: 'Reset Session User',
+          email: 'resetsess@sqd.com',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          activeSessionId: 'live-session-uuid',
+          resetPasswordToken: hashResetToken('reset-token-xyz'),
+          resetPasswordExpires: new Date(Date.now() + 3600000),
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .send({ token: 'reset-token-xyz', newPassword: 'freshpassword789' });
+      expect(res.status).toBe(200);
+
+      const user = await prisma.user.findUnique({ where: { employeeId: 'TST-RESETSESS' } });
+      expect(user?.activeSessionId).toBeNull();
     });
   });
 });

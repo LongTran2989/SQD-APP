@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../store/authStore';
 import { LogOut, Bell, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { apiClient } from '../../api/client';
 import { getPendingEscalations, ESCALATIONS_CHANGED_EVENT } from '../../api/escalationApi';
 import { ESCALATION_ACTION_ROLES } from '../../constants/escalationRoles';
 
@@ -42,7 +43,14 @@ export default function Header() {
     };
   }, [user]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Revoke the session server-side first (best-effort — a failed call must
+    // never trap the user in the app), then clear local state and redirect.
+    try {
+      await apiClient.post('/auth/logout');
+    } catch {
+      // ignore — proceed to clear local state regardless
+    }
     logout();
     router.push('/login');
   };

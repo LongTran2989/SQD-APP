@@ -51,7 +51,7 @@ export default function RichTextEditor({ value, onChange, disabled = false }: Ri
     // Keep content in sync when value prop changes externally (e.g. initial load)
     onCreate: ({ editor }) => {
       if (value && editor.isEmpty) {
-        editor.commands.setContent(value, false);
+        editor.commands.setContent(value, { emitUpdate: false });
       }
     },
   });
