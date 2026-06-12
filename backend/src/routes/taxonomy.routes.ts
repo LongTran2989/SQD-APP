@@ -7,6 +7,10 @@ import {
   upsertCauseCode,
   listHazardTags,
   upsertHazardTag,
+  listEventTypes,
+  upsertEventType,
+  listWpTypes,
+  upsertWpType,
 } from '../controllers/taxonomy.controller';
 
 const router = Router();
@@ -26,5 +30,15 @@ router.put('/cause-codes/:id', upsertCauseCode);
 router.get('/hazard-tags', listHazardTags);
 router.post('/hazard-tags', upsertHazardTag);
 router.put('/hazard-tags/:id', upsertHazardTag);
+
+// ─── Event types ─────────────────────────────────────────────────────
+router.get('/event-types', listEventTypes);
+router.post('/event-types', upsertEventType);
+router.put('/event-types/:id', upsertEventType);
+
+// ─── WP types ────────────────────────────────────────────────────────
+router.get('/wp-types', listWpTypes);
+router.post('/wp-types', upsertWpType);
+router.put('/wp-types/:id', upsertWpType);
 
 export default router;
