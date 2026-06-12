@@ -273,19 +273,6 @@ async function main() {
     console.warn('⚠️  Director VAE00071 not found — skipped Generic Ad-Hoc template seed');
   }
 
-  // ── WORK PACKAGE TYPES ────────────────────────────────────────────────────────
-  const wpTypes = [
-    { code: 'CHECK', description: 'Daily aircraft check' },
-    { code: 'AUDIT', description: 'Internal audit' },
-    { code: 'SURVEILLANCE', description: 'Surveillance inspection' },
-  ];
-  await Promise.all(
-    wpTypes.map(t =>
-      prisma.wpType.upsert({ where: { code: t.code }, update: { description: t.description }, create: t })
-    )
-  );
-  console.log(`✅ Work package types seeded (${wpTypes.length})`);
-
   // ── FINDINGS TAXONOMY: EVENT TYPES ─────────────────────────────────────────
   // Finding event-type vocabulary. Admins can add more via /api/taxonomy.
   const eventTypes = [
