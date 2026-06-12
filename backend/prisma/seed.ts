@@ -273,6 +273,39 @@ async function main() {
     console.warn('⚠️  Director VAE00071 not found — skipped Generic Ad-Hoc template seed');
   }
 
+  // ── WORK PACKAGE TYPES ────────────────────────────────────────────────────────
+  const wpTypes = [
+    { code: 'CHECK', description: 'Daily aircraft check' },
+    { code: 'AUDIT', description: 'Internal audit' },
+    { code: 'SURVEILLANCE', description: 'Surveillance inspection' },
+  ];
+  await Promise.all(
+    wpTypes.map(t =>
+      prisma.wpType.upsert({ where: { code: t.code }, update: { description: t.description }, create: t })
+    )
+  );
+  console.log(`✅ Work package types seeded (${wpTypes.length})`);
+
+  // ── FINDINGS TAXONOMY: EVENT TYPES ─────────────────────────────────────────
+  // Finding event-type vocabulary. Admins can add more via /api/taxonomy.
+  const eventTypes = [
+    { code: 'Procedural Breach', description: 'Non-compliance with procedure' },
+    { code: 'Equipment Fault', description: 'Equipment malfunction or defect' },
+    { code: 'Documentation Error', description: 'Error in documentation or records' },
+    { code: 'Maintenance Error', description: 'Maintenance execution error' },
+    { code: 'Safety Observation', description: 'Observation related to safety' },
+    { code: 'Regulatory Non-compliance', description: 'Non-compliance with regulations' },
+    { code: 'Training Gap', description: 'Training or knowledge deficiency' },
+    { code: 'Communication Failure', description: 'Communication or coordination failure' },
+    { code: 'Other', description: 'Other / free-text entry' },
+  ];
+  await Promise.all(
+    eventTypes.map(t =>
+      prisma.eventType.upsert({ where: { code: t.code }, update: { description: t.description }, create: t })
+    )
+  );
+  console.log(`✅ Event types seeded (${eventTypes.length})`);
+
   // ── FINDINGS TAXONOMY: ATA CHAPTERS ────────────────────────────────────────
   // ATA 100 chapter reference (common subset; admin-extendable via /api/taxonomy).
   const ataChapters = [
