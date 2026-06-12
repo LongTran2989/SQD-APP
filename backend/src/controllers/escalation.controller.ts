@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createFeedPost, FeedScope } from '../services/feedService';
+import { hasPrivilege } from '../utils/privilegeAccess';
 import {
   SCOPE_LEVEL,
   isEscalationTargetScope,
@@ -173,7 +174,7 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
     const statusFilter = typeof req.query.status === 'string' ? req.query.status : undefined;
 
     const isDirectorOrAdmin = role === 'Director' || role === 'Admin';
-    if (!isDirectorOrAdmin && role !== 'Manager') {
+    if (!hasPrivilege(req.user!, 'escalation:review')) {
       res.json([]);
       return;
     }
@@ -210,7 +211,7 @@ export const getEscalations = async (req: Request, res: Response): Promise<void>
         let flagDiv: number | null = null;
         if (f.targetScope === 'DIVISION') flagDiv = card?.scopeId ?? null;
         else if (f.targetScope === 'WP') flagDiv = card ? wpDiv.get(card.scopeId as number) ?? null : null;
-        return canActionFlag({ role, divisionId }, { targetScope: f.targetScope, divisionId: flagDiv });
+        return canActionFlag({ role, divisionId, permissions: req.user!.permissions }, { targetScope: f.targetScope, divisionId: flagDiv });
       });
     }
 
@@ -310,7 +311,7 @@ export const actionEscalation = async (req: Request, res: Response): Promise<voi
 
     // RBAC — shared predicate (one source of truth with getEscalations).
     const flagDiv = await resolveFlagDivision(prisma, flag);
-    if (!canActionFlag({ role, divisionId }, { targetScope: flag.targetScope, divisionId: flagDiv })) {
+    if (!canActionFlag({ role, divisionId, permissions: req.user!.permissions }, { targetScope: flag.targetScope, divisionId: flagDiv })) {
       res.status(403).json({ message: 'You do not have permission to action this escalation.' });
       return;
     }

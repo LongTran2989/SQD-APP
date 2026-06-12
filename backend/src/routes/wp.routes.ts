@@ -11,7 +11,7 @@ import {
   createWpType
 } from '../controllers/wp.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
-import { authorizeRoles } from '../middleware/rbac.middleware';
+import { requirePrivilege } from '../middleware/rbac.middleware';
 
 const router = Router();
 
@@ -20,14 +20,14 @@ router.use(authenticateJWT);
 
 // WpType CRUD — must be before /:id to avoid route conflict
 router.get('/types', getWpTypes);
-router.post('/types', authorizeRoles('Admin'), createWpType);
+router.post('/types', requirePrivilege('settings:wptype'), createWpType);
 
 // WP listing and detail
 router.get('/', getWorkPackages);
 router.get('/:id', getWorkPackageById);
 
 // WP creation — Manager, Director, Admin
-router.post('/', authorizeRoles('Admin', 'Director', 'Manager'), createWorkPackage);
+router.post('/', requirePrivilege('wp:create'), createWorkPackage);
 
 // WP update — authorization handled in controller (managers/creator/global edit all
 // fields; assigned users may edit only the timeframe).
@@ -37,7 +37,7 @@ router.put('/:id', updateWorkPackage);
 router.put('/:id/status', updateWorkPackageStatus);
 
 // WP assignment — Manager, Director, Admin (further checks in controller)
-router.post('/:id/assign', authorizeRoles('Admin', 'Director', 'Manager'), assignUserToWp);
-router.delete('/:id/assign/:userId', authorizeRoles('Admin', 'Director', 'Manager'), removeUserFromWp);
+router.post('/:id/assign', requirePrivilege('wp:assign'), assignUserToWp);
+router.delete('/:id/assign/:userId', requirePrivilege('wp:assign'), removeUserFromWp);
 
 export default router;

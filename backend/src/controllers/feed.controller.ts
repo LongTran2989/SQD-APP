@@ -114,7 +114,7 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
         target.scope === 'WP' ? (wp?.divisionId ?? null) :
         null;
       viewerCanAction = canActionFlag(
-        { role: req.user.role, divisionId: req.user.divisionId },
+        { role: req.user.role, divisionId: req.user.divisionId, permissions: req.user.permissions },
         { targetScope: target.scope, divisionId: feedDivisionId }
       );
     }

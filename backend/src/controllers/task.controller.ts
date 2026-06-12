@@ -6,17 +6,13 @@ import { checkAndTriggerPendingVerification } from '../services/findingService';
 import { createFeedPost } from '../services/feedService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-// Roles that can CREATE tasks (configurable in Phase 7 via PrivilegeConfig)
-const TASK_CREATOR_ROLES = ['Manager', 'Director', 'Admin'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,14 +108,15 @@ async function logAuditAndActivity(
  * Director by system role, they retain reviewer access via the role check below.
  */
 function isReviewer(
-  userId: number,
-  userRole: string,
-  userDivisionId: number,
+  user: { userId: number; role: string; divisionId: number; permissions?: Record<string, boolean> | null | undefined },
   task: { issuerId: number; targetDivisionId: number | null }
 ): boolean {
-  if (userId === task.issuerId) return true;
-  if (userRole === 'Director') return true;
-  if (userRole === 'Manager' && userDivisionId === task.targetDivisionId) return true;
+  // Relationship grant — the issuer always reviews their own task (stays hardcoded).
+  if (user.userId === task.issuerId) return true;
+  // Role dimension — privilege-driven (Phase 7). review_any spans all divisions;
+  // review_div is scoped to the actor's own division.
+  if (hasPrivilege(user, 'task:review_any')) return true;
+  if (hasPrivilege(user, 'task:review_div') && user.divisionId === task.targetDivisionId) return true;
   return false;
 }
 
@@ -426,15 +423,16 @@ export interface CreateTaskParams {
  */
 export async function createTaskService(
   client: PrismaLike,
-  actor: { userId: number; role: string; divisionId: number },
+  actor: { userId: number; role: string; divisionId: number; permissions?: Record<string, boolean> | null | undefined },
   params: CreateTaskParams
 ) {
   const { userId, role, divisionId } = actor;
   const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote, title } = params;
 
-  // RBAC: Manager, Director, Admin can create tasks.
-  // Regular users assigned to a WP can create tasks inside that WP for their own division.
-  let isAllowed = TASK_CREATOR_ROLES.includes(role);
+  // RBAC: privilege-driven create (Phase 7).
+  // Regular users assigned to a WP can create tasks inside that WP for their own
+  // division — relationship bypass, preserved as-is.
+  let isAllowed = hasPrivilege(actor, 'task:create');
   if (!isAllowed && wpId) {
     const wpAssignment = await client.workPackageAssignment.findFirst({ where: { wpId, userId } });
     if (wpAssignment && targetDivisionId === divisionId) {
@@ -476,7 +474,8 @@ export async function createTaskService(
       select: { id: true, divisionId: true }
     });
     if (!assignee) throw new HttpError(404, 'Assignee user not found');
-    // Director can assign anyone; Manager can only assign users in same division
+    // Division-scope comparison stays hardcoded (Phase 7 separation of concerns):
+    // Director/Admin assign anyone; Manager is locked to their own division.
     if (role === 'Manager' && assignee.divisionId !== divisionId) {
       throw new HttpError(403, 'Managers can only assign tasks to users in their own division');
     }
@@ -567,7 +566,7 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
     const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote } = req.body;
 
     const task = await prisma.$transaction((tx) =>
-      createTaskService(tx, { userId, role, divisionId }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
+      createTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
     );
 
     res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
@@ -586,7 +585,7 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
 export const updateTaskWp = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id as string, 10);
-    const { userId, role } = req.user!;
+    const { userId } = req.user!;
     const { wpId } = req.body as { wpId: number | null };
 
     const task = await prisma.task.findUnique({ where: { id, deletedAt: null } });
@@ -595,8 +594,8 @@ export const updateTaskWp = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    // Only the issuer or an elevated role may re-link a task.
-    if (task.issuerId !== userId && !TASK_CREATOR_ROLES.includes(role)) {
+    // Only the issuer (relationship) or a privileged role may re-link a task.
+    if (task.issuerId !== userId && !hasPrivilege(req.user!, 'task:relink_any')) {
       res.status(403).json({ message: 'Insufficient permissions to change the work package of this task' });
       return;
     }
@@ -671,7 +670,7 @@ export const createQuickTask = async (req: Request, res: Response): Promise<void
     }
 
     const task = await prisma.$transaction((tx) =>
-      createTaskService(tx, { userId, role, divisionId }, {
+      createTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, {
         templateId: template.id,
         targetDivisionId: targetDivisionId ?? divisionId, // default to the creator's division
         assignedToUserId: assignedToUserId ?? null,
@@ -760,7 +759,7 @@ export const reopenTask = async (req: Request, res: Response): Promise<void> => 
 export const assignTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id as string);
-    const { userId, role, divisionId } = req.user!;
+    const { userId, divisionId } = req.user!;
     const { assignedToUserId } = req.body;
 
     if (!assignedToUserId) {
@@ -782,9 +781,10 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // RBAC: Director can assign anyone; Manager can assign same-division users;
-    // Regular user assigned to a WP can assign tasks linked to that WP in the same division.
-    let isAllowed = ['Director', 'Admin', 'Manager'].includes(role);
+    // RBAC (Phase 7): assign_any (cross-division) or assign_div (own division)
+    // grants base assignment; a user assigned to the task's WP keeps the
+    // relationship bypass.
+    let isAllowed = hasPrivilege(req.user!, 'task:assign_any') || hasPrivilege(req.user!, 'task:assign_div');
     if (!isAllowed && task.wpId) {
       const wpAssignment = await prisma.workPackageAssignment.findFirst({
         where: { wpId: task.wpId, userId }
@@ -809,8 +809,9 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // Division lock: non-Director/Admin can only assign to users in their own division
-    if (!['Director', 'Admin'].includes(role) && assignee.divisionId !== divisionId) {
+    // Division lock: without assign_any (cross-division reach), assignment is
+    // restricted to the actor's own division.
+    if (!hasPrivilege(req.user!, 'task:assign_any') && assignee.divisionId !== divisionId) {
       res.status(403).json({ message: 'You can only assign tasks to users in your own division' });
       return;
     }
@@ -1082,7 +1083,7 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    if (!isReviewer(userId, role, divisionId, task)) {
+    if (!isReviewer(req.user!, task)) {
       res.status(403).json({ message: 'You do not have reviewer rights on this task' });
       return;
     }
@@ -1178,7 +1179,7 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       return;
     }
 
-    if (!isReviewer(userId, role, divisionId, task)) {
+    if (!isReviewer(req.user!, task)) {
       res.status(403).json({ message: 'You do not have reviewer rights on this task' });
       return;
     }
@@ -1256,10 +1257,10 @@ export interface ReassignTaskParams {
  */
 export async function reassignTaskService(
   client: PrismaLike,
-  actor: { userId: number; role: string; divisionId: number },
+  actor: { userId: number; role: string; divisionId: number; permissions?: Record<string, boolean> | null | undefined },
   params: ReassignTaskParams
 ) {
-  const { userId, role, divisionId } = actor;
+  const { userId } = actor;
   const { taskId: id, newAssigneeId, reason } = params;
 
   if (!newAssigneeId) throw new HttpError(400, 'newAssigneeId is required');
@@ -1279,7 +1280,7 @@ export async function reassignTaskService(
     throw new HttpError(400, 'Cannot reassign an Inactive task. Reactivate it first.');
   }
 
-  if (!isReviewer(userId, role, divisionId, task)) {
+  if (!isReviewer(actor, task)) {
     throw new HttpError(403, 'You do not have permission to reassign this task');
   }
 
@@ -1322,7 +1323,7 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
     const { newAssigneeId, reason } = req.body;
 
     const updated = await prisma.$transaction((tx) =>
-      reassignTaskService(tx, { userId, role, divisionId }, { taskId: id, newAssigneeId, reason })
+      reassignTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, { taskId: id, newAssigneeId, reason })
     );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
@@ -1428,7 +1429,7 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
     }
 
     // Only Issuer or Admin can inactivate
-    if (task.issuerId !== userId && role !== 'Admin') {
+    if (task.issuerId !== userId && !hasPrivilege(req.user!, 'task:inactivate')) {
       res.status(403).json({ message: 'Only the task issuer or an Admin can inactivate a task' });
       return;
     }
@@ -1497,7 +1498,7 @@ export const reactivateTask = async (req: Request, res: Response): Promise<void>
     }
 
     // Only Issuer or Admin can reactivate
-    if (task.issuerId !== userId && role !== 'Admin') {
+    if (task.issuerId !== userId && !hasPrivilege(req.user!, 'task:inactivate')) {
       res.status(403).json({ message: 'Only the task issuer or an Admin can reactivate a task' });
       return;
     }
@@ -1559,7 +1560,7 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
     }
 
     // Reviewer rights required to set deadline (Issuer + Director + Manager same div)
-    if (!isReviewer(userId, role, divisionId, task)) {
+    if (!isReviewer(req.user!, task)) {
       res.status(403).json({ message: 'Insufficient permissions to set deadline on this task' });
       return;
     }
@@ -1698,7 +1699,7 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
     }
 
     // OQ-2: Reviewer = Issuer + Director + Managers of same Division
-    if (!isReviewer(userId, role, divisionId, task)) {
+    if (!isReviewer(req.user!, task)) {
       res.status(403).json({ message: 'You do not have permission to decide on deadline extensions' });
       return;
     }

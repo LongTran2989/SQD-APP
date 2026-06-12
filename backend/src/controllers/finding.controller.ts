@@ -4,7 +4,8 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity, evaluateCloseGate } from '../services/findingService';
 import { computeTrendForSignature } from '../services/trendService';
-import { buildFindingScope, assertManagerDivisionScope, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
+import { buildFindingScope, assertManagerDivisionScope, isFindingReviewer } from '../utils/findingAccess';
+import { hasPrivilege } from '../utils/privilegeAccess';
 import {
   RESPONSE_ACTION_TYPES, MULTI_DEPT_SINGLE_TASK_TYPES,
   DIRECTOR_APPROVAL_TYPES, FINDING_EXPANSION_ACTIONS
@@ -150,8 +151,12 @@ async function getUserName(userId: number): Promise<string> {
  * actor is not a Manager/Director; the caller should `return` immediately.
  * `action` is folded into the message so each endpoint keeps a specific error.
  */
-function requireReviewerRole(res: Response, role: string, action: string): boolean {
-  if (!FINDING_REVIEWER_ROLES.includes(role)) {
+function requireReviewerRole(
+  res: Response,
+  actor: { role: string; permissions?: Record<string, boolean> | null | undefined },
+  action: string
+): boolean {
+  if (!isFindingReviewer(actor)) {
     res.status(403).json({ message: `Only a Manager or Director can ${action}` });
     return false;
   }
@@ -529,7 +534,7 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
     const { userId, role } = req.user!;
     const { severity, dueDate, ataChapterId, hazardTagIds } = req.body;
 
-    if (!requireReviewerRole(res, role, 'review findings')) return;
+    if (!requireReviewerRole(res, req.user!, 'review findings')) return;
     if (!severity || !SEVERITIES.includes(severity)) {
       res.status(400).json({ message: `severity is required and must be one of: ${SEVERITIES.join(', ')}` });
       return;
@@ -634,7 +639,7 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
     const { userId, role, divisionId } = req.user!;
     const { tasks } = req.body;
 
-    if (!requireReviewerRole(res, role, 'generate follow-up tasks')) return;
+    if (!requireReviewerRole(res, req.user!, 'generate follow-up tasks')) return;
     if (!Array.isArray(tasks) || tasks.length === 0) {
       res.status(400).json({ message: 'tasks must be a non-empty array' });
       return;
@@ -905,7 +910,7 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
     const id = parseInt(req.params.id as string, 10);
     const { userId, role } = req.user!;
 
-    if (!requireReviewerRole(res, role, 'close findings')) return;
+    if (!requireReviewerRole(res, req.user!, 'close findings')) return;
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
@@ -967,7 +972,7 @@ export const advanceFinding = async (req: Request, res: Response): Promise<void>
     const id = parseInt(req.params.id as string, 10);
     const { userId, role } = req.user!;
 
-    if (!requireReviewerRole(res, role, 'manually advance findings')) return;
+    if (!requireReviewerRole(res, req.user!, 'manually advance findings')) return;
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
@@ -1025,7 +1030,7 @@ export const getStuckFindings = async (req: Request, res: Response): Promise<voi
   try {
     const { role } = req.user!;
 
-    if (role !== 'Admin' && role !== 'Director') {
+    if (!hasPrivilege(req.user!, 'finding:admin')) {
       res.status(403).json({ message: 'Only an Admin or Director can view stuck findings' });
       return;
     }
@@ -1064,7 +1069,7 @@ export const forcePendingVerification = async (req: Request, res: Response): Pro
     const id = parseInt(req.params.id as string, 10);
     const { userId, role } = req.user!;
 
-    if (role !== 'Admin' && role !== 'Director') {
+    if (!hasPrivilege(req.user!, 'finding:admin')) {
       res.status(403).json({ message: 'Only an Admin or Director can force-advance a finding' });
       return;
     }
@@ -1124,7 +1129,7 @@ export const updateSeverity = async (req: Request, res: Response): Promise<void>
     const { userId, role } = req.user!;
     const { severity, reason } = req.body;
 
-    if (!requireReviewerRole(res, role, 'update severity')) return;
+    if (!requireReviewerRole(res, req.user!, 'update severity')) return;
 
     // Director is global; Manager is division-scoped for classification changes.
     if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
@@ -1187,7 +1192,7 @@ export const dismissFinding = async (req: Request, res: Response): Promise<void>
     const { userId, role } = req.user!;
     const { reason } = req.body;
 
-    if (!requireReviewerRole(res, role, 'dismiss findings')) return;
+    if (!requireReviewerRole(res, req.user!, 'dismiss findings')) return;
 
     // Director is global; Manager is division-scoped for irreversible mutations.
     if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {
@@ -1244,7 +1249,7 @@ export const updateTaxonomy = async (req: Request, res: Response): Promise<void>
     const { userId, role } = req.user!;
     const { ataChapterId, hazardTagIds } = req.body;
 
-    if (!requireReviewerRole(res, role, 'update taxonomy')) return;
+    if (!requireReviewerRole(res, req.user!, 'update taxonomy')) return;
 
     // Director is global; Manager is division-scoped for classification changes.
     if (!(await assertManagerDivisionScope(prisma, req.user!, id))) {

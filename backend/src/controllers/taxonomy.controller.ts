@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { hasPrivilege } from '../utils/privilegeAccess';
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -7,8 +8,6 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-// Only Admin / Director may manage the reference taxonomies.
-const TAXONOMY_ADMIN_ROLES = ['Admin', 'Director'];
 const activeOnly = (req: Request) => req.query.activeOnly === 'true';
 
 // ─── ATA Chapters ─────────────────────────────────────────────────────────────
@@ -28,7 +27,7 @@ export const listAtaChapters = async (req: Request, res: Response): Promise<void
 
 export const upsertAtaChapter = async (req: Request, res: Response): Promise<void> => {
   try {
-    if (!TAXONOMY_ADMIN_ROLES.includes(req.user!.role)) {
+    if (!hasPrivilege(req.user!, 'settings:taxonomy')) {
       res.status(403).json({ message: 'Only an Admin or Director can manage ATA chapters' });
       return;
     }
@@ -76,7 +75,7 @@ export const listCauseCodes = async (req: Request, res: Response): Promise<void>
 
 export const upsertCauseCode = async (req: Request, res: Response): Promise<void> => {
   try {
-    if (!TAXONOMY_ADMIN_ROLES.includes(req.user!.role)) {
+    if (!hasPrivilege(req.user!, 'settings:taxonomy')) {
       res.status(403).json({ message: 'Only an Admin or Director can manage cause codes' });
       return;
     }
@@ -126,7 +125,7 @@ export const listHazardTags = async (req: Request, res: Response): Promise<void>
 
 export const upsertHazardTag = async (req: Request, res: Response): Promise<void> => {
   try {
-    if (!TAXONOMY_ADMIN_ROLES.includes(req.user!.role)) {
+    if (!hasPrivilege(req.user!, 'settings:taxonomy')) {
       res.status(403).json({ message: 'Only an Admin or Director can manage hazard tags' });
       return;
     }

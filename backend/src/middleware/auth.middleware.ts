@@ -20,6 +20,9 @@ export interface AuthPayload {
   divisionId: number;
   forcePasswordChange?: boolean;
   sessionId?: string;
+  // Phase 7 — live role permission map from PrivilegeConfig (resolved per request,
+  // never carried in the JWT so it can't go stale). Undefined falls back to defaults.
+  permissions?: Record<string, boolean> | null | undefined;
 }
 
 declare global {
@@ -76,7 +79,16 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
         // stays behind the toggle so test JWTs without a session still work.
         const user = await prisma.user.findUnique({
           where: { id: authPayload.userId, deletedAt: null },
-          select: { activeSessionId: true, divisionId: true, role: { select: { name: true } } }
+          select: {
+            activeSessionId: true,
+            divisionId: true,
+            role: {
+              select: {
+                name: true,
+                privilegeConfig: { select: { permissions: true } }
+              }
+            }
+          }
         });
 
         if (!user) {
@@ -89,9 +101,11 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
           return;
         }
 
-        // DB is the source of truth for authorization claims (role/division).
+        // DB is the source of truth for authorization claims (role/division/permissions).
         authPayload.role = user.role.name;
         authPayload.divisionId = user.divisionId;
+        authPayload.permissions =
+          (user.role.privilegeConfig?.permissions as Record<string, boolean> | undefined) ?? null;
       } catch (dbErr) {
         console.error('Session validation error:', dbErr);
         res.status(500).json({ message: 'Internal server error during session validation' });

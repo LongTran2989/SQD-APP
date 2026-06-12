@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import { hasPrivilege } from '../utils/privilegeAccess';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -10,7 +11,7 @@ const prisma = new PrismaClient({ adapter });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const ANALYTICS_ROLES = ['Manager', 'Director', 'Admin'];
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ export const getTimeBookingAnalytics = async (req: Request, res: Response): Prom
     const { role, divisionId } = req.user!;
 
     // Only management roles may view analytics
-    if (!ANALYTICS_ROLES.includes(role)) {
+    if (!hasPrivilege(req.user!, 'analytics:view')) {
       res.status(403).json({ message: 'You do not have permission to view analytics.' });
       return;
     }

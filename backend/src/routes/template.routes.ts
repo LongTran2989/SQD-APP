@@ -11,7 +11,7 @@ import {
   unarchiveTemplate
 } from '../controllers/template.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
-import { authorizeRoles } from '../middleware/rbac.middleware';
+import { requirePrivilege } from '../middleware/rbac.middleware';
 
 const router = Router();
 
@@ -19,21 +19,21 @@ const router = Router();
 router.get('/', authenticateJWT, getTemplates);
 router.get('/:id', authenticateJWT, getTemplateById);
 
-// Only Admins, Directors, and Managers can create, update, delete, publish
-router.post('/', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), createTemplate);
-router.put('/:id', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), updateTemplate);
-router.delete('/:id', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), deleteTemplate);
+// Create / edit / delete — privilege-gated (Phase 7)
+router.post('/', authenticateJWT, requirePrivilege('template:create'), createTemplate);
+router.put('/:id', authenticateJWT, requirePrivilege('template:edit'), updateTemplate);
+router.delete('/:id', authenticateJWT, requirePrivilege('template:delete'), deleteTemplate);
 
 // Publish (archive + revision bump)
-router.post('/:id/publish', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), publishTemplate);
+router.post('/:id/publish', authenticateJWT, requirePrivilege('template:publish'), publishTemplate);
 
 // Archive
-router.patch('/:id/archive', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), archiveTemplate);
+router.patch('/:id/archive', authenticateJWT, requirePrivilege('template:archive'), archiveTemplate);
 
 // Unarchive
-router.patch('/:id/unarchive', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), unarchiveTemplate);
+router.patch('/:id/unarchive', authenticateJWT, requirePrivilege('template:unarchive'), unarchiveTemplate);
 
 // Ownership transfer
-router.post('/:id/transfer', authenticateJWT, authorizeRoles('Admin', 'Director', 'Manager'), transferOwnership);
+router.post('/:id/transfer', authenticateJWT, requirePrivilege('template:transfer'), transferOwnership);
 
 export default router;

@@ -5,6 +5,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { generateDailyCheckTasks } from '../services/wpCheckService';
 import { createFeedPost } from '../services/feedService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import { hasPrivilege } from '../utils/privilegeAccess';
 
 // Emits a WP-scope SYSTEM_EVENT alongside the existing AuditLog write. Mirrors
 // the task feed's logTaskActivity: best-effort, never throws, authorId stays
@@ -342,7 +343,7 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    const isManager = wp.creatorId === userId || ['Admin', 'Director', 'Manager'].includes(userRole);
+    const isManager = wp.creatorId === userId || hasPrivilege(req.user!, 'wp:edit');
     // PR8: an assigned user may edit ONLY the timeframe; managers/creator/global edit everything.
     let isAssignee = false;
     if (!isManager) {
@@ -440,8 +441,8 @@ export const updateWorkPackageStatus = async (req: Request, res: Response): Prom
       return;
     }
 
-    // Only creator, Admin, or Director can change status
-    if (wp.creatorId !== userId && !['Admin', 'Director'].includes(userRole)) {
+    // Only the creator (relationship) or a privileged role can change status
+    if (wp.creatorId !== userId && !hasPrivilege(req.user!, 'wp:manage_status')) {
       res.status(403).json({ message: 'Insufficient permissions to change Work Package status' });
       return;
     }
@@ -528,7 +529,7 @@ export const assignUserToWp = async (req: Request, res: Response): Promise<void>
     }
 
     // Only Manager or Director can assign users
-    if (!['Manager', 'Director', 'Admin'].includes(userRole)) {
+    if (!hasPrivilege(req.user!, 'wp:assign')) {
       res.status(403).json({ message: 'Only Manager or Director can assign users to Work Packages' });
       return;
     }
@@ -592,7 +593,7 @@ export const removeUserFromWp = async (req: Request, res: Response): Promise<voi
     const userRole = req.user!.role;
 
     // Only Manager or Director can remove assignments
-    if (!['Manager', 'Director', 'Admin'].includes(userRole)) {
+    if (!hasPrivilege(req.user!, 'wp:assign')) {
       res.status(403).json({ message: 'Only Manager or Director can remove user assignments' });
       return;
     }

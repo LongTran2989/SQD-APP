@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { createFeedPost, FeedScope } from './feedService';
+import { hasPrivilege } from '../utils/privilegeAccess';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
@@ -59,12 +60,13 @@ export async function resolveFlagDivision(
 
 // Pure predicate: can this user action a flag, given the flag's resolved division?
 export function canActionFlag(
-  user: { role: string; divisionId: number },
+  user: { role: string; divisionId: number; permissions?: Record<string, boolean> | null | undefined },
   flag: { targetScope: string; divisionId: number | null }
 ): boolean {
-  if (user.role === 'Director' || user.role === 'Admin') return true; // Admin = Director-equivalent
-  if (user.role !== 'Manager') return false;
-  if (flag.targetScope === 'ORG') return true; // any Manager may action Org flags
+  if (user.role === 'Director' || user.role === 'Admin') return true; // cross-division reach (scope, hardcoded)
+  // Role eligibility is privilege-driven (Phase 7); default grants Manager.
+  if (!hasPrivilege(user, 'escalation:review')) return false;
+  if (flag.targetScope === 'ORG') return true; // any reviewer may action Org flags
   return flag.divisionId != null && flag.divisionId === user.divisionId;
 }
 

@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
-import { canEditAnalysis, extractCapaLinkedUserIds, FINDING_REVIEWER_ROLES } from '../utils/findingAccess';
+import { canEditAnalysis, extractCapaLinkedUserIds, isFindingReviewer } from '../utils/findingAccess';
 import { CAPA_TYPES, CAPA_STATUSES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -209,7 +209,7 @@ export const verifyCapa = async (req: Request, res: Response): Promise<void> => 
     const capaId = parseInt(req.params.capaId as string, 10);
     const { userId, role } = req.user!;
 
-    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+    if (!isFindingReviewer(req.user!)) {
       res.status(403).json({ message: 'Only a Manager or Director can verify CAPA effectiveness' });
       return;
     }
@@ -279,7 +279,7 @@ export const waiveCapa = async (req: Request, res: Response): Promise<void> => {
     const { userId, role } = req.user!;
     const { waivedReason } = req.body;
 
-    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+    if (!isFindingReviewer(req.user!)) {
       res.status(403).json({ message: 'Only a Manager or Director can waive a CAPA action' });
       return;
     }
@@ -331,7 +331,7 @@ export const deleteCapa = async (req: Request, res: Response): Promise<void> => 
     const capaId = parseInt(req.params.capaId as string, 10);
     const { userId, role } = req.user!;
 
-    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+    if (!isFindingReviewer(req.user!)) {
       res.status(403).json({ message: 'Only a Manager or Director can delete a CAPA action' });
       return;
     }
@@ -441,7 +441,7 @@ export const removeCapaLink = async (req: Request, res: Response): Promise<void>
     const linkId = parseInt(req.params.linkId as string, 10);
     const { userId, role } = req.user!;
 
-    if (!FINDING_REVIEWER_ROLES.includes(role)) {
+    if (!isFindingReviewer(req.user!)) {
       res.status(403).json({ message: 'Only a Manager or Director can remove a CAPA link' });
       return;
     }

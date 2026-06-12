@@ -1,4 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
+import { hasPrivilege } from './privilegeAccess';
 
 // Single source of truth for Finding RBAC, shared by finding.controller and the
 // expansion-pack controllers (RCA / CAPA / links).
@@ -9,9 +10,16 @@ export interface Actor {
   userId: number;
   role: string;
   divisionId: number;
+  permissions?: Record<string, boolean> | null | undefined;
 }
 
-export const FINDING_REVIEWER_ROLES = ['Manager', 'Director'];
+/**
+ * Is this actor a finding reviewer? Privilege-driven (Phase 7); default grants
+ * Manager + Director (Admin excluded, as before).
+ */
+export function isFindingReviewer(actor: { role: string; permissions?: Record<string, boolean> | null | undefined }): boolean {
+  return hasPrivilege(actor, 'finding:review');
+}
 
 /**
  * Prisma WHERE fragment scoping a Finding *read* query to a user's visibility.
@@ -66,11 +74,16 @@ export function canEditAnalysis(
   capaLinkedUserIds?: number[]
 ): boolean {
   const { userId, role } = user;
-  if (role === 'Director') return true;
+  // Relationship grants — always allowed regardless of role privileges.
   if (finding.reportedByUserId === userId) return true;
   if (finding.followUpTasks?.some((t) => t.assignedToUserId === userId)) return true;
   if (capaLinkedUserIds?.includes(userId)) return true;
-  if (role === 'Manager') return managerMayEdit;
+  // Role dimension — privilege-driven (Phase 7). Managers are additionally
+  // gated by the caller-supplied managerMayEdit scope flag.
+  if (hasPrivilege(user, 'finding:manage_analysis')) {
+    if (role === 'Manager') return managerMayEdit;
+    return true;
+  }
   return false;
 }
 

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { updateUserRole, updateMyPreferences } from '../controllers/user.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
-import { authorizeRoles } from '../middleware/rbac.middleware';
+import { requirePrivilege } from '../middleware/rbac.middleware';
 
 const router = Router();
 
@@ -9,6 +9,6 @@ const router = Router();
 router.patch('/me/preferences', authenticateJWT, updateMyPreferences);
 
 // Only Admin can modify user privileges
-router.put('/:id/role', authenticateJWT, authorizeRoles('Admin'), updateUserRole);
+router.put('/:id/role', authenticateJWT, requirePrivilege('user:manage_roles'), updateUserRole);
 
 export default router;
