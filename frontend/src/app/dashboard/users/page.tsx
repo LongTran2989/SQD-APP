@@ -85,7 +85,7 @@ function UserFormModal({ editing, divisions, onClose, onSaved }: UserFormModalPr
         toast.success('User updated');
       } else {
         await createAdminUser(form);
-        toast.success('User created — default password: Abc@123');
+        toast.success('User created — they will be prompted to set a password on first login');
       }
       onSaved();
     } catch (err) {
@@ -146,7 +146,7 @@ function UserFormModal({ editing, divisions, onClose, onSaved }: UserFormModalPr
           </div>
           {!editing && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-              New user will be created with the default password <strong>Abc@123</strong> and must change it on first login.
+              New user will be created with a temporary password and prompted to set their own on first login.
             </div>
           )}
         </div>
@@ -278,7 +278,7 @@ export default function UsersPage() {
     setResetModal((m) => ({ ...m, loading: true }));
     try {
       await adminResetUserPassword(resetModal.target.id);
-      toast.success('Password reset to Abc@123');
+      toast.success('Password reset — the user must set a new password on next login');
       setResetModal({ open: false, target: null, loading: false });
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Failed to reset password'));
@@ -497,7 +497,7 @@ export default function UsersPage() {
       {resetModal.open && resetModal.target && (
         <ConfirmModal
           title="Reset password?"
-          message={`${resetModal.target.name}'s password will be reset to Abc@123. They will be required to change it on next login.`}
+          message={`${resetModal.target.name}'s password will be reset to a temporary password. They will be required to set a new one on next login, and any active session will be signed out.`}
           confirmLabel="Reset Password"
           loading={resetModal.loading}
           onConfirm={handleReset}

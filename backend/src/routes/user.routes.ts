@@ -10,7 +10,7 @@ import {
   updateMyPreferences,
 } from '../controllers/user.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
-import { requirePrivilege } from '../middleware/rbac.middleware';
+import { requirePrivilege, requireAnyPrivilege } from '../middleware/rbac.middleware';
 
 const router = Router();
 
@@ -18,9 +18,10 @@ const router = Router();
 router.patch('/me/preferences', authenticateJWT, updateMyPreferences);
 router.patch('/me/password', authenticateJWT, changePassword);
 
-// Admin: list and manage users
-// NOTE: listUsers does an OR privilege check (user:create | user:manage_roles) internally.
-router.get('/', authenticateJWT, listUsers);
+// Admin: list and manage users.
+// Listing is reachable by either user privilege; the route guard enforces this
+// (defence in depth) and the controller repeats the check.
+router.get('/', authenticateJWT, requireAnyPrivilege('user:create', 'user:manage_roles'), listUsers);
 router.post('/', authenticateJWT, requirePrivilege('user:create'), createUser);
 router.put('/:id', authenticateJWT, requirePrivilege('user:manage_roles'), updateUser);
 router.delete('/:id', authenticateJWT, requirePrivilege('user:manage_roles'), deleteUser);

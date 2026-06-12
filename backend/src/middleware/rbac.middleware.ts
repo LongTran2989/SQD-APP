@@ -38,3 +38,24 @@ export const requirePrivilege = (key: PrivilegeKey) => {
     next();
   };
 };
+
+/**
+ * OR-variant of `requirePrivilege`: passes if the actor holds ANY of the given
+ * privilege keys. Used where a route is reachable by more than one privilege
+ * (e.g. listing users is allowed for both `user:create` and `user:manage_roles`).
+ */
+export const requireAnyPrivilege = (...keys: PrivilegeKey[]) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user || !req.user.role) {
+      res.status(401).json({ message: 'Unauthorized: Role not found' });
+      return;
+    }
+
+    if (!keys.some((key) => hasPrivilege(req.user!, key))) {
+      res.status(403).json({ message: 'Forbidden: Insufficient permissions' });
+      return;
+    }
+
+    next();
+  };
+};

@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { generateDailyCheckTasks } from '../services/wpCheckService';
 import { createFeedPost } from '../services/feedService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
@@ -18,9 +16,7 @@ async function logWpSystemEvent(wpId: number, content: string, metadata?: Record
   }
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 

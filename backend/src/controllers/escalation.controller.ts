@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { createFeedPost, FeedScope } from '../services/feedService';
 import { hasPrivilege } from '../utils/privilegeAccess';
 import {
@@ -17,9 +15,7 @@ import { createTaskService, reassignTaskService } from './task.controller';
 import { createFindingService } from './finding.controller';
 import { HttpError, isHttpError } from '../utils/httpError';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // Human-readable target names for the source-feed SYSTEM_EVENT.
 const TARGET_FEED_LABEL: Record<EscalationTargetScope, string> = {

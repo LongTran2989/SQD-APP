@@ -1,14 +1,10 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
 import { canEditAnalysis, extractCapaLinkedUserIds, isFindingReviewer } from '../utils/findingAccess';
 import { CAPA_TYPES, CAPA_STATUSES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // A linked effectiveness Task must be in one of these states for its CAPA to be
 // verifiable — i.e. the verification work is genuinely done.

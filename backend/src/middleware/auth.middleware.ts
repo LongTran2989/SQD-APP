@@ -1,13 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { JWT_SECRET } from '../config/env';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // The only route a forced-password-change user may reach (relative to the
 // /api/auth router mount). Kept as a named constant rather than a bare string

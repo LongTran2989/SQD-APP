@@ -1,14 +1,28 @@
 import { Request, Response } from 'express';
 import { hasPrivilege } from '../utils/privilegeAccess';
-import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
-
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 const activeOnly = (req: Request) => req.query.activeOnly === 'true';
+
+// Application-level length caps for admin-supplied taxonomy strings. These are
+// defensive bounds so a single record can't be made arbitrarily large; short
+// identifier-style fields ("code") get a tighter cap than free-text fields.
+const MAX_CODE_LEN = 64;
+const MAX_TEXT_LEN = 2000;
+
+// Returns an error message if any provided string field exceeds its cap, else
+// null. Only validates fields that are present (undefined fields are skipped so
+// partial updates remain valid).
+const lengthError = (
+  checks: Array<{ label: string; value: unknown; max: number }>
+): string | null => {
+  for (const { label, value, max } of checks) {
+    if (typeof value === 'string' && value.length > max) {
+      return `${label} must be ${max} characters or fewer`;
+    }
+  }
+  return null;
+};
 
 // ─── ATA Chapters ─────────────────────────────────────────────────────────────
 
@@ -33,6 +47,15 @@ export const upsertAtaChapter = async (req: Request, res: Response): Promise<voi
     }
     const idParam = req.params.id;
     const { code, title, isActive } = req.body;
+
+    const lenErr = lengthError([
+      { label: 'code', value: code, max: MAX_CODE_LEN },
+      { label: 'title', value: title, max: MAX_TEXT_LEN },
+    ]);
+    if (lenErr) {
+      res.status(400).json({ message: lenErr });
+      return;
+    }
 
     if (idParam) {
       const updated = await prisma.ataChapter.update({
@@ -81,6 +104,17 @@ export const upsertCauseCode = async (req: Request, res: Response): Promise<void
     }
     const idParam = req.params.id;
     const { code, name, groupCode, groupName, isActive } = req.body;
+
+    const lenErr = lengthError([
+      { label: 'code', value: code, max: MAX_CODE_LEN },
+      { label: 'name', value: name, max: MAX_TEXT_LEN },
+      { label: 'groupCode', value: groupCode, max: MAX_CODE_LEN },
+      { label: 'groupName', value: groupName, max: MAX_TEXT_LEN },
+    ]);
+    if (lenErr) {
+      res.status(400).json({ message: lenErr });
+      return;
+    }
 
     if (idParam) {
       const updated = await prisma.causeCode.update({
@@ -132,6 +166,15 @@ export const upsertEventType = async (req: Request, res: Response): Promise<void
     const idParam = req.params.id;
     const { code, description, isActive } = req.body;
 
+    const lenErr = lengthError([
+      { label: 'code', value: code, max: MAX_CODE_LEN },
+      { label: 'description', value: description, max: MAX_TEXT_LEN },
+    ]);
+    if (lenErr) {
+      res.status(400).json({ message: lenErr });
+      return;
+    }
+
     if (idParam) {
       const updated = await prisma.eventType.update({
         where: { id: parseInt(String(idParam), 10) },
@@ -181,6 +224,15 @@ export const upsertWpType = async (req: Request, res: Response): Promise<void> =
     }
     const idParam = req.params.id;
     const { code, description, isActive } = req.body;
+
+    const lenErr = lengthError([
+      { label: 'code', value: code, max: MAX_CODE_LEN },
+      { label: 'description', value: description, max: MAX_TEXT_LEN },
+    ]);
+    if (lenErr) {
+      res.status(400).json({ message: lenErr });
+      return;
+    }
 
     if (idParam) {
       const updated = await prisma.wpType.update({
@@ -236,6 +288,15 @@ export const upsertHazardTag = async (req: Request, res: Response): Promise<void
     }
     const idParam = req.params.id;
     const { label, description, isActive } = req.body;
+
+    const lenErr = lengthError([
+      { label: 'label', value: label, max: MAX_TEXT_LEN },
+      { label: 'description', value: description, max: MAX_TEXT_LEN },
+    ]);
+    if (lenErr) {
+      res.status(400).json({ message: lenErr });
+      return;
+    }
 
     if (idParam) {
       const updated = await prisma.hazardTag.update({

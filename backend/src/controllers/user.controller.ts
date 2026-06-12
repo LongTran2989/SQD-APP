@@ -1,13 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcrypt';
 import { hasPrivilege } from '../utils/privilegeAccess';
-
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 const DEFAULT_PASSWORD = 'Abc@123';
 const BCRYPT_ROUNDS = 10;
@@ -89,8 +83,14 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
   try {
     const { employeeId, name, email, phone, roleName, divisionId } = req.body;
 
-    if (!name || !roleName || !divisionId) {
+    if (!name || !name.trim() || !roleName || !divisionId) {
       res.status(400).json({ message: 'name, roleName, and divisionId are required' });
+      return;
+    }
+
+    const divId = parseInt(divisionId, 10);
+    if (isNaN(divId)) {
+      res.status(400).json({ message: 'divisionId must be a number' });
       return;
     }
 
@@ -100,7 +100,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const division = await prisma.division.findUnique({ where: { id: parseInt(divisionId, 10) } });
+    const division = await prisma.division.findUnique({ where: { id: divId } });
     if (!division) {
       res.status(400).json({ message: 'Invalid division' });
       return;
@@ -128,12 +128,12 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
     const user = await prisma.user.create({
       data: {
         employeeId: employeeId || null,
-        name,
+        name: name.trim(),
         email: email || null,
         phone: phone || null,
         passwordHash,
         forcePasswordChange: true,
-        divisionId: parseInt(divisionId, 10),
+        divisionId: divId,
         roleId: role.id,
       },
       select: USER_SELECT,
@@ -165,7 +165,13 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
 
     const updateData: Record<string, unknown> = {};
 
-    if (name !== undefined) updateData.name = name;
+    if (name !== undefined) {
+      if (!name.trim()) {
+        res.status(400).json({ message: 'name cannot be empty' });
+        return;
+      }
+      updateData.name = name.trim();
+    }
     if (phone !== undefined) updateData.phone = phone || null;
 
     if (employeeId !== undefined) {
@@ -201,6 +207,10 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
 
     if (divisionId !== undefined) {
       const divId = parseInt(divisionId, 10);
+      if (isNaN(divId)) {
+        res.status(400).json({ message: 'divisionId must be a number' });
+        return;
+      }
       const division = await prisma.division.findUnique({ where: { id: divId } });
       if (!division) {
         res.status(400).json({ message: 'Invalid division' });
@@ -287,9 +297,11 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
 
     const newHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
 
+    // Revoke any active server-side session so tokens issued before the password
+    // change can no longer be used. The caller must re-authenticate.
     await prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: newHash, forcePasswordChange: false },
+      data: { passwordHash: newHash, forcePasswordChange: false, activeSessionId: null },
     });
 
     res.json({ message: 'Password changed successfully' });
@@ -316,9 +328,11 @@ export const adminResetPassword = async (req: Request, res: Response): Promise<v
 
     const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, BCRYPT_ROUNDS);
 
+    // Revoke the target user's active session so any token they currently hold
+    // is invalidated alongside the password reset.
     await prisma.user.update({
       where: { id: userId },
-      data: { passwordHash, forcePasswordChange: true },
+      data: { passwordHash, forcePasswordChange: true, activeSessionId: null },
     });
 
     res.json({ message: 'Password reset to default successfully' });

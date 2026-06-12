@@ -2,14 +2,10 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import crypto from 'crypto';
 import { JWT_SECRET } from '../config/env';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // A constant, valid bcrypt hash used to perform a "dummy" comparison when a
 // login is attempted for an unknown user. This keeps the found / not-found code

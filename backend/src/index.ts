@@ -6,8 +6,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 
 import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
@@ -24,9 +22,7 @@ import privilegeRoutes from './routes/privilege.routes';
 
 dotenv.config();
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from './lib/prisma';
 
 const app = express();
 const PORT = process.env.PORT || 3000;

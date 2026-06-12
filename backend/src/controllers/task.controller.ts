@@ -1,16 +1,12 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
 import { createFeedPost } from '../services/feedService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
