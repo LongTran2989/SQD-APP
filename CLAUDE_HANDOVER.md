@@ -1258,4 +1258,112 @@ Audited on **2026-05-29**. These are known vulnerabilities to be fixed before an
 
 ---
 
+## 12. DEPLOYMENT GUIDE
+
+> Living deployment reference. The auth-security hardening (branch
+> `claude/amazing-ritchie-soasus`, 2026-06) changed how secrets, cookies, and
+> CORS must be configured. **Read the "Security-critical env vars" subsection
+> before any deploy — the backend now refuses to start without `JWT_SECRET`, and
+> auth cookies require HTTPS + a configured origin in production.**
+
+### 12.1 Prerequisites
+- Node.js 18+ on the host.
+- PostgreSQL reachable from the backend (prod DB, e.g. `sqd_qa_db` or a renamed prod DB).
+- HTTPS termination (reverse proxy: Nginx / Caddy / Traefik). **Required in
+  production** — the auth cookie is `Secure`, so it is only sent over HTTPS.
+- Frontend and backend SHOULD be served on the same registrable domain
+  (e.g. `app.example.com` + `api.example.com`). The cookie is `SameSite=Strict`;
+  same-site keeps cookies flowing and mitigates CSRF. A truly cross-site split
+  needs `SameSite=None` + a CSRF token (see 12.6).
+
+### 12.2 Backend environment variables (`backend/.env` or process env)
+
+**Security-critical (must be set in production):**
+
+| Var | Required | Notes |
+|---|---|---|
+| `JWT_SECRET` | **YES** | Token signing secret. **App throws on startup if unset** (no insecure fallback any more). Must be a long random value, NOT the dev value. See 12.3. |
+| `NODE_ENV` | **YES** | Set to `production`. Controls the cookie `Secure` flag (prod = HTTPS-only) and disables the dev rate-limit skip. |
+| `FRONTEND_ORIGIN` | **YES** | Exact origin of the frontend, e.g. `https://app.example.com`. CORS is locked to this origin with `credentials:true` (a wildcard is incompatible with credentialed cookies). |
+| `DATABASE_URL` | **YES** | `postgresql://user:pass@host:5432/dbname?schema=public`. |
+| `PORT` | optional | Backend port (default 5000 in dev; set per host). |
+| `DISABLE_RATE_LIMIT` | optional | Leave **unset** in production. Only `true` disables auth rate limiting. |
+
+> `ENFORCE_SINGLE_SESSION` is a row in the `SystemSetting` table (key
+> `ENFORCE_SINGLE_SESSION`, value `'true'`/`'false'`), **not** an env var.
+> Default behaviour is ON when the row is absent. Independent of this toggle, the
+> middleware always revalidates the account (soft-delete + role/division) on
+> every request.
+
+### 12.3 Generating and storing `JWT_SECRET`
+
+Generate a strong secret (any one):
+```bash
+openssl rand -base64 48
+# or
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+Store it as a deployment secret — **never commit it**. Options:
+- **`.env` file** on the host (chmod 600, outside the repo / git-ignored):
+  `JWT_SECRET="<generated value>"`
+- **systemd**: `EnvironmentFile=/etc/sqd-app/backend.env` in the unit.
+- **Docker**: `--env-file` or a Docker secret mounted to env.
+- **PM2**: `env` block in `ecosystem.config.js` (kept out of git).
+
+Rotating the secret invalidates all existing tokens (everyone must re-login) —
+acceptable and sometimes desirable.
+
+### 12.4 Frontend environment variables
+| Var | Notes |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | Full API base, e.g. `https://api.example.com/api`. The frontend sends requests with `withCredentials`, so this must be the HTTPS origin that sets the cookie. |
+
+### 12.5 Build & run
+
+Backend:
+```bash
+cd backend
+npm ci
+npx prisma generate
+# Apply schema. For a fresh prod DB use migrate deploy if migrations are present,
+# otherwise db push. (No schema change was introduced by the auth hardening.)
+npx prisma migrate deploy   # or: npx prisma db push
+npm run build               # if a build script exists; otherwise run via ts-node/node
+# start the compiled server (NODE_ENV=production)
+```
+
+Frontend:
+```bash
+cd frontend
+npm ci
+npm run build
+npm run start               # serves the optimized production build
+```
+
+### 12.6 Reverse proxy / HTTPS notes
+- Terminate TLS at the proxy; proxy to the backend over the internal network.
+- Forward `X-Forwarded-For` so rate limiting sees the real client IP. If behind a
+  proxy, set Express `trust proxy` accordingly (add `app.set('trust proxy', 1)`
+  in `index.ts` for one proxy hop) so `express-rate-limit` keys on the real IP.
+- Ensure the proxy passes `Set-Cookie` through and does not strip `Cookie`.
+- CSRF: `SameSite=Strict` is the default mitigation. If the deployment is forced
+  cross-site, change the cookie to `SameSite=None; Secure` in
+  `auth.controller.ts` (`authCookieOptions`) **and** add a double-submit CSRF
+  token — do not relax SameSite without it.
+
+### 12.7 Pre-deploy security checklist (status from the 2026-06 hardening)
+- [x] `JWT_SECRET` required, no insecure fallback (§11 Fix 4)
+- [x] Login/forgot/reset rate limited (§11 Fix 3)
+- [x] `updatePassword` verifies current password (§11 Fix 1)
+- [x] Reset tokens stored hashed (§11 Fix 5)
+- [x] `forgotPassword` non-enumerating (§11 Fix 2)
+- [x] Server-side session revocation on logout + reset
+- [x] JWT in httpOnly cookie (not JS-readable); CORS locked to `FRONTEND_ORIGIN`
+- [ ] Set `JWT_SECRET`, `NODE_ENV=production`, `FRONTEND_ORIGIN` on the host
+- [ ] HTTPS enabled (required for the `Secure` cookie)
+- [ ] `trust proxy` configured if behind a reverse proxy
+
+---
+
 *Generated by Claude Sonnet 4.6 in claude.ai — 2026-05-14*
