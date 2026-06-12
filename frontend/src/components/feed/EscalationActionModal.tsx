@@ -7,8 +7,10 @@ import { Template } from '../../types';
 import { actionEscalation } from '../../api/escalationApi';
 import { getDivisions, getUsers, getDatasource } from '../../api/taskApi';
 import { getPublishedTemplates } from '../../api/templateApi';
+import { listEventTypes } from '../../api/taxonomyApi';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
+import { EventType } from '../../types';
 
 type Option = { value: string; label: string };
 
@@ -42,6 +44,7 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
   const [divisions, setDivisions] = useState<Option[]>([]);
   const [users, setUsers] = useState<Option[]>([]);
   const [departments, setDepartments] = useState<Option[]>([]);
+  const [eventTypes, setEventTypes] = useState<string[]>(FINDING_EVENT_TYPES as unknown as string[]);
 
   // CREATE_TASK
   const [templateId, setTemplateId] = useState<number | ''>('');
@@ -69,6 +72,15 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
       getUsers().then((u) => { if (!cancelled) setUsers(u); }).catch(() => {});
     } else if (action === 'RAISE_FINDING') {
       getDatasource('departments').then((d) => { if (!cancelled) setDepartments(d); }).catch(() => {});
+      listEventTypes(true)
+        .then((types: EventType[]) => {
+          if (!cancelled) {
+            const codes = types.map((t) => t.code);
+            if (!codes.includes('Other')) codes.push('Other');
+            setEventTypes(codes);
+          }
+        })
+        .catch(() => {});
     } else if (action === 'REASSIGN_TASK') {
       getUsers().then((u) => { if (!cancelled) setUsers(u); }).catch(() => {});
     } else if (action === 'DISSEMINATE') {
@@ -172,7 +184,7 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
               <label className="block text-xs font-medium text-slate-600 mb-1">Event type</label>
               <select className={inputCls} value={eventType} onChange={(e) => setEventType(e.target.value)}>
                 <option value="">Select an event type…</option>
-                {FINDING_EVENT_TYPES.map((t) => (
+                {eventTypes.map((t) => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>

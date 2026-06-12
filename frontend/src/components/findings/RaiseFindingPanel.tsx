@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { raiseFinding } from '../../api/findingApi';
 import { getDatasource, getDivisions as getDivisionsApi } from '../../api/taskApi';
-import { listAtaChapters, listHazardTags } from '../../api/taxonomyApi';
+import { listAtaChapters, listHazardTags, listEventTypes } from '../../api/taxonomyApi';
 import { apiErrorMessage } from '../../api/errorMessage';
-import { AtaChapter, HazardTag } from '../../types';
+import { AtaChapter, HazardTag, EventType } from '../../types';
 import toast from 'react-hot-toast';
 import { X, AlertTriangle } from 'lucide-react';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
@@ -22,6 +22,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
   const [ataChapters, setAtaChapters] = useState<AtaChapter[]>([]);
   const [hazardTags, setHazardTags] = useState<HazardTag[]>([]);
+  const [eventTypes, setEventTypes] = useState<string[]>(FINDING_EVENT_TYPES as unknown as string[]);
   const [eventType, setEventType] = useState('');
   const [eventTypeOther, setEventTypeOther] = useState('');
   const [departmentId, setDepartmentId] = useState('');
@@ -37,6 +38,13 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
     getDatasource('departments').then(setDepartments).catch(() => {});
     listAtaChapters(true).then(setAtaChapters).catch(() => {});
     listHazardTags(true).then(setHazardTags).catch(() => {});
+    listEventTypes(true)
+      .then((types: EventType[]) => {
+        const codes = types.map((t) => t.code);
+        if (!codes.includes('Other')) codes.push('Other');
+        setEventTypes(codes);
+      })
+      .catch(() => {});
     if (!taskId) {
       getDivisionsApi().then(setDivisions).catch(() => {});
     }
@@ -119,7 +127,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Select event type…</option>
-              {FINDING_EVENT_TYPES.map((t) => (
+              {eventTypes.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
