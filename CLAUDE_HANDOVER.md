@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-12 (rev 10). Supersedes all previous versions.*
+*Last updated: 2026-06-12 (rev 11). Supersedes all previous versions.*
 
 ---
 
@@ -217,6 +217,37 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Reuse/cleanup:** extracted `requireReviewerRole`, `validateTaxonomyFields`, `replaceHazardTags`, `validateResponseActionEntry` helpers (see `FINDING_EXPANSION_DEV_GUIDE.md` §4).
   - **Confirmed intentional (not changed):** open finding read-visibility for all authenticated users (`buildFindingScope → {}`); any authenticated user may raise a standalone finding.
 
+- **Phase 7 — Global Privilege Management** (✅ **COMPLETE**, 2026-06-12 — branch `claude/eloquent-gauss-3lonuo`)
+  > **381 backend tests passing. Frontend `tsc --noEmit` and `next build` clean. No additional schema change (table was added in Phase 5.0).**
+
+  Migrated all hardcoded RBAC role arrays to a single DB-driven `PrivilegeConfig` matrix. An Admin can now reconfigure who-can-do-what without a code change via `/settings/privileges`.
+
+  **Architecture:**
+  - **`backend/src/constants/privileges.ts`** (NEW) — single source of truth: `PRIVILEGE_CATALOG` (28 keys, 8 groups: Tasks, Templates, Work Packages, Findings, Analytics, Users, Escalation, Timebooking, Settings), `DEFAULT_PRIVILEGES` constant per role, `PRIVILEGE_ADMIN_FLOOR` (`settings:privileges` — always on for Admin), `RoleName` type.
+  - **`backend/src/utils/privilegeAccess.ts`** (NEW) — `hasPrivilege(actor, key)`: Admin floor → live DB value → `DEFAULT_PRIVILEGES` fallback → `false`. The fallback is the zero-regression guarantee: no test needs to seed `PrivilegeConfig`.
+  - **`backend/src/middleware/rbac.middleware.ts`** — added `requirePrivilege(key)` route middleware alongside the retained `authorizeRoles`.
+  - **`backend/src/middleware/auth.middleware.ts`** — `findUnique` extended to `include: { role: { privilegeConfig: { select: { permissions: true } } } }`; resolved map attached to `req.user.permissions`. One extra join per request; no N+1.
+  - **Route guards replaced:** `task.routes.ts` (`task:reopen`), `template.routes.ts` (7 keys), `wp.routes.ts` (`settings:wptype`, `wp:create`, `wp:assign`), `auth.routes.ts` (`user:create`), `user.routes.ts` (`user:manage_roles`).
+  - **Controller / service calls migrated:** `task.controller.ts`, `finding.controller.ts`, `findingAccess.ts` (new `isFindingReviewer` helper), `capa.controller.ts`, `findingLink.controller.ts`, `taxonomy.controller.ts`, `analytics.controller.ts`, `wp.controller.ts`, `timebooking.controller.ts`, `escalation.controller.ts`, `services/escalationService.ts`, `services/feedService.ts`. Relationship grants (issuer exception, WP-assignment bypass), division-scope comparisons, and the `requiresDirectorApproval` Director-only safety gate are **NOT in the matrix** — they stay hardcoded.
+  - **`backend/src/controllers/privilege.controller.ts`** (NEW) + **`backend/src/routes/privilege.routes.ts`** (NEW): `GET /api/settings/privileges` → `{ catalog, roles: [{ roleName, permissions }] }` (effective map = DB override ∪ defaults); `PUT /api/settings/privileges` → validates keys, enforces Admin floor, atomic `$transaction` upsert per role, writes `PRIVILEGE_CONFIG_UPDATED` AuditLog with a `{ changedKeys, before, after }` diff for compliance.
+  - **`backend/src/seeds/seed-privileges.ts`** (NEW) — idempotent upsert of `DEFAULT_PRIVILEGES` into `PrivilegeConfig`. Invoked from `prisma/seed.ts` after roles are seeded. Uses `update: {}` — never clobbers customised config.
+  - **Prisma schema** — added `Role ↔ PrivilegeConfig` relation back-reference (DB no-op; client-only change).
+
+  **Frontend:**
+  - `frontend/src/types/index.ts` — added `PrivilegeCatalogItem`, `PrivilegeMap`, `RolePrivileges`, `PrivilegeMatrix`.
+  - `frontend/src/api/privilegeApi.ts` (NEW) — `getPrivileges()`, `publishPrivileges(roles)`.
+  - `frontend/src/app/dashboard/settings/privileges/page.tsx` (NEW) — toggle matrix (rows = catalog grouped by domain, cols = roles), local draft state, `Publish Changes (n)` button with confirm dialog, Admin × `settings:privileges` cell locked on permanently, `window.location.reload()` on successful publish for cache invalidation.
+  - `frontend/src/components/layout/Sidebar.tsx` — Admin-only "Privileges" nav entry with `ShieldCheck` icon.
+
+  **Tests (`backend/src/__tests__/privilege.test.ts`, 11 tests):** GET returns catalog + per-role values; non-Admin → 403; PUT persists changes; payload stripping `settings:privileges` from Admin is floored (not rejected); unknown key or non-boolean → 400; behavioral grant/revoke; fallback with no `PrivilegeConfig` rows; audit diff written. `beforeEach` + `afterAll` wipe `PrivilegeConfig` to prevent cross-suite contamination.
+
+  **Design decisions locked:**
+  - `DEFAULT_PRIVILEGES` is the source of truth; `hasPrivilege` falls back to it per key so the existing 370 tests pass without any `PrivilegeConfig` seeds.
+  - `settings:privileges` is un-revokable from Admin — the hardcoded floor in `hasPrivilege` and the PUT enforcement together prevent Admin lockout.
+  - Director does NOT get the panel by default (Admin-only per product decision).
+  - The matrix governs the **role dimension only**. Relationship grants, division-scope comparisons, and `requiresDirectorApproval` stay hardcoded and are explicitly excluded from the catalog.
+  - Bootstrap admin: Eve Admin (`VAE99999` / `Abc@123`, role Admin, `prisma/seed.ts:180`).
+
 - **Task / Template / Work-Package Workflow Overhaul** (✅ **COMPLETE**, 2026-06-10 — branch `claude/relaxed-lamport-vf1sim`, NOT yet merged to `main`)
   > **11 sequenced PRs (PR1–PR11). 360 backend tests (359 passing; 1 pre-existing unrelated seed failure — see below).**
 
@@ -258,6 +289,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
 ### Test Suite
+- **381 backend tests on branch `claude/eloquent-gauss-3lonuo` (Phase 7 — Global Privilege Management, 2026-06-12): all 381 passing.** +11 new tests in `privilege.test.ts`. `DEFAULT_PRIVILEGES` fallback guarantees all prior 370 tests pass without `PrivilegeConfig` seeds. Frontend `tsc --noEmit` and `next build` clean.
 - **370 backend tests on branch `claude/amazing-ritchie-soasus` (Auth Security Hardening, 2026-06): 367 passing + 3 pre-existing unrelated failures** (`seed-verification` login `202` vs `200`; `task` T09 `schemaSnapshot` `fieldId`; `escalation` CREATE_TASK — all predate this branch, none in the auth flow). +18 new auth/session/rate-limit tests. **Frontend `tsc --noEmit` and `next build` are now fully clean (exit 0)** — the two long-standing `ReviewPanel.tsx`/`RichTextEditor.tsx` type errors were fixed (Next 16 build type-checks strictly). No schema change.
 - **360 backend tests on branch `claude/relaxed-lamport-vf1sim` (Task/Template/WP Workflow Overhaul, 2026-06-10): 359 passing + 1 pre-existing unrelated failure** (`seed-verification` login `202` vs `200` — seed `forcePasswordChange: false` from commit `369d12c`, predates this branch). Frontend: `tsc --noEmit` clean on all changed files (two pre-existing errors in `ReviewPanel.tsx`/`RichTextEditor.tsx` untouched); lint at baseline (no new errors introduced).
 - **322 integration tests passing** on branch `claude/compassionate-gauss-335xa3` (Finding Response Actions, 2026-06-09). **262** on `claude/eloquent-feynman-G4thG` (Feed & Escalation full history page, 2026-06-05). **260** on `claude/sqd-feed-escalation-plan-4dYZa` (Phases 1–5). `main` is at **211** (Feed Phases 1–2). Pre-feed baseline was **187** (Phase 6, 2026-06-01). Frontend lint at baseline **70 errors / 23 warnings (zero new)**; `tsc --noEmit` clean (except legacy `clean.ts`); `next build` exit 0.
@@ -311,31 +343,46 @@ A dedicated Admin-only panel under `/settings/privileges`. Allows granular, syst
 - Which roles can create/close WPs
 - Which roles can manage WpType values
 
-**Implementation note:** Build a `PrivilegeConfig` model in Phase 7. For Phases 5–6, hardcode the default rules in middleware but structure the code so the middleware reads from a config object — making it straightforward to wire up the DB-driven config in Phase 7 without rewriting business logic.
+**Implementation note (Phase 7 — COMPLETE):** The `PrivilegeConfig` model is live. `hasPrivilege(actor, key)` in `backend/src/utils/privilegeAccess.ts` is the single authority for all privilege checks. See §3.4a for the resolution order, Admin floor, and separation-of-concerns rules.
 
-### 3.4a PrivilegeConfig Model (Phase 7)
+### 3.4a PrivilegeConfig Model (Phase 7 — COMPLETE)
 
-The `PrivilegeConfig` model was added to the database schema in Phase 5.0 as a placeholder table. It will be populated and activated in Phase 7.
+The `PrivilegeConfig` model was added to the database schema in Phase 5.0 and fully activated in Phase 7 (2026-06-12).
 
-**What it is:** A database table that stores a JSON permissions map for each Role. Rather than hardcoding rules like "only Managers can assign Tasks" directly in middleware logic, the `PrivilegeConfig` table will store these rules as configurable data.
+**What it is:** A database table that stores a JSON permissions map for each Role. The `PrivilegeConfig` table holds Admin-customised overrides; the `DEFAULT_PRIVILEGES` constant in `backend/src/constants/privileges.ts` is the authoritative fallback.
 
-**How it works (Phase 7 target):**
+**How it works (live):**
 ```
 PrivilegeConfig {
   roleId: 3           // Manager role
   permissions: {
-    "task.create": true,
-    "task.assign.sameDiv": true,
-    "task.assign.anyDiv": false,
-    "template.archive": true,
+    "task:create": true,
+    "task:assign_div": true,
+    "task:assign_any": false,
+    "template:archive": true,
     ...
   }
 }
 ```
 
-**Why it matters:** The Admin-only Privilege Management panel (`/settings/privileges`) reads from and writes to this table. When an Admin changes which roles can do what, the change is saved here. The backend middleware then reads this table on each privileged request instead of relying on hardcoded role names.
+**Resolution order** (implemented in `backend/src/utils/privilegeAccess.ts → hasPrivilege`):
+1. Admin floor: if `actor.role === 'Admin'` and `key ∈ PRIVILEGE_ADMIN_FLOOR` → always `true`
+2. Live DB value: `actor.permissions?.[key]` if a boolean is present (loaded from `PrivilegeConfig` via `auth.middleware.ts` per-request join)
+3. `DEFAULT_PRIVILEGES[role]?.[key]` — the code constant
+4. `false` (fail closed)
 
-**Current state (Phase 5):** Table exists in DB but is empty. All RBAC rules in Phases 5–6 are still hardcoded in middleware as config objects, making Phase 7 a wiring exercise — not a rewrite.
+**Why the fallback matters:** No test seeds `PrivilegeConfig`. The per-key fallback guarantees all 370 pre-Phase-7 tests pass unchanged.
+
+**Admin floor (`PRIVILEGE_ADMIN_FLOOR = ['settings:privileges']`):** `hasPrivilege` always returns `true` for Admin on these keys regardless of the DB. The PUT endpoint also enforces the floor so even a direct API call cannot strip it. This prevents Admin lockout.
+
+**Separation of concerns — NOT in the matrix (hardcoded):**
+- Relationship grants: issuer exception (`task.controller.ts`), WP-assignment bypass (`task.controller.ts`), finding reporter/follow-up assignee/CAPA-linked editor exceptions (`findingAccess.ts`).
+- Division-scope comparisons: `assertManagerDivisionScope`, `assignee.divisionId !== divisionId`.
+- Safety gate: `requiresDirectorApproval` Director-only check — never configurable.
+
+**Audit:** every PUT writes a `PRIVILEGE_CONFIG_UPDATED` AuditLog with a `{ changedKeys: [{ role, key, from, to }], before, after }` diff payload for compliance.
+
+**Seeding:** `backend/src/seeds/seed-privileges.ts` upserts `DEFAULT_PRIVILEGES` idempotently (invoked from `prisma/seed.ts`). Uses `update: {}` so customised configs are never clobbered.
 
 ### 3.7 Soft Delete Pattern
 
@@ -1120,16 +1167,13 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 - `page.tsx` In Review banner copy corrected (see above — removed misleading "your manager needs this before rating").
 - `timebooking.controller.ts` 400 error message updated to list "In Review, Closed, Rejected, or Terminated" (was stale after adding `In Review` to `TIME_BOOKING_ELIGIBLE_STATUSES`).
 
-### Phase 7 — User Management & Settings
-- [ ] `/dashboard/users` — Admin only: manage users, roles, divisions
-- [ ] `/dashboard/settings` — personal preferences, password change
-- [ ] Admin: manage `WpType` values
-- [ ] Admin: manage `EventType` values (for Findings)
-- [ ] **Global Privilege Management panel** (`/settings/privileges` — Admin only)
-  - List all configurable actions as toggleable permissions per Role
-  - Changes require explicit confirmation/publish step before going live
-  - Backend: `PrivilegeConfig` model; middleware reads from config table instead of hardcoded role checks
-  - Default config mirrors rules documented in this handover
+### Phase 7 — Global Privilege Management (✅ COMPLETE 2026-06-12)
+
+- [x] **Global Privilege Management panel** (`/settings/privileges` — Admin only) — see §3.4a and the Phase 7 entry in §2 for full detail
+- [ ] `/dashboard/users` — Admin only: manage users, roles, divisions (deferred)
+- [ ] `/dashboard/settings` — personal preferences, password change (deferred)
+- [ ] Admin: manage `WpType` values (deferred)
+- [ ] Admin: manage `EventType` values for Findings — replaces hardcoded 9-item list (deferred)
 
 ---
 
@@ -1152,7 +1196,7 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 15. **Post-rejection Reassign vs General Reassign use different endpoints**: When a task is `Rejected`, the "Reassign" action must go through `POST /api/tasks/:id/post-rejection` with `action: 'reassign'` — NOT through `PUT /api/tasks/:id/reassign` (which blocks Rejected status). For all other non-final states, use `PUT /api/tasks/:id/reassign`. `TaskActionBar` has two separate handlers: `handlePostRejectReassign` and `handleGeneralReassign`.
 16. **`decideDeadlineExtension` requires `extensionIndex`**: The backend requires the index of the pending extension within the `deadlineExtensions` JSON array. The frontend uses `getPendingExtensionIndex()` to find the first entry where `decision` is null/undefined. If an extension was already decided, it won't be found and the call is blocked client-side.
 17. **`task.assignedToUser.role` is a flat string**: The user object returned in task responses has `role` as a plain string (e.g. `'Manager'`), not a nested Role object. Do not access `.role.name` — it will always be `undefined`.
-18. **Event Type in Findings is hardcoded until Phase 7**: `RaiseFindingPanel` uses a 9-item hardcoded list. Phase 7 will replace this with an admin-managed `EventType` table. The "Other" option writes a free-text value directly to `Finding.eventType`.
+18. **Event Type in Findings is still hardcoded**: `RaiseFindingPanel` uses a 9-item hardcoded list. Phase 7 delivered the privilege matrix but did not add the admin-managed `EventType` table (deferred). The "Other" option writes a free-text value directly to `Finding.eventType`.
 
 19. **`issuanceNote` is write-once by convention, not by enforcement:** The backend does not block updates to `issuanceNote` after creation — the write-once rule is enforced by the UI only (no edit control is exposed). If a future endpoint or admin tool allows Task updates, explicitly exclude `issuanceNote` from the updatable fields to preserve this intent.
 
@@ -1225,7 +1269,7 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 9. Every significant event must be written to BOTH `AuditLog` (system-wide compliance) AND `TaskActivity` (per-Task feed) — see Section 3.5.
 10. Task always stores `schemaSnapshot` at creation time — never rely on Template's `formSchema` to render a Task form.
 11. One-off Templates: auto-delete after first Task assignment. Task `schemaSnapshot` ensures form is never lost.
-12. Privilege rules: currently hardcoded in middleware but structured as a config object — Phase 7 will wire up DB-driven `PrivilegeConfig` table without rewriting business logic.
+12. Privilege rules: DB-driven via `PrivilegeConfig` table (Phase 7 complete). `hasPrivilege(actor, key)` in `privilegeAccess.ts` is the single authority — Admin floor → live DB → `DEFAULT_PRIVILEGES` fallback → deny. Do not add new raw `role === 'X'` checks; add a catalog key and use `hasPrivilege`.
 13. File Upload field type in Template builder is DEFERRED until Phase 5.4 — MinIO must be configured in Phase 5.0 first.
 14. File size/type constraints are Admin-configurable — never hardcode them in application logic.
 
