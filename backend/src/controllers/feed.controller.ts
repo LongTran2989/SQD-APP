@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import {
   createFeedPost,
   buildFeedPostScope,
@@ -11,9 +9,7 @@ import {
 } from '../services/feedService';
 import { canActionFlag } from '../services/escalationService';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

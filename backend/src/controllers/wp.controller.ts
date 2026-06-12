@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { generateDailyCheckTasks } from '../services/wpCheckService';
 import { createFeedPost } from '../services/feedService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
@@ -18,9 +16,7 @@ async function logWpSystemEvent(wpId: number, content: string, metadata?: Record
   }
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -636,40 +632,3 @@ export const removeUserFromWp = async (req: Request, res: Response): Promise<voi
   }
 };
 
-// ─── GET /api/work-packages/types ────────────────────────────────────
-export const getWpTypes = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const types = await prisma.wpType.findMany({ orderBy: { code: 'asc' } });
-    res.json(types);
-  } catch (error) {
-    console.error('Error fetching WP types:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// ─── POST /api/work-packages/types ───────────────────────────────────
-export const createWpType = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { code, description } = req.body;
-
-    if (!code) {
-      res.status(400).json({ message: 'code is required' });
-      return;
-    }
-
-    const existing = await prisma.wpType.findUnique({ where: { code } });
-    if (existing) {
-      res.status(400).json({ message: `WP type "${code}" already exists` });
-      return;
-    }
-
-    const wpType = await prisma.wpType.create({
-      data: { code: code.toUpperCase(), description: description || null }
-    });
-
-    res.status(201).json(wpType);
-  } catch (error) {
-    console.error('Error creating WP type:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};

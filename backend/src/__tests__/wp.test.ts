@@ -922,7 +922,7 @@ describe('Work Package Backend', () => {
       await prisma.wpType.deleteMany({ where: { code: 'INVESTIGATION' } });
 
       const res = await request(app)
-        .post('/api/work-packages/types')
+        .post('/api/taxonomy/wp-types')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ code: 'INVESTIGATION', description: 'Investigation type' });
 
@@ -935,7 +935,7 @@ describe('Work Package Backend', () => {
 
     it('should reject duplicate WP types', async () => {
       const res = await request(app)
-        .post('/api/work-packages/types')
+        .post('/api/taxonomy/wp-types')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ code: 'CHECK' });
 
@@ -945,7 +945,7 @@ describe('Work Package Backend', () => {
 
     it('should block non-Admin from creating WP types', async () => {
       const res = await request(app)
-        .post('/api/work-packages/types')
+        .post('/api/taxonomy/wp-types')
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ code: 'NEWTYPE' });
 
@@ -954,7 +954,7 @@ describe('Work Package Backend', () => {
 
     it('should list available WP types', async () => {
       const res = await request(app)
-        .get('/api/work-packages/types')
+        .get('/api/taxonomy/wp-types')
         .set('Authorization', `Bearer ${staffToken}`);
 
       expect(res.status).toBe(200);

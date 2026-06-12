@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import {
   PRIVILEGE_CATALOG,
   PRIVILEGE_KEYS,
@@ -13,9 +11,7 @@ import {
   RoleName,
 } from '../constants/privileges';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // Build the effective permission map for a role: stored config (if any) layered
 // over the role defaults, with the Admin floor forced on. This is what the UI

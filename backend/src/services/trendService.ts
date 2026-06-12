@@ -1,11 +1,7 @@
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { TREND_THRESHOLD, TREND_WINDOW_DAYS } from '../constants/findingExpansion';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 export interface TrendInfo {
   isRecurring: boolean;

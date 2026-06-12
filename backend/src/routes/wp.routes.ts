@@ -7,8 +7,6 @@ import {
   updateWorkPackageStatus,
   assignUserToWp,
   removeUserFromWp,
-  getWpTypes,
-  createWpType
 } from '../controllers/wp.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { requirePrivilege } from '../middleware/rbac.middleware';
@@ -17,10 +15,6 @@ const router = Router();
 
 // All WP routes require authentication
 router.use(authenticateJWT);
-
-// WpType CRUD — must be before /:id to avoid route conflict
-router.get('/types', getWpTypes);
-router.post('/types', requirePrivilege('settings:wptype'), createWpType);
 
 // WP listing and detail
 router.get('/', getWorkPackages);

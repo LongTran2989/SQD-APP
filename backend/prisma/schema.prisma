@@ -652,7 +652,17 @@ model WpType {
   id          Int      @id @default(autoincrement())
   code        String   @unique
   description String?
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
+}
+
+model EventType {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // -----------------------------------------------------------------------

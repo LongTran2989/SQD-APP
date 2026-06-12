@@ -1,14 +1,10 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { logFindingAuditAndActivity } from '../services/findingService';
 import { assertManagerDivisionScope, isFindingReviewer } from '../utils/findingAccess';
 import { LINK_TYPES, FINDING_EXPANSION_ACTIONS } from '../constants/findingExpansion';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../lib/prisma';
 
 // ─── GET /api/findings/:id/links ──────────────────────────────────────────────
 
