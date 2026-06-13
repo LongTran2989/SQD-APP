@@ -23,7 +23,8 @@
     "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
-    "prisma": "^6.19.3"
+    "prisma": "^6.19.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
