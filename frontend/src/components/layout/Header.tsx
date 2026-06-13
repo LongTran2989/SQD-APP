@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from '../../api/client';
 import { getPendingEscalations, ESCALATIONS_CHANGED_EVENT } from '../../api/escalationApi';
 import { ESCALATION_ACTION_ROLES } from '../../constants/escalationRoles';
+import NotificationBell from './NotificationBell';
 
 export default function Header() {
   const user = useAuthStore((state) => state.user);
@@ -85,7 +86,10 @@ export default function Header() {
             </span>
           )}
         </button>
-        
+
+        {/* Inbox / Notification Center — separate from the escalation bell above. */}
+        <NotificationBell />
+
         <div className="h-8 w-px bg-slate-200 mx-2"></div>
         
         <div className="flex items-center space-x-3">

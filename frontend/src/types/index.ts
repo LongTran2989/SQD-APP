@@ -597,3 +597,28 @@ export interface TimeEntrySummary {
   entryCount: number;
   runningTotal: number;
 }
+
+// ─── Notification Center ──────────────────────────────────────────────────────
+
+export type NotificationType =
+  | 'TASK_ASSIGNED'
+  | 'TASK_REVIEWED'
+  | 'TASK_SUBMITTED'
+  | 'ESCALATION_QUEUED'
+  | 'FINDING_CREATED'
+  | 'FEED_ACTIVITY';
+
+export type NotificationLinkScope = 'TASK' | 'WP' | 'FINDING' | 'ESCALATION';
+
+export interface AppNotification {
+  id: number;
+  userId: number;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  linkScope: NotificationLinkScope | null;
+  linkId: number | null;
+  metadata: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+}
