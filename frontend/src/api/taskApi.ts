@@ -227,6 +227,55 @@ export const getTimeBookingAnalytics = async (params?: {
 }): Promise<TimeBookingAnalytics> =>
   apiClient.get('/analytics/time-booking', { params }).then((r) => r.data);
 
+// ─── Findings analytics ──────────────────────────────────────────────────────
+
+export interface CountBucket {
+  key: string;
+  count: number;
+}
+
+export interface DepartmentBucket {
+  id: number;
+  name: string;
+  count: number;
+}
+
+export interface AtaChapterBucket {
+  id: number;
+  code: string;
+  title: string;
+  count: number;
+}
+
+export interface MonthBucket {
+  month: string; // YYYY-MM
+  count: number;
+}
+
+export interface FindingsAnalytics {
+  totalCount: number;
+  openCount: number;
+  closedCount: number;
+  dismissedCount: number;
+  avgDaysToClose: number | null;
+  bySeverity: CountBucket[];
+  byStatus: CountBucket[];
+  byEventType: CountBucket[];
+  byDepartment: DepartmentBucket[];
+  byAtaChapter: AtaChapterBucket[];
+  byMonth: MonthBucket[];
+}
+
+export const getFindingsAnalytics = async (params?: {
+  divisionId?: number;
+  departmentId?: number;
+  severity?: string;
+  eventType?: string;
+  from?: string;
+  to?: string;
+}): Promise<FindingsAnalytics> =>
+  apiClient.get('/analytics/findings', { params }).then((r) => r.data);
+
 // ─── Datasources (used in create form) ────────────────────────────────────────
 
 export const getDivisions = (): Promise<{ value: string; label: string }[]> =>
