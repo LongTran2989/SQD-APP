@@ -70,11 +70,22 @@ export const getTimeBookingAnalytics = async (req: Request, res: Response): Prom
     const from = req.query.from ? String(req.query.from) : undefined;
     const to = req.query.to ? String(req.query.to) : undefined;
 
-    // completedAt range — both bounds collapse into one filter object
-    const completedAtFilter: { gte?: Date; lte?: Date } = {};
+    // completedAt range — both bounds collapse into one filter object.
+    // A date-only `to` (YYYY-MM-DD) is treated as inclusive of the whole day:
+    // `new Date('2026-02-28')` is UTC midnight, so `lte` would drop tasks
+    // completed later that day. Use `lt` of the next midnight instead. A `to`
+    // that already carries a time component keeps exact `lte` semantics.
+    const completedAtFilter: { gte?: Date; lte?: Date; lt?: Date } = {};
     if (from) { const d = new Date(from); if (!Number.isNaN(d.getTime())) completedAtFilter.gte = d; }
-    if (to)   { const d = new Date(to);   if (!Number.isNaN(d.getTime())) completedAtFilter.lte = d; }
-    const hasDateFilter = completedAtFilter.gte !== undefined || completedAtFilter.lte !== undefined;
+    if (to) {
+      const d = new Date(to);
+      if (!Number.isNaN(d.getTime())) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(to.trim())) completedAtFilter.lt = new Date(d.getTime() + MS_PER_DAY);
+        else completedAtFilter.lte = d;
+      }
+    }
+    const hasDateFilter =
+      completedAtFilter.gte !== undefined || completedAtFilter.lte !== undefined || completedAtFilter.lt !== undefined;
 
     // RBAC division scoping — pushed into the DB WHERE clause so the query never fetches rows
     // outside the caller's scope. Managers are always constrained to their own division.
