@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
 import Sidebar from '../../components/layout/Sidebar';
 import Header from '../../components/layout/Header';
+import RealtimeProvider from '../../realtime/RealtimeProvider';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -60,6 +61,8 @@ export default function DashboardLayout({
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900">
       <Toaster position="top-right" />
+      {/* Opens the single live SSE stream for the signed-in user. */}
+      <RealtimeProvider />
       <Sidebar />
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <Header />

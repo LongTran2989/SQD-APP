@@ -6,6 +6,9 @@ import { postTaskComment } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
 import FlagButton from '../feed/FlagButton';
+import NewUpdatesPill from '../ui/NewUpdatesPill';
+import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
+import { feedKey } from '../../store/realtimeStore';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +38,10 @@ interface TaskActivityFeedProps {
   // When true the comment composer is hidden — e.g. the Finding detail page
   // shows the source task's feed read-only.
   readOnly?: boolean;
+  // Parent-owned refetch of this task's activity. When provided, live feed
+  // signals surface a "new updates" pill / focus-refetch instead of silently
+  // going stale.
+  onRefresh?: () => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -45,10 +52,15 @@ export default function TaskActivityFeed({
   currentUser,
   onNewActivity,
   readOnly = false,
+  onRefresh,
 }: TaskActivityFeedProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
+
+  // Live activity on this task's feed → "new updates" pill + focus-refetch,
+  // using the parent's refetch (no-op when the parent doesn't supply one).
+  const { hasNew, refresh } = useRealtimeRefresh(feedKey('TASK', task.id), () => onRefresh?.());
 
   // Auto-scroll to bottom on mount and when activities change
   useEffect(() => {
@@ -106,6 +118,7 @@ export default function TaskActivityFeed({
         ref={feedRef}
         className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0"
       >
+        {onRefresh && <NewUpdatesPill show={hasNew} onClick={refresh} />}
         {activities.length === 0 ? (
           <div className="text-center text-slate-400 text-sm py-8">
             No activity yet. Actions and comments will appear here.

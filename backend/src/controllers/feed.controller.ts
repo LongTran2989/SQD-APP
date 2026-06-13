@@ -8,6 +8,7 @@ import {
   FeedScope,
 } from '../services/feedService';
 import { canActionFlag } from '../services/escalationService';
+import { notifyFeedWatchers } from '../services/notificationService';
 
 import { prisma } from '../lib/prisma';
 
@@ -159,6 +160,9 @@ export const postFeedComment = async (req: Request, res: Response): Promise<void
       content: content.trim(),
       authorId: userId,
     });
+
+    // Notify the feed's watchers of the new comment (TASK/WP only) — best-effort.
+    await notifyFeedWatchers(prisma, target.scope, target.scopeId, userId, content.trim());
 
     const author = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true } });
 

@@ -7,6 +7,9 @@ import { FeedPostEnriched, FeedScope, EscalationTargetScope, User } from '../../
 import { getFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
 import { getApiErrorMessage } from '../../utils/apiError';
 import FeedPostItem from './FeedPostItem';
+import NewUpdatesPill from '../ui/NewUpdatesPill';
+import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
+import { feedKey } from '../../store/realtimeStore';
 
 function getInitials(name: string): string {
   return name
@@ -73,6 +76,10 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
       .catch(() => {});
   };
 
+  // Live activity: surface a "new updates" pill (and refetch on tab refocus)
+  // rather than yanking new posts in while the user is reading.
+  const { hasNew, refresh } = useRealtimeRefresh(feedKey(scope, scopeId), reloadFeed);
+
   const handlePost = async () => {
     if (!comment.trim()) return;
     setPosting(true);
@@ -105,6 +112,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
 
       {/* Feed list */}
       <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
+        <NewUpdatesPill show={hasNew} onClick={refresh} />
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />

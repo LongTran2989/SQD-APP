@@ -369,6 +369,7 @@ export default function TaskDetailPage() {
               activities={activities}
               currentUser={user}
               onNewActivity={handleNewActivity}
+              onRefresh={() => getTaskActivity(taskId).then(setActivities).catch(() => {})}
             />
           </div>
         </div>

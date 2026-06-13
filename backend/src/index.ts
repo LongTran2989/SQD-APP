@@ -19,6 +19,10 @@ import feedRoutes from './routes/feed.routes';
 import escalationRoutes from './routes/escalation.routes';
 import analyticsRoutes from './routes/analytics.routes';
 import privilegeRoutes from './routes/privilege.routes';
+import notificationRoutes from './routes/notification.routes';
+import realtimeRoutes from './routes/realtime.routes';
+import { startRealtimeListener } from './realtime/pgEvents';
+import { purgeOldNotifications } from './services/notificationService';
 
 dotenv.config();
 
@@ -48,6 +52,8 @@ app.use('/api/feeds', feedRoutes);
 app.use('/api/escalations', escalationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/settings/privileges', privilegeRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/events', realtimeRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {
@@ -87,6 +93,14 @@ if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
   });
+  // Start the cross-instance realtime LISTEN bridge (never under test — Jest
+  // must not hold an open DB connection past the suite).
+  void startRealtimeListener();
+  // Purge read notifications older than 30 days at startup then every 24 h.
+  // unref() so this housekeeping timer never keeps the event loop alive on
+  // shutdown (clean exit on SIGTERM/SIGINT during a deploy).
+  void purgeOldNotifications(prisma);
+  setInterval(() => void purgeOldNotifications(prisma), 24 * 60 * 60 * 1000).unref();
 }
 
 export default app;

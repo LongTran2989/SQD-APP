@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
 import { createFeedPost } from '../services/feedService';
+import { createNotifications, notifyFeedWatchers } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
@@ -827,6 +828,21 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId }
     );
 
+    // Notify the new assignee (additive third write — best-effort). Skips the
+    // actor in case they assigned the task to themselves.
+    await createNotifications(
+      prisma,
+      [{
+        userId: assignedToUserId,
+        type: 'TASK_ASSIGNED',
+        title: 'New task assigned to you',
+        body: `${task.taskId} was assigned to you.`,
+        linkScope: 'TASK',
+        linkId: task.id,
+      }],
+      [userId]
+    );
+
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error assigning task:', error);
@@ -1015,6 +1031,23 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
+    // Notify the issuer that their task is ready for review (only when it
+    // actually enters review — an auto-closed task needs no review prompt).
+    if (newStatus === 'In Review') {
+      await createNotifications(
+        prisma,
+        [{
+          userId: task.issuerId,
+          type: 'TASK_SUBMITTED',
+          title: 'Task submitted for review',
+          body: `${task.taskId} is ready for your review.`,
+          linkScope: 'TASK',
+          linkId: task.id,
+        }],
+        [userId]
+      );
+    }
+
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
     console.error('Error submitting task:', error);
@@ -1127,6 +1160,29 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
     // Finding Pending-Verification hook: approve/reject can finalise a follow-up task.
     if (FINAL_TASK_STATUSES.includes(newStatus)) {
       await checkAndTriggerPendingVerification(task.id, userId);
+    }
+
+    // Notify the assignee of the review outcome (skip if the reviewer is also
+    // the assignee — the self-review guard above normally prevents this).
+    if (task.assignedToUserId) {
+      const outcomeTitle: Record<string, string> = {
+        approve: 'Your task was approved',
+        reject: 'Your task was rejected',
+        'follow-up': 'Your task needs follow-up',
+      };
+      await createNotifications(
+        prisma,
+        [{
+          userId: task.assignedToUserId,
+          type: 'TASK_REVIEWED',
+          title: outcomeTitle[action]!,
+          body: comment ? String(comment) : `Review complete: ${newStatus}.`,
+          linkScope: 'TASK',
+          linkId: task.id,
+          metadata: { action, newStatus },
+        }],
+        [userId]
+      );
     }
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
@@ -1320,6 +1376,20 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
 
     const updated = await prisma.$transaction((tx) =>
       reassignTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, { taskId: id, newAssigneeId, reason })
+    );
+
+    // Notify the new assignee, post-commit (best-effort, skips self-reassign).
+    await createNotifications(
+      prisma,
+      [{
+        userId: newAssigneeId,
+        type: 'TASK_ASSIGNED',
+        title: 'A task was reassigned to you',
+        body: `${updated.taskId} was reassigned to you.`,
+        linkScope: 'TASK',
+        linkId: updated.id,
+      }],
+      [userId]
     );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
@@ -1943,6 +2013,9 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
       content: content.trim(),
       authorId: userId
     });
+
+    // Notify task watchers (issuer + assignee) of the new comment — best-effort.
+    await notifyFeedWatchers(prisma, 'TASK', id, userId, content.trim());
 
     // Enrich with author name
     const author = await prisma.user.findUnique({
