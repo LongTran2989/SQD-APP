@@ -3,7 +3,7 @@ import { emitRealtimeEvent } from '../realtime/pgEvents';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
-export type FeedScope = 'TASK' | 'WP' | 'DIVISION' | 'ORG';
+export type FeedScope = 'TASK' | 'WP' | 'DIVISION' | 'ORG' | 'FINDING';
 export type FeedPostType = 'COMMENT' | 'SYSTEM_EVENT' | 'ESCALATION_CARD' | 'INFO_CARD';
 
 export interface CreateFeedPostInput {
@@ -55,7 +55,7 @@ export async function createFeedPost(client: PrismaLike, input: CreateFeedPostIn
   return post;
 }
 
-export const FEED_SCOPES: FeedScope[] = ['TASK', 'WP', 'DIVISION', 'ORG'];
+export const FEED_SCOPES: FeedScope[] = ['TASK', 'WP', 'DIVISION', 'ORG', 'FINDING'];
 
 export function isFeedScope(value: string): value is FeedScope {
   return (FEED_SCOPES as string[]).includes(value);
@@ -89,6 +89,7 @@ export function canPostToFeed(
   switch (scope) {
     case 'TASK':
     case 'WP':
+    case 'FINDING':  // open commenting — any authenticated user (findings are globally readable)
       return true;
     case 'DIVISION':
       return isDirectorOrAdmin || scopeId === user.divisionId;

@@ -26,7 +26,7 @@ export const REALTIME_CHANNEL = 'sqd_realtime';
 export type RealtimeEvent =
   | { kind: 'notification'; userId: number }
   | { kind: 'escalation'; userId: number }
-  | { kind: 'feed'; scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG'; scopeId: number | null };
+  | { kind: 'feed'; scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG' | 'FINDING'; scopeId: number | null };
 
 // Postgres pg_notify has an 8000-byte payload limit (hard limit in the backend).
 // Signals here are signals only ({kind, userId} or {kind, scope, scopeId}) and

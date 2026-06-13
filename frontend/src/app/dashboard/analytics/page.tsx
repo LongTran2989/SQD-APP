@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BarChart2, Star, AlertTriangle } from 'lucide-react';
+import { BarChart2, Star, AlertTriangle, Clock, ClipboardList } from 'lucide-react';
 import {
   getTimeBookingAnalytics,
   TimeBookingAnalytics,
 } from '../../../api/taskApi';
+import FindingsTab from './FindingsTab';
 
 // ─── Display helpers ────────────────────────────────────────────────────────
 
@@ -46,9 +47,9 @@ function EfficiencyBadge({ ratio }: { ratio: number | null }) {
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Time Booking tab ───────────────────────────────────────────────────────
 
-export default function AnalyticsPage() {
+function TimeBookingTab() {
   const [data, setData] = useState<TimeBookingAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,10 +60,11 @@ export default function AnalyticsPage() {
       .then((d) => {
         if (!cancelled) setData(d);
       })
-      .catch((err: any) => {
+      .catch((err: unknown) => {
         if (!cancelled) {
+          const status = (err as { response?: { status?: number } })?.response?.status;
           setError(
-            err.response?.status === 403
+            status === 403
               ? 'You do not have permission to view analytics.'
               : 'Failed to load analytics. Please try again.'
           );
@@ -113,19 +115,7 @@ export default function AnalyticsPage() {
   });
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-
-      {/* Header */}
-      <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-        <div className="p-3 bg-blue-50 rounded-xl">
-          <BarChart2 className="w-7 h-7 text-blue-600" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Analytics</h1>
-          <p className="text-slate-500">Time efficiency and staff performance across tasks.</p>
-        </div>
-      </div>
-
+    <div className="space-y-6">
       {/* Incomplete bookings notice */}
       {data.incompleteBookings > 0 && (
         <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
@@ -237,6 +227,59 @@ export default function AnalyticsPage() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Page (tab shell) ───────────────────────────────────────────────────────
+
+type TabKey = 'time' | 'findings';
+
+const TABS: { key: TabKey; label: string; icon: typeof Clock }[] = [
+  { key: 'time', label: 'Time Efficiency', icon: Clock },
+  { key: 'findings', label: 'Findings', icon: ClipboardList },
+];
+
+export default function AnalyticsPage() {
+  const [tab, setTab] = useState<TabKey>('time');
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+        <div className="p-3 bg-blue-50 rounded-xl">
+          <BarChart2 className="w-7 h-7 text-blue-600" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Analytics</h1>
+          <p className="text-slate-500">Time efficiency, staff performance, and findings trends.</p>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-slate-200">
+        {TABS.map(({ key, label, icon: Icon }) => {
+          const active = tab === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                active
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Active tab */}
+      {tab === 'time' ? <TimeBookingTab /> : <FindingsTab />}
     </div>
   );
 }

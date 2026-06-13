@@ -141,7 +141,7 @@ async function writeOne(client: PrismaLike, input: NotificationInput): Promise<b
  */
 export async function notifyFeedWatchers(
   client: PrismaLike,
-  scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG',
+  scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG' | 'FINDING',
   scopeId: number | null,
   authorId: number,
   content: string
