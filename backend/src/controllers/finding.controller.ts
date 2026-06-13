@@ -10,6 +10,7 @@ import {
 } from '../constants/findingExpansion';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import { createNotifications, resolvePrivilegedUserIds } from '../services/notificationService';
 
 import { prisma } from '../lib/prisma';
 
@@ -335,6 +336,23 @@ export const createFinding = async (req: Request, res: Response): Promise<void> 
 
     const finding = await prisma.$transaction((tx) =>
       createFindingService(tx, { userId }, { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds })
+    );
+
+    // Notify the finding reviewers (finding:review holders in the target
+    // division + Director/Admin cross-division), post-commit and best-effort.
+    // The reporter (actor) is excluded — they just raised it.
+    const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', finding.targetDivisionId);
+    await createNotifications(
+      prisma,
+      reviewerIds.map((uid) => ({
+        userId: uid,
+        type: 'FINDING_CREATED' as const,
+        title: 'New finding raised',
+        body: `Finding #${finding.id}: ${finding.description.slice(0, 120)}`,
+        linkScope: 'FINDING' as const,
+        linkId: finding.id,
+      })),
+      [userId]
     );
 
     res.status(201).json(finding);

@@ -96,6 +96,11 @@ model User {
   createdFindingLinks    FindingLink[]            @relation("FindingLinkCreatedBy")
   createdResponseActions FindingResponseAction[]  @relation("FindingResponseActionCreatedBy")
 
+  // Per-user inbox (Notification Center). Cascade so test teardown that hard-
+  // deletes users does not FK-error — notifications are a disposable UI artifact,
+  // never the compliance record (AuditLog remains the source of truth).
+  notifications Notification[] @relation("UserNotifications")
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -580,6 +585,38 @@ model AuditLog {
   details Json? // Technical JSON payload of the change
 
   timestamp DateTime @default(now())
+}
+
+// -----------------------------------------------------------------------
+// Notification Center (per-user inbox)
+// -----------------------------------------------------------------------
+//
+// A disposable, per-user UI artifact powering the header inbox bell. NOT a
+// compliance record — AuditLog remains the system-of-record (Rule 3), and
+// notifications are an additive THIRD write, best-effort. NOT one of the four
+// soft-delete-protected models, so it has no `deletedAt` and may be physically
+// read/cleared. The User relation is onDelete: Cascade so test teardown that
+// hard-deletes users does not FK-error (known handover gotcha).
+model Notification {
+  id     Int  @id @default(autoincrement())
+  userId Int
+  user   User @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  type  String // TASK_ASSIGNED | TASK_REVIEWED | TASK_SUBMITTED | ESCALATION_QUEUED | FINDING_CREATED | FEED_ACTIVITY
+  title String
+  body  String?
+
+  // Deep-link target for the client (e.g. TASK/142, FINDING/8, ESCALATION).
+  linkScope String? // TASK | WP | FINDING | ESCALATION
+  linkId    Int?
+
+  metadata Json?
+  readAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
 }
 
 // -----------------------------------------------------------------------

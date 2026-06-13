@@ -1,4 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
+import { emitRealtimeEvent } from '../realtime/pgEvents';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
@@ -29,7 +30,7 @@ export interface CreateFeedPostInput {
  * (scope 'TASK', scopeId = task.id) replaces the former TaskActivity model.
  */
 export async function createFeedPost(client: PrismaLike, input: CreateFeedPostInput) {
-  return client.feedPost.create({
+  const post = await client.feedPost.create({
     data: {
       type: input.type,
       scope: input.scope,
@@ -45,6 +46,13 @@ export async function createFeedPost(client: PrismaLike, input: CreateFeedPostIn
       taggedDivisionIds: (input.taggedDivisionIds as any) ?? Prisma.DbNull,
     },
   });
+
+  // Realtime SIGNAL for the "new updates" pill + soft refetch. Rides the
+  // caller's transaction client so the NOTIFY only fires on COMMIT (no refetch
+  // race), is best-effort (never throws), and is a no-op under NODE_ENV=test.
+  await emitRealtimeEvent(client, { kind: 'feed', scope: input.scope, scopeId: input.scopeId ?? null });
+
+  return post;
 }
 
 export const FEED_SCOPES: FeedScope[] = ['TASK', 'WP', 'DIVISION', 'ORG'];

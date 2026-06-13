@@ -14,6 +14,8 @@ import {
 import { createTaskService, reassignTaskService } from './task.controller';
 import { createFindingService } from './finding.controller';
 import { HttpError, isHttpError } from '../utils/httpError';
+import { createNotifications, resolvePrivilegedUserIds } from '../services/notificationService';
+import { emitRealtimeEvent } from '../realtime/pgEvents';
 
 import { prisma } from '../lib/prisma';
 
@@ -139,6 +141,43 @@ export const flagPost = async (req: Request, res: Response): Promise<void> => {
 
       return { flag, cards };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    // Notify everyone who can ACTION this flag (post-commit, best-effort). The
+    // recipient set mirrors canActionFlag: Director/Admin reach any division;
+    // escalation:review holders are division-scoped (ORG flags → any holder).
+    let flagDivision: number | null = null;
+    if (targetScope === 'DIVISION') {
+      flagDivision = origin.divisionId;
+    } else if (targetScope === 'WP' && origin.wpId != null) {
+      const wp = await prisma.workPackage.findUnique({
+        where: { id: origin.wpId, deletedAt: null },
+        select: { divisionId: true },
+      });
+      flagDivision = wp?.divisionId ?? null;
+    }
+    const reviewerIds = await resolvePrivilegedUserIds(
+      prisma,
+      'escalation:review',
+      targetScope === 'ORG' ? null : flagDivision
+    );
+    await createNotifications(
+      prisma,
+      reviewerIds.map((uid) => ({
+        userId: uid,
+        type: 'ESCALATION_QUEUED' as const,
+        title: 'New escalation in your queue',
+        body: `${flaggedByName} escalated a comment to ${TARGET_FEED_LABEL[targetScope]}.`,
+        linkScope: 'ESCALATION' as const,
+        linkId: result.flag.id,
+      })),
+      [userId]
+    );
+    // Also nudge the existing escalation bell so it refreshes instantly rather
+    // than waiting for its 60s poll.
+    for (const uid of reviewerIds) {
+      if (uid === userId) continue;
+      await emitRealtimeEvent(prisma, { kind: 'escalation', userId: uid });
+    }
 
     res.status(201).json({ flag: result.flag, cards: result.cards });
   } catch (error) {
