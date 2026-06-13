@@ -379,6 +379,253 @@ async function main() {
   // AuthTypes, UserAuthorizations — to be added in next seed update.
   console.log('⏭️  Aviation data skipped — will be seeded in next update');
 
+  // ── SAMPLE FINDINGS ────────────────────────────────────────────────────────
+  // 8 realistic findings across 2 divisions and all lifecycle statuses.
+  // Idempotent: skips creation if a finding with the same description already exists.
+  // Reporters / reviewers drawn from the seeded user roster.
+
+  const findingReporterQCH = await prisma.user.findFirst({ where: { employeeId: 'VAE00057' } }); // Chu Thế Cường, Staff QCH
+  const findingReporterQCS = await prisma.user.findFirst({ where: { employeeId: 'VAE02576' } }); // Võ Lục Nguyên Thông, Staff QCS
+  const findingReviewerQCH = await prisma.user.findFirst({ where: { employeeId: 'VAE00483' } }); // Vũ Hồng Hải, Manager QCH
+  const findingReviewerQCS = await prisma.user.findFirst({ where: { employeeId: 'VAE00087' } }); // Nguyễn Thế Khôi, Manager QCS
+  const findingDirector    = await prisma.user.findFirst({ where: { employeeId: 'VAE00071' } }); // Lê Viết Thành, Director
+
+  const ataLandingGear = await prisma.ataChapter.findUnique({ where: { code: '32' } });
+  const ataStdPractice = await prisma.ataChapter.findUnique({ where: { code: '20' } });
+
+  type SeedFinding = {
+    description: string;
+    eventType: string;
+    status: string;
+    severity: string | null;
+    divisionCode: string;
+    deptName: string;
+    aircraftRegistration: string | null;
+    dueDate: Date | null;
+    closedAt: Date | null;
+    createdAt: Date;
+    ataCode: string | null;
+    reporterId: number;
+    closedById: number | null;
+    feedEvents: string[];
+  };
+
+  if (findingReporterQCH && findingReporterQCS && findingReviewerQCH && findingReviewerQCS && findingDirector) {
+    const now = new Date();
+    const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000);
+
+    const seedFindings: SeedFinding[] = [
+      // ── Open findings (freshly raised, not yet reviewed) ──
+      {
+        description: 'Torque wrench calibration record was missing for VN-A xxx engine run on line maintenance. Technician proceeded without verifying calibration status.',
+        eventType: 'Procedural Breach',
+        status: 'Open',
+        severity: null,
+        divisionCode: 'QCH',
+        deptName: 'HAN BMC',
+        aircraftRegistration: 'VN-A101',
+        dueDate: null,
+        closedAt: null,
+        createdAt: daysAgo(5),
+        ataCode: '20',
+        reporterId: findingReporterQCH.id,
+        closedById: null,
+        feedEvents: ['Finding raised by Chu Thế Cường — Procedural Breach'],
+      },
+      {
+        description: 'Component replacement record (P/N 5001-00-01) has an incorrect part number entry in the maintenance log for aircraft undergoing check at HCM base.',
+        eventType: 'Documentation Error',
+        status: 'Open',
+        severity: null,
+        divisionCode: 'QCS',
+        deptName: 'HCM BMC',
+        aircraftRegistration: 'VN-A205',
+        dueDate: null,
+        closedAt: null,
+        createdAt: daysAgo(3),
+        ataCode: null,
+        reporterId: findingReporterQCS.id,
+        closedById: null,
+        feedEvents: ['Finding raised by Võ Lục Nguyên Thông — Documentation Error'],
+      },
+
+      // ── In Progress findings (reviewed, severity set) ──
+      {
+        description: 'Landing gear retraction test completed without required two-person verification. Only one engineer signed off on the test card.',
+        eventType: 'Equipment Fault',
+        status: 'In Progress',
+        severity: 'Level 1',
+        divisionCode: 'QCH',
+        deptName: 'HAN RMC',
+        aircraftRegistration: 'VN-A112',
+        dueDate: daysAgo(-14), // 14 days from now
+        closedAt: null,
+        createdAt: daysAgo(10),
+        ataCode: '32',
+        reporterId: findingReporterQCH.id,
+        closedById: null,
+        feedEvents: [
+          'Finding raised by Chu Thế Cường — Equipment Fault',
+          'Finding reviewed by Vũ Hồng Hải — severity: Level 1',
+        ],
+      },
+      {
+        description: 'CASR Part 145.A.55 — maintenance record for engine borescope inspection was not transferred to aircraft technical log within the required 30-day window.',
+        eventType: 'Regulatory Non-compliance',
+        status: 'In Progress',
+        severity: 'Level 2',
+        divisionCode: 'QCS',
+        deptName: 'HCM RMC',
+        aircraftRegistration: 'VN-A311',
+        dueDate: daysAgo(-7), // 7 days from now
+        closedAt: null,
+        createdAt: daysAgo(15),
+        ataCode: null,
+        reporterId: findingReporterQCS.id,
+        closedById: null,
+        feedEvents: [
+          'Finding raised by Võ Lục Nguyên Thông — Regulatory Non-compliance',
+          'Finding reviewed by Nguyễn Thế Khôi — severity: Level 2',
+        ],
+      },
+
+      // ── Pending Verification findings ──
+      {
+        description: 'Hydraulic fluid level check interval exceeded by 3 days on line station aircraft. No adverse event occurred but procedure requires escalation.',
+        eventType: 'Maintenance Error',
+        status: 'Pending Verification',
+        severity: 'Level 1',
+        divisionCode: 'QCH',
+        deptName: 'EGD',
+        aircraftRegistration: null,
+        dueDate: null,
+        closedAt: null,
+        createdAt: daysAgo(25),
+        ataCode: '29',
+        reporterId: findingReporterQCH.id,
+        closedById: null,
+        feedEvents: [
+          'Finding raised by Chu Thế Cường — Maintenance Error',
+          'Finding reviewed by Vũ Hồng Hải — severity: Level 1',
+          'Finding advanced to Pending Verification by Vũ Hồng Hải',
+        ],
+      },
+      {
+        description: 'Ramp safety briefing was skipped for contract ground crew during pushback operations. Verbal warning issued on the spot; no incident.',
+        eventType: 'Safety Observation',
+        status: 'Pending Verification',
+        severity: 'Observation',
+        divisionCode: 'QCS',
+        deptName: 'DAD BRANCH',
+        aircraftRegistration: null,
+        dueDate: null,
+        closedAt: null,
+        createdAt: daysAgo(20),
+        ataCode: null,
+        reporterId: findingReporterQCS.id,
+        closedById: null,
+        feedEvents: [
+          'Finding raised by Võ Lục Nguyên Thông — Safety Observation',
+          'Finding reviewed by Nguyễn Thế Khôi — severity: Observation',
+          'Finding advanced to Pending Verification by Nguyễn Thế Khôi',
+        ],
+      },
+
+      // ── Closed finding ──
+      {
+        description: 'Approved maintenance data (AMM 32-11-01 Rev.14) was not available at the work site. Technician used printed copy two revisions behind the current AMM.',
+        eventType: 'Procedural Breach',
+        status: 'Closed',
+        severity: 'Level 2',
+        divisionCode: 'QCH',
+        deptName: 'HAN BMC',
+        aircraftRegistration: 'VN-A098',
+        dueDate: null,
+        closedAt: daysAgo(2),
+        createdAt: daysAgo(30),
+        ataCode: '32',
+        reporterId: findingReporterQCH.id,
+        closedById: findingReviewerQCH.id,
+        feedEvents: [
+          'Finding raised by Chu Thế Cường — Procedural Breach',
+          'Finding reviewed by Vũ Hồng Hải — severity: Level 2',
+          'Finding advanced to Pending Verification by Vũ Hồng Hải',
+          'Finding closed by Vũ Hồng Hải',
+        ],
+      },
+
+      // ── Dismissed finding ──
+      {
+        description: 'Reported suspected fuel contamination on VN-A402 — subsequent lab analysis confirmed within spec. Finding raised in error by trainee technician.',
+        eventType: 'Other',
+        status: 'Dismissed',
+        severity: null,
+        divisionCode: 'QCS',
+        deptName: 'HCM BMC',
+        aircraftRegistration: 'VN-A402',
+        dueDate: null,
+        closedAt: null,
+        createdAt: daysAgo(12),
+        ataCode: null,
+        reporterId: findingReporterQCS.id,
+        closedById: null,
+        feedEvents: [
+          'Finding raised by Võ Lục Nguyên Thông — Other',
+          'Finding dismissed by Nguyễn Thế Khôi: Lab result confirms fuel in-spec; finding not substantiated.',
+        ],
+      },
+    ];
+
+    let findingCount = 0;
+    for (const sf of seedFindings) {
+      // Idempotent: skip if a finding with this exact description already exists.
+      const exists = await prisma.finding.findFirst({ where: { description: sf.description } });
+      if (exists) continue;
+
+      const ataChapter = sf.ataCode
+        ? (sf.ataCode === '32' ? ataLandingGear : ataStdPractice)
+        : null;
+
+      const finding = await prisma.finding.create({
+        data: {
+          description:         sf.description,
+          eventType:           sf.eventType,
+          status:              sf.status,
+          severity:            sf.severity,
+          departmentId:        deptMap[sf.deptName]!,
+          targetDivisionId:    divMap[sf.divisionCode]!,
+          reportedByUserId:    sf.reporterId,
+          closedByUserId:      sf.closedById,
+          closedAt:            sf.closedAt,
+          aircraftRegistration: sf.aircraftRegistration,
+          ataChapterId:        ataChapter?.id ?? null,
+          createdAt:           sf.createdAt,
+          ...(sf.dueDate && { dueDate: sf.dueDate }),
+        },
+      });
+
+      // Seed feed events (SYSTEM_EVENT) so the finding's feed history is visible
+      // immediately, before any server-side writes occur via the live API.
+      for (const content of sf.feedEvents) {
+        await prisma.feedPost.create({
+          data: {
+            type:     'SYSTEM_EVENT',
+            scope:    'FINDING',
+            scopeId:  finding.id,
+            content,
+            authorId: null,
+            createdAt: sf.createdAt, // align with finding creation date
+          },
+        });
+      }
+
+      findingCount++;
+    }
+    console.log(`✅ Sample findings seeded (${findingCount} new)`);
+  } else {
+    console.warn('⚠️  Sample findings skipped — required seed users not found');
+  }
+
   console.log('');
   console.log('🎉 Seed complete!');
   console.log('');

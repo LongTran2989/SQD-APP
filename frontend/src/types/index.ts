@@ -251,7 +251,7 @@ export interface TaskActivityEnriched extends TaskActivity {
 }
 
 // ── Unified feed (Phase 2) — generic across all four scopes ──────────────────
-export type FeedScope = 'TASK' | 'WP' | 'DIVISION' | 'ORG';
+export type FeedScope = 'TASK' | 'WP' | 'DIVISION' | 'ORG' | 'FINDING';
 export type FeedPostType = 'COMMENT' | 'SYSTEM_EVENT' | 'ESCALATION_CARD' | 'INFO_CARD';
 
 export interface FeedPost {

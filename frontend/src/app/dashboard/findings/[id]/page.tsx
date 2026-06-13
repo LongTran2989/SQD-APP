@@ -4,9 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
-import { FindingDetail, TaskEnriched, TaskActivityEnriched } from '../../../../types';
+import { FindingDetail } from '../../../../types';
 import { getFindingById, closeFinding } from '../../../../api/findingApi';
-import { getTaskById, getTaskActivity } from '../../../../api/taskApi';
 import { SeverityBadge, FindingStatusBadge, ResponseActionBadge } from '../../../../components/findings/FindingBadges';
 import ReviewPanel from '../../../../components/findings/ReviewPanel';
 import GenerateFollowUpModal from '../../../../components/findings/GenerateFollowUpModal';
@@ -15,7 +14,7 @@ import CapaPanel from '../../../../components/findings/CapaPanel';
 import RelatedFindingsPanel from '../../../../components/findings/RelatedFindingsPanel';
 import TrendBanner from '../../../../components/findings/TrendBanner';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
-import TaskActivityFeed from '../../../../components/tasks/TaskActivityFeed';
+import FindingActivityFeed from '../../../../components/findings/FindingActivityFeed';
 import toast from 'react-hot-toast';
 import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X } from 'lucide-react';
 
@@ -37,8 +36,6 @@ export default function FindingDetailPage() {
   const findingId = Number(params.id);
 
   const [finding, setFinding] = useState<FindingDetail | null>(null);
-  const [sourceTask, setSourceTask] = useState<TaskEnriched | null>(null);
-  const [activities, setActivities] = useState<TaskActivityEnriched[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,18 +49,10 @@ export default function FindingDetailPage() {
     try {
       const f = await getFindingById(findingId);
       setFinding(f);
-      if (f.sourceTask) {
-        // Source task feed (read-only). Transparency model: any user can read tasks.
-        const [t, acts] = await Promise.all([
-          getTaskById(f.sourceTask.id).catch(() => null),
-          getTaskActivity(f.sourceTask.id).catch(() => []),
-        ]);
-        setSourceTask(t);
-        setActivities(acts);
-      }
       setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load finding');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setError(msg || 'Failed to load finding');
     } finally {
       setLoading(false);
     }
@@ -79,8 +68,9 @@ export default function FindingDetailPage() {
       await closeFinding(findingId);
       toast.success('Finding closed');
       router.push('/dashboard/findings');
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to close finding');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg || 'Failed to close finding');
       setClosing(false);
       setShowCloseConfirm(false);
     }
@@ -265,16 +255,10 @@ export default function FindingDetailPage() {
           )}
         </div>
 
-        {/* ── Right column — Activity feed (source task, read-only) ── */}
+        {/* ── Right column — Finding activity feed ── */}
         <div className="lg:col-span-1">
           <div className="h-[calc(100vh-12rem)] sticky top-6">
-            {sourceTask ? (
-              <TaskActivityFeed task={sourceTask} activities={activities} currentUser={user} onNewActivity={() => {}} readOnly />
-            ) : (
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 text-sm text-slate-400 italic">
-                No source task feed available.
-              </div>
-            )}
+            <FindingActivityFeed findingId={findingId} currentUser={user} onRefresh={load} />
           </div>
         </div>
       </div>

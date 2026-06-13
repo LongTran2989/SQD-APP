@@ -31,6 +31,7 @@ export const canPostToFeed = (
   switch (scope) {
     case 'TASK':
     case 'WP':
+    case 'FINDING':
       return true;
     case 'DIVISION':
       return isDirectorOrAdmin || scopeId === userDivisionId;
