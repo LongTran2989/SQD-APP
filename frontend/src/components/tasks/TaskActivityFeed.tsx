@@ -9,24 +9,7 @@ import FlagButton from '../feed/FlagButton';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) +
-    ' ' +
-    d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-}
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-}
+import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,8 +73,9 @@ export default function TaskActivityFeed({
       const newActivity = await postTaskComment(task.id, comment.trim());
       onNewActivity(newActivity);
       setComment('');
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to post comment');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg || 'Failed to post comment');
     } finally {
       setPosting(false);
     }

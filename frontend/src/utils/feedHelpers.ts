@@ -31,6 +31,16 @@ export function formatTimestamp(iso: string): string {
   );
 }
 
+/** Up-to-two-letter uppercase initials for an avatar (e.g. "Long Tran" → "LT"). */
+export function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+}
+
 /** Deep-link to a flagged source, using the denormalised id on the card. */
 export function sourceHref(post: Pick<FeedPostEnriched, 'sourceTaskId' | 'sourceWpId'>): string | null {
   if (post.sourceTaskId) return `/dashboard/tasks/${post.sourceTaskId}`;

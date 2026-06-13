@@ -64,6 +64,13 @@ export const flagPost = async (req: Request, res: Response): Promise<void> => {
       res.status(400).json({ message: 'Unknown source scope.' });
       return;
     }
+    // FINDING sits outside the escalation hierarchy (SCOPE_LEVEL -1). Reject it
+    // explicitly with a correct message instead of letting it fall through the
+    // level comparisons to a misleading "Org-level" error.
+    if (sourcePost.scope === 'FINDING') {
+      res.status(400).json({ message: 'Finding comments cannot be escalated.' });
+      return;
+    }
     if (sourcePost.scope === 'ORG') {
       res.status(400).json({ message: 'Org-level comments cannot be escalated further.' });
       return;
