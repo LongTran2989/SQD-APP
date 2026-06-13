@@ -12,7 +12,9 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
  *   Task→WP, WP→Division, Task→Division (info@WP), WP→Org (info@Division),
  *   Task→Org (info@WP + info@Division), Division→Org.
  */
-export const SCOPE_LEVEL: Record<FeedScope, number> = { TASK: 0, WP: 1, DIVISION: 2, ORG: 3 };
+// FINDING is outside the escalation hierarchy — set to -1 so it never satisfies
+// a level comparison and cannot be used as an escalation origin or target.
+export const SCOPE_LEVEL: Record<FeedScope, number> = { TASK: 0, WP: 1, DIVISION: 2, ORG: 3, FINDING: -1 };
 
 // A flag may target WP / DIVISION / ORG only — TASK is the floor, never a target.
 export type EscalationTargetScope = 'WP' | 'DIVISION' | 'ORG';
@@ -83,6 +85,7 @@ const SCOPE_LABEL: Record<FeedScope, string> = {
   WP: 'a work package',
   DIVISION: 'a division',
   ORG: 'the organisation',
+  FINDING: 'a finding',
 };
 
 const TARGET_LABEL: Record<EscalationTargetScope, string> = {

@@ -33,7 +33,7 @@ async function resolveFeedTarget(
   const scopeIdStr = Array.isArray(rawScopeId) ? rawScopeId[0] : rawScopeId;
   const scope = (scopeStr ?? '').toUpperCase();
   if (!isFeedScope(scope)) {
-    return { ok: false, status: 400, message: `Invalid feed scope: ${rawScope}. Must be TASK, WP, DIVISION, or ORG.` };
+    return { ok: false, status: 400, message: `Invalid feed scope: ${rawScope}. Must be TASK, WP, DIVISION, ORG, or FINDING.` };
   }
 
   if (scope === 'ORG') {
@@ -56,6 +56,9 @@ async function resolveFeedTarget(
   } else if (scope === 'DIVISION') {
     const division = await prisma.division.findUnique({ where: { id: scopeId }, select: { id: true } });
     if (!division) return { ok: false, status: 404, message: 'Division not found' };
+  } else if (scope === 'FINDING') {
+    const finding = await prisma.finding.findUnique({ where: { id: scopeId, deletedAt: null }, select: { id: true } });
+    if (!finding) return { ok: false, status: 404, message: 'Finding not found' };
   }
 
   return { ok: true, scope, scopeId };
