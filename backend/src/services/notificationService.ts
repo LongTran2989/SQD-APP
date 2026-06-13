@@ -60,27 +60,33 @@ export async function createNotifications(
   inputs: NotificationInput[],
   excludeUserIds: Array<number | null | undefined> = []
 ): Promise<void> {
-  try {
-    const exclude = new Set(excludeUserIds.filter((id): id is number => typeof id === 'number'));
-    // De-dup identical (user,type,linkScope,linkId) tuples within this batch.
-    const seen = new Set<string>();
-    const recipients = new Set<number>();
+  const exclude = new Set(excludeUserIds.filter((id): id is number => typeof id === 'number'));
+  // De-dup identical (user,type,linkScope,linkId) tuples within this batch.
+  const seen = new Set<string>();
+  const recipients = new Set<number>();
 
-    for (const input of inputs) {
-      if (exclude.has(input.userId)) continue;
-      const key = `${input.userId}|${input.type}|${input.linkScope ?? ''}|${input.linkId ?? ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+  for (const input of inputs) {
+    if (exclude.has(input.userId)) continue;
+    const key = `${input.userId}|${input.type}|${input.linkScope ?? ''}|${input.linkId ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
+    // Isolate each write: one recipient's failure must never abort the rest of
+    // the batch (e.g. a transient error on reviewer #3 should still notify #4-N).
+    try {
       const written = await writeOne(client, input);
       if (written) recipients.add(input.userId);
+    } catch (err) {
+      console.error('[notifications] write failed for user', input.userId, '(non-fatal):', err);
     }
+  }
 
-    for (const userId of recipients) {
+  for (const userId of recipients) {
+    try {
       await emitRealtimeEvent(client, { kind: 'notification', userId });
+    } catch (err) {
+      console.error('[notifications] signal failed for user', userId, '(non-fatal):', err);
     }
-  } catch (err) {
-    console.error('[notifications] createNotifications failed (non-fatal):', err);
   }
 }
 

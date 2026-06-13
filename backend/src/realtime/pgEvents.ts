@@ -81,6 +81,13 @@ function dispatch(raw: string): void {
       // (via its open views + RBAC-scoped refetch) whether the signal is relevant.
       publishToAll({ type: 'feed', data: { scope: evt.scope, scopeId: evt.scopeId } });
       return;
+    default: {
+      // Exhaustiveness guard: a new event kind that forgets a dispatch case (or a
+      // malformed payload) must surface in logs rather than vanish silently.
+      const unhandled: never = evt;
+      console.warn('[realtime] dropped unknown event:', JSON.stringify(unhandled));
+      return;
+    }
   }
 }
 

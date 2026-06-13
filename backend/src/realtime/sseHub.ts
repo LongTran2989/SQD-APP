@@ -28,13 +28,19 @@ export const MAX_CONNECTIONS_PER_USER = 5;
 
 const clients = new Map<number, Set<Response>>();
 
-/** Serialises and writes one SSE frame. Swallows write errors (dead socket). */
-export function writeEvent(res: Response, evt: SseEvent): void {
+/**
+ * Serialises and writes one SSE frame. Returns false if the write failed (dead
+ * socket) so broadcast loops can proactively prune it — the 'close' handler may
+ * be delayed or suppressed by a proxy, and a stale socket otherwise costs a
+ * failed write on every future fan-out.
+ */
+export function writeEvent(res: Response, evt: SseEvent): boolean {
   try {
     res.write(`event: ${evt.type}\n`);
     res.write(`data: ${JSON.stringify(evt.data ?? {})}\n\n`);
+    return true;
   } catch {
-    // Socket already closed — cleanup happens on the 'close' handler.
+    return false;
   }
 }
 
@@ -65,13 +71,17 @@ export function removeClient(userId: number, res: Response): void {
 export function publishToUser(userId: number, evt: SseEvent): void {
   const set = clients.get(userId);
   if (!set) return;
-  for (const res of set) writeEvent(res, evt);
+  for (const res of set) {
+    if (!writeEvent(res, evt)) removeClient(userId, res);
+  }
 }
 
 /** Pushes an event to every open stream across all users (broadcast). */
 export function publishToAll(evt: SseEvent): void {
-  for (const set of clients.values()) {
-    for (const res of set) writeEvent(res, evt);
+  for (const [userId, set] of clients) {
+    for (const res of set) {
+      if (!writeEvent(res, evt)) removeClient(userId, res);
+    }
   }
 }
 

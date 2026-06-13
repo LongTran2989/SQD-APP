@@ -52,19 +52,26 @@ export const markRead = async (req: Request, res: Response): Promise<void> => {
   }
 
   // Scope the update by userId so one user can never mark another's as read.
+  const readAt = new Date();
   const result = await prisma.notification.updateMany({
     where: { id, userId, readAt: null },
-    data: { readAt: new Date() },
+    data: { readAt },
   });
-  if (result.count === 0) {
-    // Either not found, not theirs, or already read — distinguish 404 vs 200.
-    const exists = await prisma.notification.findFirst({ where: { id, userId }, select: { id: true } });
-    if (!exists) {
-      res.status(404).json({ message: 'Notification not found.' });
-      return;
-    }
+  if (result.count > 0) {
+    // Freshly marked read — echo the timestamp the client can sync to.
+    res.status(200).json({ ok: true, updated: true, readAt });
+    return;
   }
-  res.status(200).json({ ok: true });
+  // Nothing updated: either not found / not theirs (404) or already read (no-op).
+  const existing = await prisma.notification.findFirst({
+    where: { id, userId },
+    select: { readAt: true },
+  });
+  if (!existing) {
+    res.status(404).json({ message: 'Notification not found.' });
+    return;
+  }
+  res.status(200).json({ ok: true, updated: false, readAt: existing.readAt });
 };
 
 // POST /api/notifications/read-all

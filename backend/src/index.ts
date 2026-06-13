@@ -97,8 +97,10 @@ if (process.env.NODE_ENV !== 'test') {
   // must not hold an open DB connection past the suite).
   void startRealtimeListener();
   // Purge read notifications older than 30 days at startup then every 24 h.
+  // unref() so this housekeeping timer never keeps the event loop alive on
+  // shutdown (clean exit on SIGTERM/SIGINT during a deploy).
   void purgeOldNotifications(prisma);
-  setInterval(() => void purgeOldNotifications(prisma), 24 * 60 * 60 * 1000);
+  setInterval(() => void purgeOldNotifications(prisma), 24 * 60 * 60 * 1000).unref();
 }
 
 export default app;

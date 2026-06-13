@@ -18,6 +18,16 @@ export const streamEvents = (req: Request, res: Response): void => {
     return;
   }
 
+  // Enforce the per-user connection cap BEFORE committing to a 200 SSE stream,
+  // so a rejected client gets a real 429 status (visible to proxies/monitoring)
+  // rather than a 200 carrying an error frame.
+  if (!addClient(userId, res)) {
+    res
+      .status(429)
+      .json({ message: 'Too many connections', max: MAX_CONNECTIONS_PER_USER });
+    return;
+  }
+
   // SSE headers. `X-Accel-Buffering: no` disables nginx buffering; `no-transform`
   // stops compression proxies from coalescing frames.
   res.writeHead(200, {
@@ -29,13 +39,6 @@ export const streamEvents = (req: Request, res: Response): void => {
   res.flushHeaders?.();
   // Never time the socket out — this is a long-lived stream.
   req.socket.setTimeout?.(0);
-
-  if (!addClient(userId, res)) {
-    // At the per-user connection cap — refuse politely and close.
-    writeEvent(res, { type: 'error', data: { message: 'Too many connections', max: MAX_CONNECTIONS_PER_USER } });
-    res.end();
-    return;
-  }
 
   // Initial hello so the client knows the stream is live (and can refetch counts).
   writeEvent(res, { type: 'ready', data: {} });
