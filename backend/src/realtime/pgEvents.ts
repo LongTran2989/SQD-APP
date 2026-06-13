@@ -28,6 +28,12 @@ export type RealtimeEvent =
   | { kind: 'escalation'; userId: number }
   | { kind: 'feed'; scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG'; scopeId: number | null };
 
+// Postgres pg_notify has an 8000-byte payload limit (hard limit in the backend).
+// Signals here are signals only ({kind, userId} or {kind, scope, scopeId}) and
+// are always << 100 bytes. This guard is defensive against future field additions
+// and ensures a payload overflow is caught before it can abort a surrounding tx.
+const MAX_NOTIFY_BYTES = 7900;
+
 /**
  * Publishes a realtime signal via pg_notify, riding the caller's transaction
  * client when one is supplied. Best-effort: never throws, never blocks the
@@ -38,6 +44,11 @@ export async function emitRealtimeEvent(client: PrismaLike, evt: RealtimeEvent):
   if (process.env.NODE_ENV === 'test') return;
   try {
     const payload = JSON.stringify(evt);
+    if (Buffer.byteLength(payload, 'utf8') > MAX_NOTIFY_BYTES) {
+      // Should never happen — guard exists to catch future signal-shape drift.
+      console.error('[realtime] emit skipped — payload exceeds pg_notify limit:', Buffer.byteLength(payload, 'utf8'), 'bytes');
+      return;
+    }
     // pg_notify(text, text) — parameterised so the JSON payload is safely quoted.
     await client.$executeRaw`SELECT pg_notify(${REALTIME_CHANNEL}, ${payload})`;
   } catch (err) {

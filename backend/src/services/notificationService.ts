@@ -3,6 +3,9 @@ import { hasPrivilege } from '../utils/privilegeAccess';
 import { PrivilegeKey } from '../constants/privileges';
 import { emitRealtimeEvent } from '../realtime/pgEvents';
 
+// Retain read notifications for this many days before purging.
+const NOTIFICATION_RETENTION_DAYS = 30;
+
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 /**
@@ -171,6 +174,25 @@ export async function notifyFeedWatchers(
     await createNotifications(client, inputs, [authorId]);
   } catch (err) {
     console.error('[notifications] notifyFeedWatchers failed (non-fatal):', err);
+  }
+}
+
+// ─── Retention / housekeeping ────────────────────────────────────────────────
+
+/**
+ * Deletes notifications that have been read and are older than
+ * NOTIFICATION_RETENTION_DAYS. Unread notifications are never touched.
+ * Called once at startup and then on a 24-hour interval (see index.ts).
+ */
+export async function purgeOldNotifications(client: PrismaClient): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const { count } = await client.notification.deleteMany({
+      where: { readAt: { not: null, lt: cutoff } },
+    });
+    if (count > 0) console.log(`[notifications] purged ${count} old read notification(s)`);
+  } catch (err) {
+    console.error('[notifications] purge failed (non-fatal):', err);
   }
 }
 

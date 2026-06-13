@@ -22,6 +22,7 @@ import privilegeRoutes from './routes/privilege.routes';
 import notificationRoutes from './routes/notification.routes';
 import realtimeRoutes from './routes/realtime.routes';
 import { startRealtimeListener } from './realtime/pgEvents';
+import { purgeOldNotifications } from './services/notificationService';
 
 dotenv.config();
 
@@ -95,6 +96,9 @@ if (process.env.NODE_ENV !== 'test') {
   // Start the cross-instance realtime LISTEN bridge (never under test — Jest
   // must not hold an open DB connection past the suite).
   void startRealtimeListener();
+  // Purge read notifications older than 30 days at startup then every 24 h.
+  void purgeOldNotifications(prisma);
+  setInterval(() => void purgeOldNotifications(prisma), 24 * 60 * 60 * 1000);
 }
 
 export default app;
