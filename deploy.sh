@@ -1,0 +1,168 @@
+#!/bin/bash
+# SQD-APP — OCI Ubuntu ARM deployment script
+# Usage: sudo bash deploy.sh your-subdomain.duckdns.org
+set -e
+
+if [ -z "$1" ]; then
+  echo "Usage: sudo bash deploy.sh your-subdomain.duckdns.org"
+  exit 1
+fi
+
+DOMAIN=$1
+REPO_URL="https://github.com/LongTran2989/SQD-APP.git"
+BRANCH="claude/hosting-options-testing-sd615t"
+DB_NAME="sqd_qa_db"
+DB_USER="sqd_user"
+DB_PASSWORD=$(openssl rand -hex 16)
+JWT_SECRET=$(openssl rand -hex 32)
+
+echo ""
+echo "============================================"
+echo "  SQD-APP Deployment"
+echo "  Domain : $DOMAIN"
+echo "============================================"
+echo ""
+
+# ── 1. System packages ────────────────────────────────────────────────────────
+echo "→ [1/9] Updating system and installing packages..."
+apt-get update -y && apt-get upgrade -y
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs git nginx certbot python3-certbot-nginx \
+  postgresql postgresql-contrib iptables-persistent
+
+echo "→ Installing PM2..."
+npm install -g pm2
+
+# ── 2. Open OS firewall ───────────────────────────────────────────────────────
+echo "→ [2/9] Opening firewall ports 80 and 443..."
+iptables -I INPUT -p tcp --dport 80 -j ACCEPT  2>/dev/null || true
+iptables -I INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+netfilter-persistent save 2>/dev/null || true
+
+# ── 3. PostgreSQL ─────────────────────────────────────────────────────────────
+echo "→ [3/9] Setting up PostgreSQL..."
+sudo -u postgres psql -c "
+  DO \$\$
+  BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$DB_USER') THEN
+      CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';
+    END IF;
+  END
+  \$\$;"
+sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;" 2>/dev/null \
+  || echo "  (database already exists — skipping)"
+
+# ── 4. Clone repo ─────────────────────────────────────────────────────────────
+echo "→ [4/9] Cloning repository..."
+if [ -d "/app/.git" ]; then
+  cd /app && git fetch origin && git checkout $BRANCH && git pull origin $BRANCH
+else
+  git clone -b $BRANCH $REPO_URL /app
+fi
+
+# ── 5. Backend ────────────────────────────────────────────────────────────────
+echo "→ [5/9] Installing backend dependencies and pushing schema..."
+cd /app/backend
+cat > .env << EOF
+DATABASE_URL="postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME"
+JWT_SECRET="$JWT_SECRET"
+NODE_ENV=production
+ENFORCE_SINGLE_SESSION=true
+FRONTEND_ORIGIN=https://$DOMAIN
+PORT=5000
+EOF
+npm install
+npx prisma db push
+npx prisma db seed
+
+# ── 6. Frontend ───────────────────────────────────────────────────────────────
+echo "→ [6/9] Building frontend (takes 2–3 minutes)..."
+cd /app/frontend
+cat > .env.local << EOF
+NEXT_PUBLIC_API_URL=https://$DOMAIN/api
+EOF
+npm install
+npm run build
+
+# ── 7. PM2 ───────────────────────────────────────────────────────────────────
+echo "→ [7/9] Starting services with PM2..."
+pm2 delete backend  2>/dev/null || true
+pm2 delete frontend 2>/dev/null || true
+
+cd /app/backend
+pm2 start "npx ts-node src/index.ts" --name backend
+
+cd /app/frontend
+pm2 start "npm start" --name frontend
+
+pm2 save
+# Register PM2 to auto-start on reboot
+env PATH=$PATH:/usr/bin pm2 startup systemd -u root --hp /root 2>&1 \
+  | grep "sudo" | bash || true
+
+# ── 8. Nginx ─────────────────────────────────────────────────────────────────
+echo "→ [8/9] Configuring nginx..."
+cat > /etc/nginx/sites-available/sqd-app << NGINX
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    # SSE endpoint needs streaming (no buffering)
+    location /api/events/ {
+        proxy_pass         http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   Connection '';
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 24h;
+    }
+
+    location /api/ {
+        proxy_pass         http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For  \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+    }
+
+    location / {
+        proxy_pass         http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade \$http_upgrade;
+        proxy_set_header   Connection 'upgrade';
+        proxy_set_header   Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+    }
+}
+NGINX
+
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/sqd-app /etc/nginx/sites-enabled/sqd-app
+nginx -t && systemctl reload nginx
+
+# ── 9. SSL certificate ────────────────────────────────────────────────────────
+echo "→ [9/9] Getting SSL certificate from Let's Encrypt..."
+certbot --nginx -d $DOMAIN \
+  --non-interactive --agree-tos \
+  --email "admin@$DOMAIN" \
+  --redirect
+
+# ── Done ──────────────────────────────────────────────────────────────────────
+echo ""
+echo "============================================"
+echo "  ✅  Deployment complete!"
+echo ""
+echo "  URL   : https://$DOMAIN"
+echo "  Login : director@sqd.com"
+echo "  Pass  : password123"
+echo ""
+echo "  Useful commands:"
+echo "    pm2 status          — check if services are running"
+echo "    pm2 logs backend    — backend logs"
+echo "    pm2 logs frontend   — frontend logs"
+echo "    pm2 restart all     — restart both services"
+echo "============================================"
+echo ""
