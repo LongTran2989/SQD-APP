@@ -13,6 +13,13 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Parses a route param as a positive integer. Returns null when absent or non-numeric. */
+function parseTaskId(raw: string | string[] | undefined): number | null {
+  if (!raw || Array.isArray(raw)) return null;
+  const n = parseInt(raw, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
 /**
  * Generates the next sequential human-readable taskId for a given division code.
  * Format: [DivisionCode]-[000001]
@@ -20,7 +27,7 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
  */
 async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
   const lastTask = await tx.task.findFirst({
-    where: { taskId: { startsWith: `${divisionCode}-` }, deletedAt: null },
+    where: { taskId: { startsWith: `${divisionCode}-` } },
     orderBy: { id: 'desc' },
     select: { taskId: true }
   });
@@ -369,7 +376,8 @@ export const getUnassignedTasks = async (req: Request, res: Response): Promise<v
 
 export const getTaskById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
 
     const task = await prisma.task.findUnique({
@@ -581,7 +589,8 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
 // Link an existing task to a Work Package, or clear its link (wpId: null).
 export const updateTaskWp = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { wpId } = req.body as { wpId: number | null };
 
@@ -696,7 +705,8 @@ export const createQuickTask = async (req: Request, res: Response): Promise<void
 // has no assignee), clears completedAt, and leaves all TaskData/schemaSnapshot intact.
 export const reopenTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { reason } = req.body as { reason?: string };
 
@@ -755,7 +765,8 @@ export const reopenTask = async (req: Request, res: Response): Promise<void> => 
 
 export const assignTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, divisionId } = req.user!;
     const { assignedToUserId } = req.body;
 
@@ -813,20 +824,24 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: { assignedToUserId, status: 'Assigned' },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: { assignedToUserId, status: 'Assigned' },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_ASSIGNED',
+        userId,
+        `Task assigned to ${assignee.name}`,
+        { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId },
+        undefined,
+        tx
+      );
+      return u;
     });
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_ASSIGNED',
-      userId,
-      `Task assigned to ${assignee.name}`,
-      { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId }
-    );
 
     // Notify the new assignee (additive third write — best-effort). Skips the
     // actor in case they assigned the task to themselves.
@@ -854,7 +869,8 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
 
 export const selfAssignTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
 
     const task = await prisma.task.findUnique({
@@ -881,20 +897,24 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: { assignedToUserId: userId, status: 'Assigned' },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: { assignedToUserId: userId, status: 'Assigned' },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_SELF_ASSIGNED',
+        userId,
+        `Task self-assigned by ${req.user!.userId} (PERFORM THIS TASK)`,
+        { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId: userId },
+        undefined,
+        tx
+      );
+      return u;
     });
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_SELF_ASSIGNED',
-      userId,
-      `Task self-assigned by ${req.user!.userId} (PERFORM THIS TASK)`,
-      { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId: userId }
-    );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
@@ -907,7 +927,8 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
 
 export const saveTaskData = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { data } = req.body;
 
@@ -936,31 +957,32 @@ export const saveTaskData = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const isFirstSave = task.status === 'Assigned' || task.status === 'Follow-up Required';
-    const newStatus = isFirstSave && task.status === 'Assigned' ? 'In Progress' : task.status;
+    const newStatus = task.status === 'Assigned' ? 'In Progress' : task.status;
 
-    // Upsert TaskData
-    await prisma.taskData.upsert({
-      where: { taskId: id },
-      update: { data },
-      create: { taskId: id, data }
-    });
-
-    if (newStatus !== task.status) {
-      await prisma.task.update({
-        where: { id },
-        data: { status: newStatus }
+    await prisma.$transaction(async (tx) => {
+      await tx.taskData.upsert({
+        where: { taskId: id },
+        update: { data },
+        create: { taskId: id, data }
       });
 
-      await logAuditAndActivity(
-        task.id,
-        String(task.id),
-        'TASK_IN_PROGRESS',
-        userId,
-        'Task progress saved. Status: Assigned → In Progress',
-        { fromStatus: 'Assigned', toStatus: 'In Progress' }
-      );
-    }
+      if (newStatus !== task.status) {
+        await tx.task.update({
+          where: { id },
+          data: { status: newStatus }
+        });
+        await logAuditAndActivity(
+          task.id,
+          String(task.id),
+          'TASK_IN_PROGRESS',
+          userId,
+          'Task progress saved. Status: Assigned → In Progress',
+          { fromStatus: 'Assigned', toStatus: 'In Progress' },
+          undefined,
+          tx
+        );
+      }
+    });
 
     res.json({ message: 'Task data saved', status: newStatus });
   } catch (error) {
@@ -973,7 +995,8 @@ export const saveTaskData = async (req: Request, res: Response): Promise<void> =
 
 export const submitTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
 
     const task = await prisma.task.findUnique({
@@ -1003,30 +1026,35 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
     // TODO (future): Implement a TASK_APPROVAL_GRACE_MINUTES SystemSetting if grace window is required.
     const newStatus = requiresApproval ? 'In Review' : 'Closed';
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        completedAt: newStatus === 'Closed' ? new Date() : null
-      },
-      include: taskInclude()
-    });
-
     const actionType = newStatus === 'Closed' ? 'TASK_APPROVED' : 'TASK_SUBMITTED';
     const content = newStatus === 'Closed'
       ? `Task submitted and auto-closed (requiresApproval = false). Status: ${task.status} → Closed`
       : `Task submitted for review. Status: ${task.status} → In Review`;
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      actionType,
-      userId,
-      content,
-      { fromStatus: task.status, toStatus: newStatus }
-    );
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          completedAt: newStatus === 'Closed' ? new Date() : null
+        },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        actionType,
+        userId,
+        content,
+        { fromStatus: task.status, toStatus: newStatus },
+        undefined,
+        tx
+      );
+      return u;
+    });
 
     // Finding Pending-Verification hook: auto-close may finalise a follow-up task.
+    // Runs after commit because it creates its own internal transaction.
     if (newStatus === 'Closed') {
       await checkAndTriggerPendingVerification(task.id, userId);
     }
@@ -1059,7 +1087,8 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
 
 export const reviewTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { action, comment } = req.body; // action: 'approve' | 'reject' | 'follow-up'
 
@@ -1131,33 +1160,37 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
 
     const newStatus = statusMap[action]!;
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        rejectionReason: action === 'reject' ? (comment ?? null) : undefined,
-        completedAt: newStatus === 'Closed' ? new Date() : null
-      },
-      include: taskInclude()
-    });
-
     const contentMap: Record<string, string> = {
       'approve': `Task approved. Status: In Review → Closed`,
       'reject': `Task rejected. Reason: ${comment}. Status: In Review → Rejected`,
       'follow-up': `Follow-up requested: ${comment}. Status: In Review → Follow-up Required`
     };
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      actionTypeMap[action]!,
-      userId,
-      contentMap[action]!,
-      { fromStatus: 'In Review', toStatus: newStatus, comment },
-      comment
-    );
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          rejectionReason: action === 'reject' ? (comment ?? null) : undefined,
+          completedAt: newStatus === 'Closed' ? new Date() : null
+        },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        actionTypeMap[action]!,
+        userId,
+        contentMap[action]!,
+        { fromStatus: 'In Review', toStatus: newStatus, comment },
+        comment,
+        tx
+      );
+      return u;
+    });
 
     // Finding Pending-Verification hook: approve/reject can finalise a follow-up task.
+    // Runs after commit because it creates its own internal transaction.
     if (FINAL_TASK_STATUSES.includes(newStatus)) {
       await checkAndTriggerPendingVerification(task.id, userId);
     }
@@ -1196,7 +1229,8 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
 
 export const postRejectionAction = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { action, newAssigneeId, reason } = req.body; // action: 'terminate' | 'reassign'
 
@@ -1248,11 +1282,17 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       // Reassign — validate new assignee
       const newAssignee = await prisma.user.findUnique({
         where: { id: newAssigneeId, deletedAt: null },
-        select: { id: true, name: true }
+        select: { id: true, name: true, divisionId: true }
       });
 
       if (!newAssignee) {
         res.status(404).json({ message: 'New assignee not found' });
+        return;
+      }
+
+      // Division lock: mirrors assignTask — block cross-division unless assign_any.
+      if (!hasPrivilege(req.user!, 'task:assign_any') && newAssignee.divisionId !== divisionId) {
+        res.status(403).json({ message: 'You can only reassign tasks to users in your own division' });
         return;
       }
 
@@ -1265,23 +1305,27 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       content = `Task reassigned to ${newAssignee.name} after rejection. Status: Rejected → Assigned`;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: updateData,
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: updateData,
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        actionType,
+        userId,
+        content,
+        { fromStatus: 'Rejected', toStatus: updateData.status, reason },
+        reason,
+        tx
+      );
+      return u;
     });
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      actionType,
-      userId,
-      content,
-      { fromStatus: 'Rejected', toStatus: updateData.status, reason },
-      reason
-    );
-
     // Finding Pending-Verification hook: termination finalises a follow-up task.
+    // Runs after commit because it creates its own internal transaction.
     if (FINAL_TASK_STATUSES.includes(updateData.status)) {
       await checkAndTriggerPendingVerification(task.id, userId);
     }
@@ -1338,9 +1382,14 @@ export async function reassignTaskService(
 
   const newAssignee = await client.user.findUnique({
     where: { id: newAssigneeId, deletedAt: null },
-    select: { id: true, name: true }
+    select: { id: true, name: true, divisionId: true }
   });
   if (!newAssignee) throw new HttpError(404, 'New assignee not found');
+
+  // Division lock: mirrors assignTask — block cross-division unless assign_any.
+  if (!hasPrivilege(actor, 'task:assign_any') && newAssignee.divisionId !== actor.divisionId) {
+    throw new HttpError(403, 'You can only reassign tasks to users in your own division');
+  }
 
   const previousAssigneeId = task.assignedToUserId;
 
@@ -1407,7 +1456,8 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
 
 export const transferIssuerRights = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { newIssuerId } = req.body;
 
@@ -1437,6 +1487,11 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
       return;
     }
 
+    if (task.status === 'Inactive') {
+      res.status(400).json({ message: 'Cannot transfer issuer rights on an Inactive task' });
+      return;
+    }
+
     const newIssuer = await prisma.user.findUnique({
       where: { id: newIssuerId, deletedAt: null },
       select: { id: true, name: true }
@@ -1449,20 +1504,24 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
 
     const previousIssuerId = task.issuerId;
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: { issuerId: newIssuerId },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: { issuerId: newIssuerId },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_ISSUER_TRANSFERRED',
+        userId,
+        `Issuer rights transferred to ${newIssuer.name}. Previous issuer (id: ${previousIssuerId}) loses issuer rights. Note: system role-based reviewer rights (Manager/Director) are unaffected.`,
+        { previousIssuerId, newIssuerId },
+        undefined,
+        tx
+      );
+      return u;
     });
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_ISSUER_TRANSFERRED',
-      userId,
-      `Issuer rights transferred to ${newIssuer.name}. Previous issuer (id: ${previousIssuerId}) loses issuer rights. Note: system role-based reviewer rights (Manager/Director) are unaffected.`,
-      { previousIssuerId, newIssuerId }
-    );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
@@ -1475,9 +1534,10 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
 
 export const inactivateTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role } = req.user!;
-    const { reason } = req.body;
+    const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
 
     if (!reason) {
       res.status(400).json({ message: 'A reason is required when inactivating a task' });
@@ -1510,29 +1570,32 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        status: 'Inactive',
-        inactivationLog: {
-          reason,
-          inactivatedBy: userId,
-          inactivatedAt: new Date().toISOString(),
-          previousStatus: task.status
-        }
-      },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          status: 'Inactive',
+          inactivationLog: {
+            reason,
+            inactivatedBy: userId,
+            inactivatedAt: new Date().toISOString(),
+            previousStatus: task.status
+          }
+        },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_INACTIVATED',
+        userId,
+        `Task inactivated. Reason: ${reason}. Status: ${task.status} → Inactive`,
+        { fromStatus: task.status, toStatus: 'Inactive', reason },
+        reason,
+        tx
+      );
+      return u;
     });
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_INACTIVATED',
-      userId,
-      `Task inactivated. Reason: ${reason}. Status: ${task.status} → Inactive`,
-      { fromStatus: task.status, toStatus: 'Inactive', reason },
-      reason
-    );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
@@ -1545,12 +1608,13 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
 
 export const reactivateTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role } = req.user!;
 
     const task = await prisma.task.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, issuerId: true, status: true, inactivationLog: true }
+      select: { id: true, issuerId: true, assignedToUserId: true, status: true, inactivationLog: true }
     });
 
     if (!task) {
@@ -1570,25 +1634,30 @@ export const reactivateTask = async (req: Request, res: Response): Promise<void>
     }
 
     const log = task.inactivationLog as any;
-    const previousStatus = log?.previousStatus ?? 'Assigned';
+    // Derive fallback from live assignedToUserId — safe even if the log is absent/corrupted.
+    const previousStatus = log?.previousStatus ?? (task.assignedToUserId ? 'Assigned' : 'Unassigned');
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        status: previousStatus,
-        inactivationLog: Prisma.DbNull
-      },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          status: previousStatus,
+          inactivationLog: Prisma.DbNull
+        },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_REACTIVATED',
+        userId,
+        `Task reactivated. Status: Inactive → ${previousStatus}`,
+        { fromStatus: 'Inactive', toStatus: previousStatus },
+        undefined,
+        tx
+      );
+      return u;
     });
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_REACTIVATED',
-      userId,
-      `Task reactivated. Status: Inactive → ${previousStatus}`,
-      { fromStatus: 'Inactive', toStatus: previousStatus }
-    );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
@@ -1601,7 +1670,8 @@ export const reactivateTask = async (req: Request, res: Response): Promise<void>
 
 export const setDeadline = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { deadline } = req.body;
 
@@ -1632,21 +1702,29 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
     }
 
     const newDeadline = new Date(deadline);
+    if (isNaN(newDeadline.getTime())) {
+      res.status(400).json({ message: 'Invalid deadline date' });
+      return;
+    }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: { deadline: newDeadline },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: { deadline: newDeadline },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_DEADLINE_SET',
+        userId,
+        `Deadline set to ${newDeadline.toISOString()}`,
+        { deadline: newDeadline.toISOString() },
+        undefined,
+        tx
+      );
+      return u;
     });
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_DEADLINE_SET',
-      userId,
-      `Deadline set to ${newDeadline.toISOString()}`,
-      { deadline: newDeadline.toISOString() }
-    );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
@@ -1659,7 +1737,8 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
 
 export const requestDeadlineExtension = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { reason, proposedDeadline } = req.body;
 
@@ -1733,7 +1812,8 @@ export const requestDeadlineExtension = async (req: Request, res: Response): Pro
 
 export const decideDeadlineExtension = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { extensionIndex, decision, newDeadline } = req.body;
 
@@ -1747,82 +1827,99 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
       return;
     }
 
-    const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      select: {
-        id: true,
-        issuerId: true,
-        targetDivisionId: true,
-        status: true,
-        deadline: true,
-        deadlineExtensions: true
-      }
-    });
-
-    if (!task) {
-      res.status(404).json({ message: 'Task not found' });
-      return;
-    }
-
-    // OQ-2: Reviewer = Issuer + Director + Managers of same Division
-    if (!isReviewer(req.user!, task)) {
-      res.status(403).json({ message: 'You do not have permission to decide on deadline extensions' });
-      return;
-    }
-
-    const extensions = (task.deadlineExtensions as any[]) ?? [];
-    if (extensionIndex < 0 || extensionIndex >= extensions.length) {
-      res.status(400).json({ message: 'Invalid extensionIndex' });
-      return;
-    }
-
-    const extension = extensions[extensionIndex];
-    if (extension.decision !== null) {
-      res.status(400).json({ message: 'This extension request has already been decided' });
-      return;
-    }
-
-    extensions[extensionIndex] = {
-      ...extension,
-      decision,
-      decidedAt: new Date().toISOString()
-    };
-
+    // Validate newDeadline format early (before the transaction) to return 400 not 500.
     let deadlineUpdate: Date | undefined;
-    if (decision === 'approve') {
-      const resolvedDeadline = newDeadline ?? extension.proposedDeadline;
-      if (!resolvedDeadline) {
-        res.status(400).json({ message: 'newDeadline is required when approving an extension (or proposedDeadline must have been set in the request)' });
+    if (decision === 'approve' && newDeadline) {
+      deadlineUpdate = new Date(newDeadline);
+      if (isNaN(deadlineUpdate.getTime())) {
+        res.status(400).json({ message: 'Invalid newDeadline date' });
         return;
       }
-      deadlineUpdate = new Date(resolvedDeadline);
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        deadlineExtensions: extensions,
-        ...(deadlineUpdate ? { deadline: deadlineUpdate } : {})
-      },
-      include: taskInclude()
+    // Wrap in a transaction with a row-level lock to prevent concurrent decide calls
+    // from reading the same stale extensions blob and silently losing one write.
+    const updated = await prisma.$transaction(async (tx) => {
+      // Lock the Task row for the duration of this transaction.
+      await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${id} FOR UPDATE`;
+
+      const task = await tx.task.findUnique({
+        where: { id, deletedAt: null },
+        select: {
+          id: true,
+          issuerId: true,
+          targetDivisionId: true,
+          status: true,
+          deadline: true,
+          deadlineExtensions: true
+        }
+      });
+
+      if (!task) throw new HttpError(404, 'Task not found');
+
+      // OQ-2: Reviewer = Issuer + Director + Managers of same Division
+      if (!isReviewer(req.user!, task)) {
+        throw new HttpError(403, 'You do not have permission to decide on deadline extensions');
+      }
+
+      const extensions = (task.deadlineExtensions as any[]) ?? [];
+      if (extensionIndex < 0 || extensionIndex >= extensions.length) {
+        throw new HttpError(400, 'Invalid extensionIndex');
+      }
+
+      const extension = extensions[extensionIndex];
+      if (extension.decision !== null) {
+        throw new HttpError(400, 'This extension request has already been decided');
+      }
+
+      // Resolve deadline when approving (proposedDeadline from the request is the fallback).
+      if (decision === 'approve' && !deadlineUpdate) {
+        const resolvedDeadline = extension.proposedDeadline;
+        if (!resolvedDeadline) {
+          throw new HttpError(400, 'newDeadline is required when approving an extension (or proposedDeadline must have been set in the request)');
+        }
+        deadlineUpdate = new Date(resolvedDeadline);
+        if (isNaN(deadlineUpdate.getTime())) {
+          throw new HttpError(400, 'Invalid proposedDeadline stored in the extension request');
+        }
+      }
+
+      extensions[extensionIndex] = { ...extension, decision, decidedAt: new Date().toISOString() };
+
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          deadlineExtensions: extensions,
+          ...(deadlineUpdate ? { deadline: deadlineUpdate } : {})
+        },
+        include: taskInclude()
+      });
+
+      const actionType = decision === 'approve' ? 'TASK_DEADLINE_EXTENSION_APPROVED' : 'TASK_DEADLINE_EXTENSION_DENIED';
+      const content = decision === 'approve'
+        ? `Deadline extension approved. New deadline: ${deadlineUpdate!.toISOString()}`
+        : 'Deadline extension denied. Original deadline stands.';
+
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        actionType,
+        userId,
+        content,
+        { decision, newDeadline: deadlineUpdate?.toISOString() ?? null, extensionIndex },
+        undefined,
+        tx
+      );
+
+      return u;
     });
-
-    const actionType = decision === 'approve' ? 'TASK_DEADLINE_EXTENSION_APPROVED' : 'TASK_DEADLINE_EXTENSION_DENIED';
-    const content = decision === 'approve'
-      ? `Deadline extension approved. New deadline: ${deadlineUpdate!.toISOString()}`
-      : 'Deadline extension denied. Original deadline stands.';
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      actionType,
-      userId,
-      content,
-      { decision, newDeadline: deadlineUpdate?.toISOString() ?? null, extensionIndex }
-    );
 
     res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
   } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
     console.error('Error deciding deadline extension:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -1832,7 +1929,8 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
 
 export const rateTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { rating } = req.body;
 
@@ -1937,7 +2035,8 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
 
 export const getTaskActivity = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
 
     const task = await prisma.task.findUnique({
@@ -1985,7 +2084,8 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
 
 export const postTaskComment = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { content } = req.body;
 
