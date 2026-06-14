@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { TaskEnriched, User, TaskStatus } from '../../types';
+import { TaskEnriched, User } from '../../types';
+import { FINAL_TASK_STATUSES } from '../../constants/taskStatus';
 import StarRating from './StarRating';
 import {
   reviewTask,
@@ -39,10 +40,6 @@ import {
   Clock,
 } from 'lucide-react';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const FINAL_TASK_STATUSES: TaskStatus[] = ['Closed', 'Rejected', 'Terminated'];
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface UserOption {
@@ -61,10 +58,12 @@ function computeIsReviewer(user: User, task: TaskEnriched): boolean {
 }
 
 function computeCanRate(user: User, task: TaskEnriched): boolean {
+  // 'Inactive' is not in FINAL_TASK_STATUSES, so this already excludes it.
   if (!FINAL_TASK_STATUSES.includes(task.status)) return false;
-  if (task.status === 'Inactive') return false;
-  // role is a flat string on the user object, not a nested relation
-  const assigneeRole = (task.assignedToUser as any)?.role;
+  // The API returns assignedToUser.role as a nested { name } relation; tolerate a
+  // flat string too so this keeps working if the shape is ever normalised.
+  const rawRole = (task.assignedToUser as any)?.role;
+  const assigneeRole = typeof rawRole === 'string' ? rawRole : rawRole?.name;
   if (user.role === 'Director' && assigneeRole === 'Manager') return true;
   if (user.role === 'Manager' && task.targetDivisionId === user.divisionId) return true;
   return false;
@@ -251,13 +250,27 @@ export default function TaskActionBar({
   const [showReopenInput, setShowReopenInput] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
 
-  // Rating
+  // Rating — synced to the task prop via the React-recommended "adjust state
+  // during render" pattern, so a refreshed task (re-rated elsewhere, or updated
+  // by another action) updates the widget instead of showing a stale value.
   const [ratingValue, setRatingValue] = useState<number | null>(task.rating);
+  const [ratingSyncedFor, setRatingSyncedFor] = useState<number | null>(task.rating);
+  if (task.rating !== ratingSyncedFor) {
+    setRatingSyncedFor(task.rating);
+    setRatingValue(task.rating);
+  }
 
-  // Fetch user list for pickers
+  // Fetch the user list only for states where a user-picker action can appear
+  // (assign / reassign / transfer-issuer). Closed and Terminated tasks never
+  // show one, so the request is skipped there. Surface failures instead of
+  // swallowing them — an empty picker with no message looks like "no users".
+  const needsUserList = task.status !== 'Closed' && task.status !== 'Terminated';
   useEffect(() => {
-    getUsers().then(setAllUsers).catch(() => {});
-  }, []);
+    if (!needsUserList) return;
+    getUsers()
+      .then(setAllUsers)
+      .catch(() => toast.error('Failed to load the user list. Please refresh to assign or reassign.'));
+  }, [needsUserList]);
 
   // ── Computed permissions ──
   const isAssignee = currentUser.id === task.assignedToUserId;
@@ -454,13 +467,13 @@ export default function TaskActionBar({
     });
   };
 
-  const handleDecideExtension = (decision: 'approved' | 'denied') => {
+  const handleDecideExtension = (decision: 'approve' | 'deny') => {
     const extensionIndex = getPendingExtensionIndex(task);
     if (extensionIndex === -1) {
       toast.error('No pending extension request found');
       return;
     }
-    if (decision === 'approved' && extensionNewDeadline) {
+    if (decision === 'approve' && extensionNewDeadline) {
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(extensionNewDeadline) || isNaN(Date.parse(extensionNewDeadline))) {
         toast.error('Invalid date format for new deadline. Please use a valid date.');
@@ -472,9 +485,9 @@ export default function TaskActionBar({
         task.id,
         extensionIndex,
         decision,
-        decision === 'approved' && extensionNewDeadline ? extensionNewDeadline : undefined
+        decision === 'approve' && extensionNewDeadline ? extensionNewDeadline : undefined
       );
-      toast.success(decision === 'approved' ? 'Extension approved' : 'Extension denied');
+      toast.success(decision === 'approve' ? 'Extension approved' : 'Extension denied');
       setShowDecideExtension(false);
       setExtensionNewDeadline('');
       return r;
@@ -747,10 +760,10 @@ export default function TaskActionBar({
                   />
                 </div>
                 <div className="flex gap-2">
-                  <ActionButton id="btn-approve-extension" onClick={() => handleDecideExtension('approved')} disabled={loading === 'extension-approved'} variant="success" icon={CheckCircle2}>
+                  <ActionButton id="btn-approve-extension" onClick={() => handleDecideExtension('approve')} disabled={loading === 'extension-approve'} variant="success" icon={CheckCircle2}>
                     Approve
                   </ActionButton>
-                  <ActionButton id="btn-deny-extension" onClick={() => handleDecideExtension('denied')} disabled={loading === 'extension-denied'} variant="danger" icon={XCircle}>
+                  <ActionButton id="btn-deny-extension" onClick={() => handleDecideExtension('deny')} disabled={loading === 'extension-deny'} variant="danger" icon={XCircle}>
                     Deny
                   </ActionButton>
                 </div>

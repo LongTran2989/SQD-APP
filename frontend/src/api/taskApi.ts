@@ -14,8 +14,8 @@ export interface TaskFilters {
 export const getTasks = (filters?: TaskFilters): Promise<TaskEnriched[]> => {
   const params = new URLSearchParams();
   if (filters?.statuses) filters.statuses.forEach((s) => params.append('statuses', s));
-  if (filters?.issuerId) params.set('issuerId', String(filters.issuerId));
-  if (filters?.assignedToUserId) params.set('assignedToUserId', String(filters.assignedToUserId));
+  if (filters?.issuerId != null) params.set('issuerId', String(filters.issuerId));
+  if (filters?.assignedToUserId != null) params.set('assignedToUserId', String(filters.assignedToUserId));
   if (filters?.startDate) params.set('startDate', filters.startDate);
   if (filters?.endDate) params.set('endDate', filters.endDate);
   const qs = params.toString();
@@ -140,7 +140,7 @@ export const requestDeadlineExtension = (
 export const decideDeadlineExtension = (
   id: number,
   extensionIndex: number,
-  decision: 'approved' | 'denied',
+  decision: 'approve' | 'deny',
   newDeadline?: string
 ): Promise<TaskEnriched> =>
   apiClient.put(`/tasks/${id}/deadline/decide`, { extensionIndex, decision, newDeadline }).then((r) => r.data);

@@ -144,6 +144,9 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg || 'Failed to create task');
+    } finally {
+      // Always release the button — even if onSaved() throws, the form must not
+      // stay frozen in its spinner state.
       setSubmitting(false);
     }
   };

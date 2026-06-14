@@ -38,7 +38,10 @@ function DynamicSelect({
       .then((data) => setOptions(data))
       .catch(() => setOptions([]))
       .finally(() => setLoading(false));
-  }, [field.dataSource, field.options]);
+    // field.options comes from an immutable schema snapshot; keying only on
+    // dataSource avoids refetching when the parent passes a new array identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [field.dataSource]);
 
   if (loading) {
     return (
