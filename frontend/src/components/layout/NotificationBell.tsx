@@ -47,7 +47,7 @@ export default function NotificationBell() {
 
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AppNotification[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -58,11 +58,17 @@ export default function NotificationBell() {
   }, [setUnreadCount]);
 
   // (Re)load the open list whenever the dropdown opens or new activity arrives.
-  // Resets loading/error state on each fetch so stale state never persists.
+  // When the dropdown closes, reset loading=true so the spinner appears
+  // immediately on the next open (no "all caught up" flash before the fetch).
+  // When unreadCount changes while already open, silently refetch without
+  // resetting loading so the existing items stay visible during the refresh.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setLoading(true);
+      setFetchError(false);
+      return;
+    }
     let cancelled = false;
-    setLoading(true);
     setFetchError(false);
     listNotifications({ limit: 15 })
       .then((page) => { if (!cancelled) { setItems(page.items); setFetchError(false); } })
