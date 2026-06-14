@@ -20,6 +20,61 @@ function parseTaskId(raw: string | string[] | undefined): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+// ─── Free-text / payload caps ──────────────────────────────────────────────────
+// The backend is the authoritative boundary — any frontend maxLength is UX only
+// and trivially bypassable. Limits are generous (aviation QA records favour
+// detail) while still blocking unbounded-storage / DoS via giant payloads.
+const MAX_TITLE_LEN = 300;       // task titles are short labels
+const MAX_REASON_LEN = 2000;     // reassign / inactivate / reopen / extension reasons
+const MAX_COMMENT_LEN = 5000;    // review comments + activity-feed comments
+
+// Dynamic task data (saveTaskData). `data` is arbitrary JSON shaped by the
+// template's schemaSnapshot, so we cap generically rather than per declared type:
+// a single string value (covers text / textarea / rich_text HTML) plus the total
+// serialized payload.
+const MAX_FIELD_VALUE_LEN = 100_000;     // chars per individual string value
+const MAX_TASK_DATA_BYTES = 512 * 1024;  // total serialized JSON
+
+/** Returns an error string if `value` (when a string) exceeds `max` chars, else null. */
+function lengthError(value: unknown, max: number, label: string): string | null {
+  if (typeof value === 'string' && value.length > max) {
+    return `${label} must be at most ${max} characters`;
+  }
+  return null;
+}
+
+/**
+ * Validates a saveTaskData payload: rejects an oversized serialized blob and any
+ * individual over-long string value (text / textarea / rich_text). Returns an
+ * error string, or null when the payload is within limits.
+ */
+function taskDataError(data: unknown): string | null {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(data);
+  } catch {
+    return 'data must be serializable JSON';
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_TASK_DATA_BYTES) {
+    return `Task data exceeds the maximum size of ${Math.floor(MAX_TASK_DATA_BYTES / 1024)} KB`;
+  }
+  // Walk every string value; non-strings are bounded by the overall size cap above.
+  const stack: unknown[] = [data];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (typeof cur === 'string') {
+      if (cur.length > MAX_FIELD_VALUE_LEN) {
+        return `A field value exceeds the maximum length of ${MAX_FIELD_VALUE_LEN} characters`;
+      }
+    } else if (Array.isArray(cur)) {
+      stack.push(...cur);
+    } else if (cur && typeof cur === 'object') {
+      stack.push(...Object.values(cur as Record<string, unknown>));
+    }
+  }
+  return null;
+}
+
 /**
  * Generates the next sequential human-readable taskId for a given division code.
  * Format: [DivisionCode]-[000001]
@@ -683,6 +738,10 @@ export const createQuickTask = async (req: Request, res: Response): Promise<void
       res.status(400).json({ message: 'Task title is required' });
       return;
     }
+    if (String(title).length > MAX_TITLE_LEN) {
+      res.status(400).json({ message: `Task title must be at most ${MAX_TITLE_LEN} characters` });
+      return;
+    }
 
     const template = await prisma.template.findUnique({
       where: { templateId: GENERIC_ADHOC_SLUG },
@@ -730,6 +789,11 @@ export const reopenTask = async (req: Request, res: Response): Promise<void> => 
 
     if (!reason || !reason.trim()) {
       res.status(400).json({ message: 'A reason is required to re-open a task' });
+      return;
+    }
+    const reopenReasonErr = lengthError(reason, MAX_REASON_LEN, 'reason');
+    if (reopenReasonErr) {
+      res.status(400).json({ message: reopenReasonErr });
       return;
     }
 
@@ -955,6 +1019,12 @@ export const saveTaskData = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    const dataErr = taskDataError(data);
+    if (dataErr) {
+      res.status(400).json({ message: dataErr });
+      return;
+    }
+
     const task = await prisma.task.findUnique({
       where: { id, deletedAt: null },
       select: { id: true, assignedToUserId: true, status: true }
@@ -1117,6 +1187,12 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
 
     if ((action === 'reject' || action === 'follow-up') && !comment) {
       res.status(400).json({ message: 'A comment is required when rejecting or requesting follow-up' });
+      return;
+    }
+
+    const commentLenErr = lengthError(comment, MAX_COMMENT_LEN, 'comment');
+    if (commentLenErr) {
+      res.status(400).json({ message: commentLenErr });
       return;
     }
 
@@ -1379,6 +1455,7 @@ export async function reassignTaskService(
 
   if (!newAssigneeId) throw new HttpError(400, 'newAssigneeId is required');
   if (!reason?.trim()) throw new HttpError(400, 'A reason is required when reassigning a task');
+  if (reason.length > MAX_REASON_LEN) throw new HttpError(400, `reason must be at most ${MAX_REASON_LEN} characters`);
 
   const task = await client.task.findUnique({
     where: { id, deletedAt: null },
@@ -1513,11 +1590,20 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
 
     const newIssuer = await prisma.user.findUnique({
       where: { id: newIssuerId, deletedAt: null },
-      select: { id: true, name: true }
+      select: { id: true, name: true, role: { select: { name: true } } }
     });
 
     if (!newIssuer) {
       res.status(404).json({ message: 'New issuer not found' });
+      return;
+    }
+
+    // Issuer = reviewer (isReviewer grants rights to userId === issuerId), so the
+    // target must be a role that can legitimately review tasks. Restrict transfer
+    // to Managers and Directors; never hand reviewer rights to a Staff / Group
+    // Leader (or other) account via this path.
+    if (newIssuer.role.name !== 'Manager' && newIssuer.role.name !== 'Director') {
+      res.status(403).json({ message: 'Issuer rights can only be transferred to a Manager or Director' });
       return;
     }
 
@@ -1560,6 +1646,10 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
 
     if (!reason) {
       res.status(400).json({ message: 'A reason is required when inactivating a task' });
+      return;
+    }
+    if (reason.length > MAX_REASON_LEN) {
+      res.status(400).json({ message: `reason must be at most ${MAX_REASON_LEN} characters` });
       return;
     }
 
@@ -1763,6 +1853,11 @@ export const requestDeadlineExtension = async (req: Request, res: Response): Pro
 
     if (!reason) {
       res.status(400).json({ message: 'A reason is required for deadline extension requests' });
+      return;
+    }
+    const extReasonErr = lengthError(reason, MAX_REASON_LEN, 'reason');
+    if (extReasonErr) {
+      res.status(400).json({ message: extReasonErr });
       return;
     }
 
@@ -2110,6 +2205,12 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
 
     if (!content || !content.trim()) {
       res.status(400).json({ message: 'content is required' });
+      return;
+    }
+
+    const contentLenErr = lengthError(content, MAX_COMMENT_LEN, 'content');
+    if (contentLenErr) {
+      res.status(400).json({ message: contentLenErr });
       return;
     }
 

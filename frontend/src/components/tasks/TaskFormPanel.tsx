@@ -12,6 +12,11 @@ const READ_ONLY_STATUSES: TaskStatus[] = [
   'Unassigned', 'Inactive', 'Closed', 'Rejected', 'Terminated', 'In Review',
 ];
 
+// UX guardrail mirroring the backend per-value cap (MAX_FIELD_VALUE_LEN in
+// task.controller.ts). The backend is the authoritative limit; this just stops a
+// user typing past it and hitting a 400 on save. rich_text is capped server-side.
+const MAX_FIELD_VALUE_LEN = 100_000;
+
 // ─── Dynamic select with data source fetch ────────────────────────────────────
 
 function DynamicSelect({
@@ -99,6 +104,7 @@ function FieldRenderer({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           required={field.required}
+          maxLength={MAX_FIELD_VALUE_LEN}
           placeholder={field.helpText ?? ''}
           className={baseInputClass}
         />
@@ -112,6 +118,7 @@ function FieldRenderer({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           required={field.required}
+          maxLength={MAX_FIELD_VALUE_LEN}
           placeholder={field.helpText ?? ''}
           rows={4}
           className={baseInputClass}

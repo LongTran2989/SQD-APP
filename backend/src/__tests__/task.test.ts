@@ -1837,6 +1837,19 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.status).toBe(403);
     });
 
+    it('T54a: Issuer cannot transfer rights to a Staff member → 403', async () => {
+      // Security review: issuer === reviewer, so a transfer target must be a role
+      // that can legitimately review. Handing issuer rights to Staff is rejected.
+      const taskId = await createTaskWithIssuer(managerId);
+
+      const res = await request(app)
+        .put(`/api/tasks/${taskId}/transfer-issuer`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ newIssuerId: staffId });
+
+      expect(res.status).toBe(403);
+    });
+
     it('T55: Original issuer loses issuer-based review rights after transfer', async () => {
       const taskId = await createTaskWithIssuer(managerId);
 
