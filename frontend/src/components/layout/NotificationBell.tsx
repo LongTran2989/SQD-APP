@@ -47,7 +47,8 @@ export default function NotificationBell() {
 
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AppNotification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Prime the badge on first mount in case the SSE stream hasn't sent its first
@@ -56,14 +57,16 @@ export default function NotificationBell() {
     getUnreadCount().then(setUnreadCount).catch(() => {});
   }, [setUnreadCount]);
 
-  // (Re)load the open list whenever new activity arrives (the badge count
-  // changes). setState lives only in the promise callbacks — mirrors FeedPanel.
+  // (Re)load the open list whenever the dropdown opens or new activity arrives.
+  // Resets loading/error state on each fetch so stale state never persists.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setLoading(true);
+    setFetchError(false);
     listNotifications({ limit: 15 })
-      .then((page) => { if (!cancelled) setItems(page.items); })
-      .catch(() => { if (!cancelled) setItems([]); })
+      .then((page) => { if (!cancelled) { setItems(page.items); setFetchError(false); } })
+      .catch(() => { if (!cancelled) { setItems([]); setFetchError(true); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [open, unreadCount]);
@@ -131,6 +134,8 @@ export default function NotificationBell() {
               <div className="flex items-center justify-center py-8">
                 <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
               </div>
+            ) : fetchError ? (
+              <div className="text-center text-slate-400 text-sm py-10">Could not load notifications.</div>
             ) : items.length === 0 ? (
               <div className="text-center text-slate-400 text-sm py-10">You&apos;re all caught up.</div>
             ) : (

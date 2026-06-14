@@ -29,7 +29,7 @@ dotenv.config();
 import { prisma } from './lib/prisma';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 // Auth now rides an httpOnly cookie, so CORS must allow credentials and name an
 // explicit origin (a wildcard origin is incompatible with credentialed
