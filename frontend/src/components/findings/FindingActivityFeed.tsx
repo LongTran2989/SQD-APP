@@ -5,27 +5,10 @@ import { FeedPostEnriched, User } from '../../types';
 import { getFeed, postFeedComment } from '../../api/feedApi';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
+import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
-
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  return (
-    d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) +
-    ' ' +
-    d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-  );
-}
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((p) => p[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-}
 
 interface FindingActivityFeedProps {
   findingId: number;

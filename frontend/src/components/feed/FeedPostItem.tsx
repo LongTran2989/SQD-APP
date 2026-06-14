@@ -5,26 +5,7 @@ import { FeedPostEnriched, EscalationTargetScope } from '../../types';
 import EscalationCard from './EscalationCard';
 import InfoCard from './InfoCard';
 import FlagButton from './FlagButton';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  return (
-    d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) +
-    ' ' +
-    d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-  );
-}
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-}
+import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 

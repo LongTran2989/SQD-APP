@@ -1,17 +1,17 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import { FINDING_SEVERITIES, FINDING_STATUSES } from '../constants/findingTaxonomy';
 import { hasPrivilege } from '../utils/privilegeAccess';
 
 import { prisma } from '../lib/prisma';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Canonical Finding taxonomy — kept in sync with finding.controller.ts. Used to
-// seed the severity/status buckets so the dashboard always renders a complete set
-// of bars (count 0 included), and to validate the optional ?severity filter.
-const FINDING_SEVERITIES = ['Observation', 'Level 1', 'Level 2'];
-const FINDING_STATUSES = ['Open', 'In Progress', 'Pending Verification', 'Closed', 'Dismissed'];
+// FINDING_SEVERITIES / FINDING_STATUSES are imported from the shared taxonomy so
+// the analytics buckets and the ?severity validation stay in lockstep with the
+// finding controller. They seed the severity/status buckets so the dashboard
+// always renders a complete set of bars (count 0 included).
 // Bucket label for findings not yet triaged (severity is nullable until reviewed).
 const UNREVIEWED_SEVERITY = 'Unreviewed';
 
@@ -70,11 +70,22 @@ export const getTimeBookingAnalytics = async (req: Request, res: Response): Prom
     const from = req.query.from ? String(req.query.from) : undefined;
     const to = req.query.to ? String(req.query.to) : undefined;
 
-    // completedAt range — both bounds collapse into one filter object
-    const completedAtFilter: { gte?: Date; lte?: Date } = {};
+    // completedAt range — both bounds collapse into one filter object.
+    // A date-only `to` (YYYY-MM-DD) is treated as inclusive of the whole day:
+    // `new Date('2026-02-28')` is UTC midnight, so `lte` would drop tasks
+    // completed later that day. Use `lt` of the next midnight instead. A `to`
+    // that already carries a time component keeps exact `lte` semantics.
+    const completedAtFilter: { gte?: Date; lte?: Date; lt?: Date } = {};
     if (from) { const d = new Date(from); if (!Number.isNaN(d.getTime())) completedAtFilter.gte = d; }
-    if (to)   { const d = new Date(to);   if (!Number.isNaN(d.getTime())) completedAtFilter.lte = d; }
-    const hasDateFilter = completedAtFilter.gte !== undefined || completedAtFilter.lte !== undefined;
+    if (to) {
+      const d = new Date(to);
+      if (!Number.isNaN(d.getTime())) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(to.trim())) completedAtFilter.lt = new Date(d.getTime() + MS_PER_DAY);
+        else completedAtFilter.lte = d;
+      }
+    }
+    const hasDateFilter =
+      completedAtFilter.gte !== undefined || completedAtFilter.lte !== undefined || completedAtFilter.lt !== undefined;
 
     // RBAC division scoping — pushed into the DB WHERE clause so the query never fetches rows
     // outside the caller's scope. Managers are always constrained to their own division.
@@ -268,11 +279,22 @@ export const getFindingsAnalytics = async (req: Request, res: Response): Promise
     const from = req.query.from ? String(req.query.from) : undefined;
     const to = req.query.to ? String(req.query.to) : undefined;
 
-    // createdAt range — both bounds collapse into one filter object
-    const createdAtFilter: { gte?: Date; lte?: Date } = {};
+    // createdAt range — both bounds collapse into one filter object.
+    // A date-only `to` (YYYY-MM-DD) is treated as inclusive of the whole day:
+    // `new Date('2026-02-28')` is UTC midnight, so `lte` would drop findings
+    // created later that day. Use `lt` of the next midnight instead. A `to` that
+    // already carries a time component keeps exact `lte` semantics.
+    const createdAtFilter: { gte?: Date; lte?: Date; lt?: Date } = {};
     if (from) { const d = new Date(from); if (!Number.isNaN(d.getTime())) createdAtFilter.gte = d; }
-    if (to)   { const d = new Date(to);   if (!Number.isNaN(d.getTime())) createdAtFilter.lte = d; }
-    const hasDateFilter = createdAtFilter.gte !== undefined || createdAtFilter.lte !== undefined;
+    if (to) {
+      const d = new Date(to);
+      if (!Number.isNaN(d.getTime())) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(to.trim())) createdAtFilter.lt = new Date(d.getTime() + MS_PER_DAY);
+        else createdAtFilter.lte = d;
+      }
+    }
+    const hasDateFilter =
+      createdAtFilter.gte !== undefined || createdAtFilter.lte !== undefined || createdAtFilter.lt !== undefined;
 
     // RBAC division scoping — pushed into the DB WHERE clause so the query never fetches rows
     // outside the caller's scope. Managers are always constrained to their own division.

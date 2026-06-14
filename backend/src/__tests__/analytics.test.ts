@@ -104,7 +104,9 @@ describe('Findings Analytics (GET /api/analytics/findings)', () => {
   });
 
   afterAll(async () => {
-    await prisma.finding.deleteMany({ where: { description: { in: ['F1', 'F2', 'F3', 'F4', 'F-DEL', 'G1', 'G2'] } } });
+    // Full wipe (not a named list) so any finding a test leaves behind — e.g. the
+    // intraday fixture in A21 — is cleared before the FK-linked users are deleted.
+    await prisma.finding.deleteMany({});
     await prisma.user.deleteMany({ where: { email: { in: ['ana_director@sqd.com', 'ana_admin@sqd.com', 'ana_manager@sqd.com', 'ana_manager2@sqd.com', 'ana_staff@sqd.com'] } } });
     await prisma.$disconnect();
     await pool.end();
@@ -250,5 +252,13 @@ describe('Findings Analytics (GET /api/analytics/findings)', () => {
   it('A20: ?from/?to filter on createdAt', async () => {
     const { body } = await get(directorToken, '?from=2026-02-01&to=2026-02-28');
     expect(body.totalCount).toBe(2); // F3 (02-05), F4 (02-01)
+  });
+
+  it('A21: date-only ?to is inclusive of the whole boundary day (intraday timestamps not dropped)', async () => {
+    // A finding created later on the `to` day must still fall inside the range.
+    // A naive `lte midnight(to)` would drop this; the controller uses `lt next-midnight`.
+    await prisma.finding.create({ data: { description: 'F-INTRADAY', eventType: 'Procedural Breach', departmentId: deptId, reportedByUserId: directorId, targetDivisionId: divisionId, severity: 'Level 1', status: 'Open', createdAt: new Date('2026-02-28T14:30:00.000Z') } });
+    const { body } = await get(directorToken, '?from=2026-02-01&to=2026-02-28');
+    expect(body.totalCount).toBe(3); // F4 (02-01), F3 (02-05), F-INTRADAY (02-28 14:30)
   });
 });

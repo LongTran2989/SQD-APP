@@ -184,7 +184,7 @@ export default function FindingsTab() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Total Findings" value={String(data.totalCount)} />
-        <StatCard label="Open" value={String(data.openCount)} hint="not yet resolved" />
+        <StatCard label="Unresolved" value={String(data.openCount)} hint="not yet resolved" />
         <StatCard
           label="Resolved"
           value={`${resolved}`}

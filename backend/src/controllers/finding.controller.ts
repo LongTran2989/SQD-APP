@@ -10,17 +10,13 @@ import {
 } from '../constants/findingExpansion';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import { FINDING_SEVERITIES as SEVERITIES, FINDING_STATUSES } from '../constants/findingTaxonomy';
 import { createNotifications, resolvePrivilegedUserIds } from '../services/notificationService';
 import { createFeedPost } from '../services/feedService';
 
 import { prisma } from '../lib/prisma';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
-
-// ─── Constants ──────────────────────────────────────────────────────────────
-
-const SEVERITIES = ['Observation', 'Level 1', 'Level 2'];
-const FINDING_STATUSES = ['Open', 'In Progress', 'Pending Verification', 'Closed', 'Dismissed'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
