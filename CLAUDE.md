@@ -32,6 +32,7 @@ Violating any of these rules silently breaks data integrity, compliance, or RBAC
 10. **File Upload deferred.** Do not implement File Upload field type until MinIO is configured (Phase 5.4+). Never hardcode file size/type limits — Admin-configurable only.
 11. **Terminal — cmd only.** Always use cmd syntax. Never PowerShell syntax (`$env:VAR`, backtick line continuation, etc.).
 12. **Update `CLAUDE_HANDOVER.md` after every completed feature.** Once the user confirms a feature is complete and all tests pass, update `CLAUDE_HANDOVER.md` — phase status, completed items, test count, new gotchas. Do this before ending the session. Never update it before the user confirms completion.
+13. **Update `CODE_REVIEW_AUDIT_LOG.md` after every accepted code or security review.** Log every finding with its severity and final status (Fixed / Deferred / Accepted-as-is). Update `CLAUDE_HANDOVER.md` §2 and §8 in the same session. Do NOT wait for the user to ask — this is mandatory after any `/code-review` or `/security-review` the user accepts.
 
 ---
 
@@ -57,6 +58,7 @@ Read these before touching code — they supersede this file:
 
 1. **`CLAUDE_HANDOVER.md`** — Absolute source of truth: roadmap, architecture decisions, full object reference, schema, RBAC rules, security fixes. Read Section 10 ("BEFORE STARTING ANY NEW FEATURE") first.
 2. **`BUSINESS_WORKFLOW.md`** — Human-readable workflow rules: templates, work packages, task execution, findings loop, data visibility.
+3. **`CODE_REVIEW_AUDIT_LOG.md`** — Running log of all `/code-review` and `/security-review` sessions: every finding, severity, status (Fixed / Deferred / Accepted-as-is), and open flags. Read before any review session to avoid re-examining already-resolved issues.
 
 ---
 
@@ -112,7 +114,7 @@ npm run test
 npm run test -- auth.test.ts
 ```
 
-Always targets `sqd_qa_test_db` (Rule 8). Database wiped in `beforeEach`. All 150 tests must pass before and after every change.
+Always targets `sqd_qa_test_db` (Rule 8). Database wiped in `beforeEach`. All 423 tests must pass before and after every change (count as of 2026-06-14; verify the actual count with `npm test` before starting).
 
 ---
 
@@ -147,14 +149,17 @@ cd frontend && npm run build && npm run start
 
 ---
 
-## SECURITY NOTES (DEFERRED — implement before production)
+## SECURITY STATUS
 
-Audited 2026-05-29. See `CLAUDE_HANDOVER.md` Section 11 for detailed fixes:
-1. `updatePassword` — missing current-password verification
-2. `forgotPassword` — allows user enumeration (404 on unknown email)
-3. No rate limiting on `/login` and `/forgot-password`
-4. JWT secret falls back to weak default
-5. Reset tokens stored plaintext
+All original 2026-05-29 audit findings are **implemented** (branch `claude/amazing-ritchie-soasus`). See `CLAUDE_HANDOVER.md` §11 for detail.
+
+**Open deferred items** (from Task slice security review, 2026-06-14 — see `CODE_REVIEW_AUDIT_LOG.md`):
+- **DEF-1:** Rich text rendered via Tiptap is safe today; if ever rendered outside `RichTextEditor` (e.g. migrations, CSV import), sanitise with DOMPurify first.
+- **DEF-2:** `SearchableSelect` has no keyboard navigation — fails WCAG keyboard-only (internal tool, address before external audit).
+- **DEF-3:** `transferIssuerRights` has no division-scope check on target (only role checked). Low risk at current privilege matrix.
+- **DEF-4:** `task:assign_div` holders can assign on tasks targeted at another division — needs product confirmation before locking.
+
+All other findings from reviews on this branch are fixed. New findings from future reviews go in `CODE_REVIEW_AUDIT_LOG.md`.
 
 ---
 
@@ -165,3 +170,4 @@ Audited 2026-05-29. See `CLAUDE_HANDOVER.md` Section 11 for detailed fixes:
 3. Plan every file change, get approval before touching code (Rule 1).
 4. Run `cd backend && npm run test` — confirm 150 pass as baseline.
 5. After user confirms completion, update `CLAUDE_HANDOVER.md` (Rule 12).
+6. After an accepted code/security review, update `CODE_REVIEW_AUDIT_LOG.md` (Rule 13).

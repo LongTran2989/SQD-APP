@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-13 (rev 13). Supersedes all previous versions.*
+*Last updated: 2026-06-14 (rev 14). Supersedes all previous versions.*
 
 ---
 
@@ -17,6 +17,35 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 ## 2. CURRENT IMPLEMENTATION STATUS
 
 ### Completed
+- **Task Slice Code Review, Security Review & Architectural Improvements** (✅ **COMPLETE**, 2026-06-14 — branch `claude/exciting-rubin-hqkxma`)
+  > **423 backend tests passing (+ 2 new regression tests). `tsc --noEmit` clean for all modified files. See `CODE_REVIEW_AUDIT_LOG.md` for the complete finding-by-finding record.**
+
+  Three separate passes on the Task management vertical slice in a single session:
+
+  **Frontend code review — 10 bugs fixed:**
+  - `taskApi.ts`: `decideDeadlineExtension` used wrong decision literals (`'approved'/'denied'` → `'approve'/'deny'`).
+  - `TaskActionBar.tsx`: `computeCanRate` read nested `.role.name` from a flat string; Director rating was always broken. `ratingValue` state didn't reset on prop change. `getUsers()` fetched unconditionally (N+1); errors were swallowed silently. Dead `Inactive` guard removed. Duplicated `computeIsReviewer()` removed — all `canX` derivations now use server-computed `task.isReviewer`.
+  - `TaskCreateForm.tsx`: `setSubmitting(false)` moved to `finally` to prevent form freeze.
+  - `TaskFormPanel.tsx`: `field.options` removed from `DynamicSelect` useEffect deps (caused repeated refetches).
+  - `CreateTaskModal.tsx`: Escape key + backdrop-click handlers added (WCAG 2.1.2).
+
+  **Three architectural improvements:**
+  - `frontend/src/constants/taskStatus.ts` (now a full mirror): `TASK_STATUSES`, `FINAL_TASK_STATUSES`, `REVIEW_ACTIONS`, `DEADLINE_DECISIONS` — single source for contract literals.
+  - `backend/src/controllers/task.controller.ts`: `enrichTask()` helper appends `isReviewer`, `isOverdue`, `deadlineStatus` to every task response, eliminating client-side RBAC re-derivation.
+  - `backend/src/__tests__/contractSync.test.ts` (new): guard test that parses the frontend mirror as text and asserts it matches the backend authority on every CI run.
+
+  **Backend code review — 10 bugs fixed (`task.controller.ts`):**
+  Soft-delete sequence collision in `generateTaskId`; non-atomic dual-writes (9 handlers now wrapped in `prisma.$transaction`); non-atomic `saveTaskData`; missing division-scope check in reassign paths; invalid-date guard in `setDeadline`; wrong reactivation fallback status; `parseInt` → `parseTaskId` helper (systemic, 16 call sites); row-lock for `decideDeadlineExtension`; missing Inactive block in `transferIssuerRights`; whitespace-only reason + dead branch in `inactivateTask`/`saveTaskData`.
+
+  **Security review — 6 vulnerabilities fixed:**
+  - **HIGH (SEC-1):** `createTaskService` gated assignee division lock on `role === 'Manager'` — WP-bypass users (Staff/Group Leader) could assign cross-division on create. Fixed: `hasPrivilege(actor, 'task:assign_any')`. Regression test T04c.
+  - **Medium (SEC-2):** `transferIssuerRights` allowed transfer to any user. Since `issuerId === userId` grants reviewer rights, this gave Staff reviewer access. Fixed: restricted to Manager/Director targets. Regression test T54a.
+  - **Low (SEC-3/4):** `reassignTask` used raw `parseInt` (NaN → 500); float `extensionIndex` bypassed bounds check (undefined.decision → 500). Both fixed.
+  - **Medium (SEC-5/6):** Dynamic form fields (`text`/`textarea`/`rich_text`) and free-text controller inputs were completely unbounded. Fixed: 512 KB payload cap + 100k per field value; `title` 300, `reason` 2000, `comment`/`content` 5000. Frontend `maxLength` UX guardrail.
+  - **Confirmed intentional:** Manager cross-division task planting (by design — uses org feed/escalation path); transparent view/comment model (all authenticated users).
+
+  **`types/index.ts` fix (separate commit):** `forcePasswordChange: boolean` added to `User` interface — the field was returned in auth responses and used in two components but missing from the type.
+
 - **Realtime: SSE Live Notifications + Notification Center + Manual Refresh** (✅ **COMPLETE**, 2026-06-13 — branch `claude/sqd-app-sse-notifications-yj7n32`, NOT yet merged to `main`)
   > **396 backend tests passing (+15 new in `notification.test.ts`). Backend `tsc --noEmit` clean (production code; pre-existing `notification.test.ts` strict-optional warnings only). Additive `Notification` model + reversible migration. Living developer manual: `REALTIME_DEV_GUIDE.md`.**
   - **What it does:** pushes lightweight **signals** (never payloads) to the browser over one SSE stream; the client refetches via the existing REST endpoints so all RBAC scoping and the dual-write are reused untouched. Notifications are an **additive THIRD write** — they sit alongside, never replace, the `AuditLog` + `FeedPost` dual-write (Rule 3), and are best-effort (a notification failure can never roll back the business write).
@@ -331,6 +360,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
 ### Test Suite
+- **423 backend tests on branch `claude/exciting-rubin-hqkxma` (Task Slice Review, 2026-06-14): all 423 passing.** +2 new regression tests (T04c cross-division assignee on create, T54a issuer-transfer role restriction). New `contractSync.test.ts` suite validates frontend/backend literal parity. Frontend `tsc --noEmit` clean for all modified files.
 - **Branch `claude/exciting-darwin-gyohuf` (Phase 7 Deferred Items, 2026-06-12): backend `tsc --noEmit` clean; tests could not be executed in the remote build container (no PostgreSQL). Run `npm test` locally against `sqd_qa_test_db` to verify baseline 381 tests still pass before merging.**
 - **381 backend tests on branch `claude/eloquent-gauss-3lonuo` (Phase 7 — Global Privilege Management, 2026-06-12): all 381 passing.** +11 new tests in `privilege.test.ts`. `DEFAULT_PRIVILEGES` fallback guarantees all prior 370 tests pass without `PrivilegeConfig` seeds. Frontend `tsc --noEmit` and `next build` clean.
 - **370 backend tests on branch `claude/amazing-ritchie-soasus` (Auth Security Hardening, 2026-06): 367 passing + 3 pre-existing unrelated failures** (`seed-verification` login `202` vs `200`; `task` T09 `schemaSnapshot` `fieldId`; `escalation` CREATE_TASK — all predate this branch, none in the auth flow). +18 new auth/session/rate-limit tests. **Frontend `tsc --noEmit` and `next build` are now fully clean (exit 0)** — the two long-standing `ReviewPanel.tsx`/`RichTextEditor.tsx` type errors were fixed (Next 16 build type-checks strictly). No schema change.
@@ -1291,6 +1321,16 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 
 43. **`emitRealtimeEvent` signals must stay tiny (`pg_notify` 8 KB limit):** Events are SIGNALS only (`{kind, userId}` or `{kind, scope, scopeId}`) — never embed payloads. `emitRealtimeEvent` guards against >7900-byte payloads (logs + skips rather than risk aborting the surrounding tx). If you add a new event kind, keep it to identifiers and add a `dispatch` case in `pgEvents.ts` — the switch has an exhaustive `default` that logs dropped/unknown kinds, so a forgotten case is visible in logs rather than silent.
 
+45. **`transferIssuerRights` is restricted to Manager/Director targets (2026-06-14):** Since `issuerId === userId` grants reviewer rights via `isReviewer()`, the endpoint now validates the target user's role from the DB before accepting the transfer. Handing issuer rights to Staff/Group Leader is rejected with 403. If you add a new role that should be eligible (e.g. a future "Lead Inspector" above Staff), add it to the explicit allowlist in `transferIssuerRights` in `task.controller.ts`.
+
+46. **`createTaskService` assignee division lock is now privilege-gated, not role-string-gated (2026-06-14):** The check `if (!hasPrivilege(actor, 'task:assign_any') && assignee.divisionId !== actor.divisionId)` applies to ALL actors including the WP-assignment bypass path (Group Leader/Staff). Previously the check only fired for `role === 'Manager'`, so bypass users could seed a cross-division assignee on create. If `task:assign_any` is ever granted to a new role via `PrivilegeConfig`, that role inherits cross-division create-with-assignee permission — this is correct by design.
+
+47. **Task API contract literals have a guard test (`contractSync.test.ts`):** `TASK_STATUSES`, `FINAL_TASK_STATUSES`, `REVIEW_ACTIONS`, and `DEADLINE_DECISIONS` are defined as the authority in `backend/src/constants/taskStatus.ts` and mirrored verbatim in `frontend/src/constants/taskStatus.ts`. `backend/src/__tests__/contractSync.test.ts` parses the frontend file as text on every CI run and fails if the arrays drift. If you add or rename a status/action, update BOTH files and the tests will confirm they match.
+
+48. **`enrichTask()` is the only place `isReviewer`, `isOverdue`, and `deadlineStatus` are computed — use it at every response site:** Every task response in `task.controller.ts` must go through `enrichTask(task, req.user!)`. Do not inline `isReviewer()`/`computeIsOverdue()`/`computeDeadlineStatus()` at new response sites. The frontend `TaskActionBar` and `TaskActivityFeed` both consume `task.isReviewer` from the API response — if a new endpoint skips `enrichTask`, those components will break silently (field is `undefined`, not `false`).
+
+49. **Free-text and task-data fields now have backend caps — never silently truncate:** `saveTaskData` rejects payloads over 512 KB or with any single string value over 100k chars. Controller free-text fields: `title` 300, `reason` 2000, `comment`/`content` 5000. Errors return 400 with a clear message. The frontend `maxLength` on `text`/`textarea` fields mirrors the per-value cap as a UX guardrail; `rich_text` fields are only capped server-side (Tiptap's output HTML can be long). If you add a new free-text field, add a `lengthError()` guard at the same pattern as the existing ones.
+
 44. **The inbox bell (`NotificationBell`, blue) is separate from the escalation bell (`Header`, red):** They are independent — different data sources, different badges. The realtime `notification`/`escalation` signals both also dispatch the existing `escalations:changed` window event so the red bell refreshes instantly (no 60s wait). Do not merge them. `useRealtimeRefresh` deliberately never refetches content out from under a reader — it raises the "N new updates" pill and only refetches on click or tab refocus.
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
@@ -1336,6 +1376,7 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 13. Prisma client: import `prisma` from `'../lib/prisma'`. Never instantiate `new Pool(…)` or `new PrismaClient(…)` in a controller, service, or middleware — use the shared singleton (see gotcha #36).
 14. File Upload field type in Template builder is DEFERRED until Phase 5.4 — MinIO must be configured in Phase 5.0 first.
 15. File size/type constraints are Admin-configurable — never hardcode them in application logic.
+16. After a `/code-review` or `/security-review` session that the user accepts: update `CODE_REVIEW_AUDIT_LOG.md` with all findings + statuses, then update `CLAUDE_HANDOVER.md` §2 and §8 before ending the session.
 
 ---
 
