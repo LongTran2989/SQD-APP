@@ -49,14 +49,6 @@ interface UserOption {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function computeIsReviewer(user: User, task: TaskEnriched): boolean {
-  return (
-    user.id === task.issuerId ||
-    user.role === 'Director' ||
-    (user.role === 'Manager' && user.divisionId === task.targetDivisionId)
-  );
-}
-
 function computeCanRate(user: User, task: TaskEnriched): boolean {
   // 'Inactive' is not in FINAL_TASK_STATUSES, so this already excludes it.
   if (!FINAL_TASK_STATUSES.includes(task.status)) return false;
@@ -274,7 +266,9 @@ export default function TaskActionBar({
 
   // ── Computed permissions ──
   const isAssignee = currentUser.id === task.assignedToUserId;
-  const isReviewer = computeIsReviewer(currentUser, task);
+  // Reviewer rights are computed server-side (privilege-aware) and returned on
+  // the enriched task — the client must not recompute them.
+  const isReviewer = task.isReviewer;
   const canRate = computeCanRate(currentUser, task);
   const isFinal = FINAL_TASK_STATUSES.includes(task.status);
   const isInactive = task.status === 'Inactive';

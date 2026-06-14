@@ -1,7 +1,29 @@
-import { TaskStatus } from '../types';
+// Frontend MIRROR of the backend Task API contract literals
+// (backend/src/constants/taskStatus.ts is the authority). A backend guard test
+// (backend/src/__tests__/contractSync.test.ts) fails if these drift, so update
+// this file whenever the backend authority changes. Keep values and order identical.
 
-// Canonical terminal ("final") Task statuses. Mirrors the backend authority
-// (backend/src/constants/taskStatus.ts) — a task in one of these states is done:
-// no further data entry, status transitions, or re-linking. Centralised here so
-// every component gates on the same list and a backend change is a single edit.
+// All Task statuses, in lifecycle order.
+export const TASK_STATUSES = [
+  'Unassigned',
+  'Assigned',
+  'In Progress',
+  'In Review',
+  'Follow-up Required',
+  'Closed',
+  'Rejected',
+  'Terminated',
+  'Inactive',
+] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+// Terminal ("final") Task statuses — a task here is done (Admin re-open aside).
 export const FINAL_TASK_STATUSES: TaskStatus[] = ['Closed', 'Rejected', 'Terminated'];
+
+// Review decision verbs accepted by PUT /tasks/:id/review.
+export const REVIEW_ACTIONS = ['approve', 'reject', 'follow-up'] as const;
+export type ReviewAction = (typeof REVIEW_ACTIONS)[number];
+
+// Deadline-extension decision verbs accepted by PUT /tasks/:id/deadline/decide.
+export const DEADLINE_DECISIONS = ['approve', 'deny'] as const;
+export type DeadlineDecision = (typeof DEADLINE_DECISIONS)[number];

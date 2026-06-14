@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry, TimeEntry, TimeEntrySummary } from '../types';
+import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry, TimeEntry, TimeEntrySummary, ReviewAction, DeadlineDecision } from '../types';
 
 // ─── List endpoints ────────────────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ export const submitTask = (id: number): Promise<TaskEnriched> =>
 
 export const reviewTask = (
   id: number,
-  action: 'approve' | 'reject' | 'follow-up',
+  action: ReviewAction,
   comment?: string
 ): Promise<TaskEnriched> =>
   apiClient.put(`/tasks/${id}/review`, { action, comment }).then((r) => r.data);
@@ -140,7 +140,7 @@ export const requestDeadlineExtension = (
 export const decideDeadlineExtension = (
   id: number,
   extensionIndex: number,
-  decision: 'approve' | 'deny',
+  decision: DeadlineDecision,
   newDeadline?: string
 ): Promise<TaskEnriched> =>
   apiClient.put(`/tasks/${id}/deadline/decide`, { extensionIndex, decision, newDeadline }).then((r) => r.data);

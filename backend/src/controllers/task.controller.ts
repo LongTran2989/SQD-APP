@@ -4,7 +4,7 @@ import { checkAndTriggerPendingVerification } from '../services/findingService';
 import { createFeedPost } from '../services/feedService';
 import { createNotifications, notifyFeedWatchers } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
-import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS } from '../constants/taskStatus';
 import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
 
 import { prisma } from '../lib/prisma';
@@ -209,6 +209,30 @@ function taskInclude() {
   };
 }
 
+type ReviewerActor = {
+  userId: number;
+  role: string;
+  divisionId: number;
+  permissions?: Record<string, boolean> | null | undefined;
+};
+
+/**
+ * Standard response shaping for a Task. Appends the on-the-fly computed fields
+ * (isOverdue, deadlineStatus) plus the per-request `isReviewer` flag so the
+ * client never has to replicate reviewer RBAC (including the Phase 7 privilege
+ * checks). Use this at every response site for a consistent shape.
+ */
+function enrichTask<
+  T extends { deadline: Date | null; status: string; issuerId: number; targetDivisionId: number | null }
+>(task: T, actor: ReviewerActor) {
+  return {
+    ...task,
+    isOverdue: computeIsOverdue(task),
+    deadlineStatus: computeDeadlineStatus(task),
+    isReviewer: isReviewer(actor, task)
+  };
+}
+
 // ─── GET /api/tasks ───────────────────────────────────────────────────────────
 
 export const getTasks = async (req: Request, res: Response): Promise<void> => {
@@ -294,9 +318,7 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
     const lastActivityMap = await getLastActivityMap(tasks.map(t => t.id));
 
     const result = tasks.map(t => ({
-      ...t,
-      isOverdue: computeIsOverdue(t),
-      deadlineStatus: computeDeadlineStatus(t),
+      ...enrichTask(t, req.user!),
       lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt
     }));
 
@@ -325,11 +347,7 @@ export const getMyTasks = async (req: Request, res: Response): Promise<void> => 
       include: taskInclude()
     });
 
-    const result = tasks.map(t => ({
-      ...t,
-      isOverdue: computeIsOverdue(t),
-      deadlineStatus: computeDeadlineStatus(t)
-    }));
+    const result = tasks.map(t => enrichTask(t, req.user!));
 
     res.json(result);
   } catch (error) {
@@ -359,11 +377,7 @@ export const getUnassignedTasks = async (req: Request, res: Response): Promise<v
       include: taskInclude()
     });
 
-    const result = tasks.map(t => ({
-      ...t,
-      isOverdue: computeIsOverdue(t),
-      deadlineStatus: computeDeadlineStatus(t)
-    }));
+    const result = tasks.map(t => enrichTask(t, req.user!));
 
     res.json(result);
   } catch (error) {
@@ -397,7 +411,7 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
     // All authenticated users can view the task details.
     // Action endpoints (PUT/POST) remain strictly controlled.
 
-    res.json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
+    res.json(enrichTask(task, req.user!));
   } catch (error) {
     console.error('Error fetching task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -574,7 +588,7 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
       createTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
     );
 
-    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
+    res.status(201).json(enrichTask(task, req.user!));
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -643,7 +657,7 @@ export const updateTaskWp = async (req: Request, res: Response): Promise<void> =
       { fromWpId: task.wpId, toWpId: newWpId }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error updating task work package:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -689,7 +703,7 @@ export const createQuickTask = async (req: Request, res: Response): Promise<void
       })
     );
 
-    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
+    res.status(201).json(enrichTask(task, req.user!));
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -754,7 +768,7 @@ export const reopenTask = async (req: Request, res: Response): Promise<void> => 
       reason.trim()
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error re-opening task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -858,7 +872,7 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       [userId]
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -916,7 +930,7 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       return u;
     });
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error self-assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1076,7 +1090,7 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       );
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error submitting task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1092,7 +1106,7 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
     const { userId, role, divisionId } = req.user!;
     const { action, comment } = req.body; // action: 'approve' | 'reject' | 'follow-up'
 
-    if (!action || !['approve', 'reject', 'follow-up'].includes(action)) {
+    if (!action || !REVIEW_ACTIONS.includes(action)) {
       res.status(400).json({ message: 'action must be one of: approve, reject, follow-up' });
       return;
     }
@@ -1218,7 +1232,7 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
       );
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error reviewing task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1330,7 +1344,7 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error performing post-rejection action:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1441,7 +1455,7 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
       [userId]
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -1523,7 +1537,7 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
       return u;
     });
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error transferring issuer rights:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1597,7 +1611,7 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
       return u;
     });
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error inactivating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1659,7 +1673,7 @@ export const reactivateTask = async (req: Request, res: Response): Promise<void>
       return u;
     });
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error reactivating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1726,7 +1740,7 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
       return u;
     });
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error setting deadline:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1801,7 +1815,7 @@ export const requestDeadlineExtension = async (req: Request, res: Response): Pro
       { reason, proposedDeadline: proposedDeadline ?? null }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error requesting deadline extension:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1822,7 +1836,7 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
       return;
     }
 
-    if (!decision || !['approve', 'deny'].includes(decision)) {
+    if (!decision || !DEADLINE_DECISIONS.includes(decision)) {
       res.status(400).json({ message: 'decision must be approve or deny' });
       return;
     }
@@ -1914,7 +1928,7 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
       return u;
     });
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -2024,7 +2038,7 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
       { previousRating, newRating: rating, isRevision }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error rating task:', error);
     res.status(500).json({ message: 'Internal server error' });

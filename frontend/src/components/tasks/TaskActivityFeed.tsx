@@ -52,13 +52,11 @@ export default function TaskActivityFeed({
     }
   }, [activities.length]);
 
-  // OQ-6: Comment box visible for all statuses to authorised users
+  // OQ-6: Comment box visible for all statuses to authorised users. Reviewer
+  // rights come from the server (privilege-aware); the assignee can also comment.
   const canComment =
     !readOnly &&
-    (currentUser.id === task.assignedToUserId ||
-      currentUser.id === task.issuerId ||
-      currentUser.role === 'Director' ||
-      (currentUser.role === 'Manager' && currentUser.divisionId === task.targetDivisionId));
+    (task.isReviewer || currentUser.id === task.assignedToUserId);
 
   // A task comment can escalate to its WP (only if the task is in one), its
   // Division, or the Org. Backend re-validates and places the cards.
