@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon src/index.ts",
+    "build": "npx prisma generate && tsc -p tsconfig.build.json",
+    "start": "node dist/src/index.js",
     "test": "dotenv -e .env.test -- jest --runInBand",
     "test:setup": "dotenv -e .env.test -- node node_modules/prisma/build/index.js db push --accept-data-loss"
   },

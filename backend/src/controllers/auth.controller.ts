@@ -28,7 +28,10 @@ const AUTH_COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 day — matches token T
 const authCookieOptions = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
+  // SameSite=None is required when the frontend and backend are on different
+  // domains (e.g. Railway subdomains). SameSite=Strict is used locally where
+  // both run on localhost and cross-site cookies are not needed.
+  sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'strict') as 'none' | 'strict',
   path: '/'
 });
 
