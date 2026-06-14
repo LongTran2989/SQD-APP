@@ -21,6 +21,7 @@ export interface User {
   email: string;
   role: string; // The backend returns the role name as a string
   divisionId: number | null;
+  forcePasswordChange: boolean;
   preferences?: UserPreferences | null;
 }
 
