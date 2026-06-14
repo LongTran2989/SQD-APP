@@ -4,7 +4,7 @@ import { checkAndTriggerPendingVerification } from '../services/findingService';
 import { createFeedPost } from '../services/feedService';
 import { createNotifications, notifyFeedWatchers } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
-import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS } from '../constants/taskStatus';
 import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
 
 import { prisma } from '../lib/prisma';
@@ -13,6 +13,68 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Parses a route param as a positive integer. Returns null when absent or non-numeric. */
+function parseTaskId(raw: string | string[] | undefined): number | null {
+  if (!raw || Array.isArray(raw)) return null;
+  const n = parseInt(raw, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
+// ─── Free-text / payload caps ──────────────────────────────────────────────────
+// The backend is the authoritative boundary — any frontend maxLength is UX only
+// and trivially bypassable. Limits are generous (aviation QA records favour
+// detail) while still blocking unbounded-storage / DoS via giant payloads.
+const MAX_TITLE_LEN = 300;       // task titles are short labels
+const MAX_REASON_LEN = 2000;     // reassign / inactivate / reopen / extension reasons
+const MAX_COMMENT_LEN = 5000;    // review comments + activity-feed comments
+
+// Dynamic task data (saveTaskData). `data` is arbitrary JSON shaped by the
+// template's schemaSnapshot, so we cap generically rather than per declared type:
+// a single string value (covers text / textarea / rich_text HTML) plus the total
+// serialized payload.
+const MAX_FIELD_VALUE_LEN = 100_000;     // chars per individual string value
+const MAX_TASK_DATA_BYTES = 512 * 1024;  // total serialized JSON
+
+/** Returns an error string if `value` (when a string) exceeds `max` chars, else null. */
+function lengthError(value: unknown, max: number, label: string): string | null {
+  if (typeof value === 'string' && value.length > max) {
+    return `${label} must be at most ${max} characters`;
+  }
+  return null;
+}
+
+/**
+ * Validates a saveTaskData payload: rejects an oversized serialized blob and any
+ * individual over-long string value (text / textarea / rich_text). Returns an
+ * error string, or null when the payload is within limits.
+ */
+function taskDataError(data: unknown): string | null {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(data);
+  } catch {
+    return 'data must be serializable JSON';
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_TASK_DATA_BYTES) {
+    return `Task data exceeds the maximum size of ${Math.floor(MAX_TASK_DATA_BYTES / 1024)} KB`;
+  }
+  // Walk every string value; non-strings are bounded by the overall size cap above.
+  const stack: unknown[] = [data];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (typeof cur === 'string') {
+      if (cur.length > MAX_FIELD_VALUE_LEN) {
+        return `A field value exceeds the maximum length of ${MAX_FIELD_VALUE_LEN} characters`;
+      }
+    } else if (Array.isArray(cur)) {
+      stack.push(...cur);
+    } else if (cur && typeof cur === 'object') {
+      stack.push(...Object.values(cur as Record<string, unknown>));
+    }
+  }
+  return null;
+}
+
 /**
  * Generates the next sequential human-readable taskId for a given division code.
  * Format: [DivisionCode]-[000001]
@@ -20,7 +82,7 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
  */
 async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
   const lastTask = await tx.task.findFirst({
-    where: { taskId: { startsWith: `${divisionCode}-` }, deletedAt: null },
+    where: { taskId: { startsWith: `${divisionCode}-` } },
     orderBy: { id: 'desc' },
     select: { taskId: true }
   });
@@ -202,6 +264,30 @@ function taskInclude() {
   };
 }
 
+type ReviewerActor = {
+  userId: number;
+  role: string;
+  divisionId: number;
+  permissions?: Record<string, boolean> | null | undefined;
+};
+
+/**
+ * Standard response shaping for a Task. Appends the on-the-fly computed fields
+ * (isOverdue, deadlineStatus) plus the per-request `isReviewer` flag so the
+ * client never has to replicate reviewer RBAC (including the Phase 7 privilege
+ * checks). Use this at every response site for a consistent shape.
+ */
+function enrichTask<
+  T extends { deadline: Date | null; status: string; issuerId: number; targetDivisionId: number | null }
+>(task: T, actor: ReviewerActor) {
+  return {
+    ...task,
+    isOverdue: computeIsOverdue(task),
+    deadlineStatus: computeDeadlineStatus(task),
+    isReviewer: isReviewer(actor, task)
+  };
+}
+
 // ─── GET /api/tasks ───────────────────────────────────────────────────────────
 
 export const getTasks = async (req: Request, res: Response): Promise<void> => {
@@ -287,9 +373,7 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
     const lastActivityMap = await getLastActivityMap(tasks.map(t => t.id));
 
     const result = tasks.map(t => ({
-      ...t,
-      isOverdue: computeIsOverdue(t),
-      deadlineStatus: computeDeadlineStatus(t),
+      ...enrichTask(t, req.user!),
       lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt
     }));
 
@@ -318,11 +402,7 @@ export const getMyTasks = async (req: Request, res: Response): Promise<void> => 
       include: taskInclude()
     });
 
-    const result = tasks.map(t => ({
-      ...t,
-      isOverdue: computeIsOverdue(t),
-      deadlineStatus: computeDeadlineStatus(t)
-    }));
+    const result = tasks.map(t => enrichTask(t, req.user!));
 
     res.json(result);
   } catch (error) {
@@ -352,11 +432,7 @@ export const getUnassignedTasks = async (req: Request, res: Response): Promise<v
       include: taskInclude()
     });
 
-    const result = tasks.map(t => ({
-      ...t,
-      isOverdue: computeIsOverdue(t),
-      deadlineStatus: computeDeadlineStatus(t)
-    }));
+    const result = tasks.map(t => enrichTask(t, req.user!));
 
     res.json(result);
   } catch (error) {
@@ -369,7 +445,8 @@ export const getUnassignedTasks = async (req: Request, res: Response): Promise<v
 
 export const getTaskById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
 
     const task = await prisma.task.findUnique({
@@ -389,7 +466,7 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
     // All authenticated users can view the task details.
     // Action endpoints (PUT/POST) remain strictly controlled.
 
-    res.json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
+    res.json(enrichTask(task, req.user!));
   } catch (error) {
     console.error('Error fetching task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -471,10 +548,14 @@ export async function createTaskService(
       select: { id: true, divisionId: true }
     });
     if (!assignee) throw new HttpError(404, 'Assignee user not found');
-    // Division-scope comparison stays hardcoded (Phase 7 separation of concerns):
-    // Director/Admin assign anyone; Manager is locked to their own division.
-    if (role === 'Manager' && assignee.divisionId !== divisionId) {
-      throw new HttpError(403, 'Managers can only assign tasks to users in their own division');
+    // Division lock — mirrors assignTask: only an actor with cross-division reach
+    // (task:assign_any) may seed an assignee outside their own division. This MUST
+    // be privilege-gated, not role-string-gated: the WP-assignment create bypass
+    // (Group Leader / Staff) and any custom role granted task:create would
+    // otherwise skip the check entirely and assign a task to a user in another
+    // division on creation.
+    if (!hasPrivilege(actor, 'task:assign_any') && assignee.divisionId !== divisionId) {
+      throw new HttpError(403, 'You can only assign tasks to users in your own division');
     }
   }
 
@@ -566,7 +647,7 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
       createTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
     );
 
-    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
+    res.status(201).json(enrichTask(task, req.user!));
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -581,7 +662,8 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
 // Link an existing task to a Work Package, or clear its link (wpId: null).
 export const updateTaskWp = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { wpId } = req.body as { wpId: number | null };
 
@@ -634,7 +716,7 @@ export const updateTaskWp = async (req: Request, res: Response): Promise<void> =
       { fromWpId: task.wpId, toWpId: newWpId }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error updating task work package:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -654,6 +736,10 @@ export const createQuickTask = async (req: Request, res: Response): Promise<void
 
     if (!title || !String(title).trim()) {
       res.status(400).json({ message: 'Task title is required' });
+      return;
+    }
+    if (String(title).length > MAX_TITLE_LEN) {
+      res.status(400).json({ message: `Task title must be at most ${MAX_TITLE_LEN} characters` });
       return;
     }
 
@@ -680,7 +766,7 @@ export const createQuickTask = async (req: Request, res: Response): Promise<void
       })
     );
 
-    res.status(201).json({ ...task, isOverdue: computeIsOverdue(task), deadlineStatus: computeDeadlineStatus(task) });
+    res.status(201).json(enrichTask(task, req.user!));
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -696,12 +782,18 @@ export const createQuickTask = async (req: Request, res: Response): Promise<void
 // has no assignee), clears completedAt, and leaves all TaskData/schemaSnapshot intact.
 export const reopenTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { reason } = req.body as { reason?: string };
 
     if (!reason || !reason.trim()) {
       res.status(400).json({ message: 'A reason is required to re-open a task' });
+      return;
+    }
+    const reopenReasonErr = lengthError(reason, MAX_REASON_LEN, 'reason');
+    if (reopenReasonErr) {
+      res.status(400).json({ message: reopenReasonErr });
       return;
     }
 
@@ -744,7 +836,7 @@ export const reopenTask = async (req: Request, res: Response): Promise<void> => 
       reason.trim()
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error re-opening task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -755,7 +847,8 @@ export const reopenTask = async (req: Request, res: Response): Promise<void> => 
 
 export const assignTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, divisionId } = req.user!;
     const { assignedToUserId } = req.body;
 
@@ -813,20 +906,24 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: { assignedToUserId, status: 'Assigned' },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: { assignedToUserId, status: 'Assigned' },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_ASSIGNED',
+        userId,
+        `Task assigned to ${assignee.name}`,
+        { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId },
+        undefined,
+        tx
+      );
+      return u;
     });
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_ASSIGNED',
-      userId,
-      `Task assigned to ${assignee.name}`,
-      { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId }
-    );
 
     // Notify the new assignee (additive third write — best-effort). Skips the
     // actor in case they assigned the task to themselves.
@@ -843,7 +940,7 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       [userId]
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -854,7 +951,8 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
 
 export const selfAssignTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
 
     const task = await prisma.task.findUnique({
@@ -881,22 +979,26 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: { assignedToUserId: userId, status: 'Assigned' },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: { assignedToUserId: userId, status: 'Assigned' },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_SELF_ASSIGNED',
+        userId,
+        `Task self-assigned by ${req.user!.userId} (PERFORM THIS TASK)`,
+        { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId: userId },
+        undefined,
+        tx
+      );
+      return u;
     });
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_SELF_ASSIGNED',
-      userId,
-      `Task self-assigned by ${req.user!.userId} (PERFORM THIS TASK)`,
-      { fromStatus: 'Unassigned', toStatus: 'Assigned', assignedToUserId: userId }
-    );
-
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error self-assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -907,12 +1009,19 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
 
 export const saveTaskData = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { data } = req.body;
 
     if (!data) {
       res.status(400).json({ message: 'data is required' });
+      return;
+    }
+
+    const dataErr = taskDataError(data);
+    if (dataErr) {
+      res.status(400).json({ message: dataErr });
       return;
     }
 
@@ -936,31 +1045,32 @@ export const saveTaskData = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const isFirstSave = task.status === 'Assigned' || task.status === 'Follow-up Required';
-    const newStatus = isFirstSave && task.status === 'Assigned' ? 'In Progress' : task.status;
+    const newStatus = task.status === 'Assigned' ? 'In Progress' : task.status;
 
-    // Upsert TaskData
-    await prisma.taskData.upsert({
-      where: { taskId: id },
-      update: { data },
-      create: { taskId: id, data }
-    });
-
-    if (newStatus !== task.status) {
-      await prisma.task.update({
-        where: { id },
-        data: { status: newStatus }
+    await prisma.$transaction(async (tx) => {
+      await tx.taskData.upsert({
+        where: { taskId: id },
+        update: { data },
+        create: { taskId: id, data }
       });
 
-      await logAuditAndActivity(
-        task.id,
-        String(task.id),
-        'TASK_IN_PROGRESS',
-        userId,
-        'Task progress saved. Status: Assigned → In Progress',
-        { fromStatus: 'Assigned', toStatus: 'In Progress' }
-      );
-    }
+      if (newStatus !== task.status) {
+        await tx.task.update({
+          where: { id },
+          data: { status: newStatus }
+        });
+        await logAuditAndActivity(
+          task.id,
+          String(task.id),
+          'TASK_IN_PROGRESS',
+          userId,
+          'Task progress saved. Status: Assigned → In Progress',
+          { fromStatus: 'Assigned', toStatus: 'In Progress' },
+          undefined,
+          tx
+        );
+      }
+    });
 
     res.json({ message: 'Task data saved', status: newStatus });
   } catch (error) {
@@ -973,7 +1083,8 @@ export const saveTaskData = async (req: Request, res: Response): Promise<void> =
 
 export const submitTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
 
     const task = await prisma.task.findUnique({
@@ -1003,30 +1114,35 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
     // TODO (future): Implement a TASK_APPROVAL_GRACE_MINUTES SystemSetting if grace window is required.
     const newStatus = requiresApproval ? 'In Review' : 'Closed';
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        completedAt: newStatus === 'Closed' ? new Date() : null
-      },
-      include: taskInclude()
-    });
-
     const actionType = newStatus === 'Closed' ? 'TASK_APPROVED' : 'TASK_SUBMITTED';
     const content = newStatus === 'Closed'
       ? `Task submitted and auto-closed (requiresApproval = false). Status: ${task.status} → Closed`
       : `Task submitted for review. Status: ${task.status} → In Review`;
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      actionType,
-      userId,
-      content,
-      { fromStatus: task.status, toStatus: newStatus }
-    );
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          completedAt: newStatus === 'Closed' ? new Date() : null
+        },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        actionType,
+        userId,
+        content,
+        { fromStatus: task.status, toStatus: newStatus },
+        undefined,
+        tx
+      );
+      return u;
+    });
 
     // Finding Pending-Verification hook: auto-close may finalise a follow-up task.
+    // Runs after commit because it creates its own internal transaction.
     if (newStatus === 'Closed') {
       await checkAndTriggerPendingVerification(task.id, userId);
     }
@@ -1048,7 +1164,7 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       );
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error submitting task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1059,17 +1175,24 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
 
 export const reviewTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { action, comment } = req.body; // action: 'approve' | 'reject' | 'follow-up'
 
-    if (!action || !['approve', 'reject', 'follow-up'].includes(action)) {
+    if (!action || !REVIEW_ACTIONS.includes(action)) {
       res.status(400).json({ message: 'action must be one of: approve, reject, follow-up' });
       return;
     }
 
     if ((action === 'reject' || action === 'follow-up') && !comment) {
       res.status(400).json({ message: 'A comment is required when rejecting or requesting follow-up' });
+      return;
+    }
+
+    const commentLenErr = lengthError(comment, MAX_COMMENT_LEN, 'comment');
+    if (commentLenErr) {
+      res.status(400).json({ message: commentLenErr });
       return;
     }
 
@@ -1131,33 +1254,37 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
 
     const newStatus = statusMap[action]!;
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        rejectionReason: action === 'reject' ? (comment ?? null) : undefined,
-        completedAt: newStatus === 'Closed' ? new Date() : null
-      },
-      include: taskInclude()
-    });
-
     const contentMap: Record<string, string> = {
       'approve': `Task approved. Status: In Review → Closed`,
       'reject': `Task rejected. Reason: ${comment}. Status: In Review → Rejected`,
       'follow-up': `Follow-up requested: ${comment}. Status: In Review → Follow-up Required`
     };
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      actionTypeMap[action]!,
-      userId,
-      contentMap[action]!,
-      { fromStatus: 'In Review', toStatus: newStatus, comment },
-      comment
-    );
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          rejectionReason: action === 'reject' ? (comment ?? null) : undefined,
+          completedAt: newStatus === 'Closed' ? new Date() : null
+        },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        actionTypeMap[action]!,
+        userId,
+        contentMap[action]!,
+        { fromStatus: 'In Review', toStatus: newStatus, comment },
+        comment,
+        tx
+      );
+      return u;
+    });
 
     // Finding Pending-Verification hook: approve/reject can finalise a follow-up task.
+    // Runs after commit because it creates its own internal transaction.
     if (FINAL_TASK_STATUSES.includes(newStatus)) {
       await checkAndTriggerPendingVerification(task.id, userId);
     }
@@ -1185,7 +1312,7 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
       );
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error reviewing task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1196,7 +1323,8 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
 
 export const postRejectionAction = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { action, newAssigneeId, reason } = req.body; // action: 'terminate' | 'reassign'
 
@@ -1248,11 +1376,17 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       // Reassign — validate new assignee
       const newAssignee = await prisma.user.findUnique({
         where: { id: newAssigneeId, deletedAt: null },
-        select: { id: true, name: true }
+        select: { id: true, name: true, divisionId: true }
       });
 
       if (!newAssignee) {
         res.status(404).json({ message: 'New assignee not found' });
+        return;
+      }
+
+      // Division lock: mirrors assignTask — block cross-division unless assign_any.
+      if (!hasPrivilege(req.user!, 'task:assign_any') && newAssignee.divisionId !== divisionId) {
+        res.status(403).json({ message: 'You can only reassign tasks to users in your own division' });
         return;
       }
 
@@ -1265,28 +1399,32 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       content = `Task reassigned to ${newAssignee.name} after rejection. Status: Rejected → Assigned`;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: updateData,
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: updateData,
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        actionType,
+        userId,
+        content,
+        { fromStatus: 'Rejected', toStatus: updateData.status, reason },
+        reason,
+        tx
+      );
+      return u;
     });
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      actionType,
-      userId,
-      content,
-      { fromStatus: 'Rejected', toStatus: updateData.status, reason },
-      reason
-    );
-
     // Finding Pending-Verification hook: termination finalises a follow-up task.
+    // Runs after commit because it creates its own internal transaction.
     if (FINAL_TASK_STATUSES.includes(updateData.status)) {
       await checkAndTriggerPendingVerification(task.id, userId);
     }
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error performing post-rejection action:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1317,6 +1455,7 @@ export async function reassignTaskService(
 
   if (!newAssigneeId) throw new HttpError(400, 'newAssigneeId is required');
   if (!reason?.trim()) throw new HttpError(400, 'A reason is required when reassigning a task');
+  if (reason.length > MAX_REASON_LEN) throw new HttpError(400, `reason must be at most ${MAX_REASON_LEN} characters`);
 
   const task = await client.task.findUnique({
     where: { id, deletedAt: null },
@@ -1338,9 +1477,14 @@ export async function reassignTaskService(
 
   const newAssignee = await client.user.findUnique({
     where: { id: newAssigneeId, deletedAt: null },
-    select: { id: true, name: true }
+    select: { id: true, name: true, divisionId: true }
   });
   if (!newAssignee) throw new HttpError(404, 'New assignee not found');
+
+  // Division lock: mirrors assignTask — block cross-division unless assign_any.
+  if (!hasPrivilege(actor, 'task:assign_any') && newAssignee.divisionId !== actor.divisionId) {
+    throw new HttpError(403, 'You can only reassign tasks to users in your own division');
+  }
 
   const previousAssigneeId = task.assignedToUserId;
 
@@ -1370,7 +1514,8 @@ export async function reassignTaskService(
 
 export const reassignTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { newAssigneeId, reason } = req.body;
 
@@ -1392,7 +1537,7 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
       [userId]
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     if (isHttpError(error)) {
       res.status(error.status).json({ message: error.message });
@@ -1407,7 +1552,8 @@ export const reassignTask = async (req: Request, res: Response): Promise<void> =
 
 export const transferIssuerRights = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { newIssuerId } = req.body;
 
@@ -1437,9 +1583,14 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
       return;
     }
 
+    if (task.status === 'Inactive') {
+      res.status(400).json({ message: 'Cannot transfer issuer rights on an Inactive task' });
+      return;
+    }
+
     const newIssuer = await prisma.user.findUnique({
       where: { id: newIssuerId, deletedAt: null },
-      select: { id: true, name: true }
+      select: { id: true, name: true, role: { select: { name: true } } }
     });
 
     if (!newIssuer) {
@@ -1447,24 +1598,37 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
       return;
     }
 
+    // Issuer = reviewer (isReviewer grants rights to userId === issuerId), so the
+    // target must be a role that can legitimately review tasks. Restrict transfer
+    // to Managers and Directors; never hand reviewer rights to a Staff / Group
+    // Leader (or other) account via this path.
+    if (newIssuer.role.name !== 'Manager' && newIssuer.role.name !== 'Director') {
+      res.status(403).json({ message: 'Issuer rights can only be transferred to a Manager or Director' });
+      return;
+    }
+
     const previousIssuerId = task.issuerId;
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: { issuerId: newIssuerId },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: { issuerId: newIssuerId },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_ISSUER_TRANSFERRED',
+        userId,
+        `Issuer rights transferred to ${newIssuer.name}. Previous issuer (id: ${previousIssuerId}) loses issuer rights. Note: system role-based reviewer rights (Manager/Director) are unaffected.`,
+        { previousIssuerId, newIssuerId },
+        undefined,
+        tx
+      );
+      return u;
     });
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_ISSUER_TRANSFERRED',
-      userId,
-      `Issuer rights transferred to ${newIssuer.name}. Previous issuer (id: ${previousIssuerId}) loses issuer rights. Note: system role-based reviewer rights (Manager/Director) are unaffected.`,
-      { previousIssuerId, newIssuerId }
-    );
-
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error transferring issuer rights:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1475,12 +1639,17 @@ export const transferIssuerRights = async (req: Request, res: Response): Promise
 
 export const inactivateTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role } = req.user!;
-    const { reason } = req.body;
+    const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
 
     if (!reason) {
       res.status(400).json({ message: 'A reason is required when inactivating a task' });
+      return;
+    }
+    if (reason.length > MAX_REASON_LEN) {
+      res.status(400).json({ message: `reason must be at most ${MAX_REASON_LEN} characters` });
       return;
     }
 
@@ -1510,31 +1679,34 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        status: 'Inactive',
-        inactivationLog: {
-          reason,
-          inactivatedBy: userId,
-          inactivatedAt: new Date().toISOString(),
-          previousStatus: task.status
-        }
-      },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          status: 'Inactive',
+          inactivationLog: {
+            reason,
+            inactivatedBy: userId,
+            inactivatedAt: new Date().toISOString(),
+            previousStatus: task.status
+          }
+        },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_INACTIVATED',
+        userId,
+        `Task inactivated. Reason: ${reason}. Status: ${task.status} → Inactive`,
+        { fromStatus: task.status, toStatus: 'Inactive', reason },
+        reason,
+        tx
+      );
+      return u;
     });
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_INACTIVATED',
-      userId,
-      `Task inactivated. Reason: ${reason}. Status: ${task.status} → Inactive`,
-      { fromStatus: task.status, toStatus: 'Inactive', reason },
-      reason
-    );
-
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error inactivating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1545,12 +1717,13 @@ export const inactivateTask = async (req: Request, res: Response): Promise<void>
 
 export const reactivateTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role } = req.user!;
 
     const task = await prisma.task.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, issuerId: true, status: true, inactivationLog: true }
+      select: { id: true, issuerId: true, assignedToUserId: true, status: true, inactivationLog: true }
     });
 
     if (!task) {
@@ -1570,27 +1743,32 @@ export const reactivateTask = async (req: Request, res: Response): Promise<void>
     }
 
     const log = task.inactivationLog as any;
-    const previousStatus = log?.previousStatus ?? 'Assigned';
+    // Derive fallback from live assignedToUserId — safe even if the log is absent/corrupted.
+    const previousStatus = log?.previousStatus ?? (task.assignedToUserId ? 'Assigned' : 'Unassigned');
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        status: previousStatus,
-        inactivationLog: Prisma.DbNull
-      },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          status: previousStatus,
+          inactivationLog: Prisma.DbNull
+        },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_REACTIVATED',
+        userId,
+        `Task reactivated. Status: Inactive → ${previousStatus}`,
+        { fromStatus: 'Inactive', toStatus: previousStatus },
+        undefined,
+        tx
+      );
+      return u;
     });
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_REACTIVATED',
-      userId,
-      `Task reactivated. Status: Inactive → ${previousStatus}`,
-      { fromStatus: 'Inactive', toStatus: previousStatus }
-    );
-
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error reactivating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1601,7 +1779,8 @@ export const reactivateTask = async (req: Request, res: Response): Promise<void>
 
 export const setDeadline = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { deadline } = req.body;
 
@@ -1632,23 +1811,31 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
     }
 
     const newDeadline = new Date(deadline);
+    if (isNaN(newDeadline.getTime())) {
+      res.status(400).json({ message: 'Invalid deadline date' });
+      return;
+    }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: { deadline: newDeadline },
-      include: taskInclude()
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.task.update({
+        where: { id },
+        data: { deadline: newDeadline },
+        include: taskInclude()
+      });
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        'TASK_DEADLINE_SET',
+        userId,
+        `Deadline set to ${newDeadline.toISOString()}`,
+        { deadline: newDeadline.toISOString() },
+        undefined,
+        tx
+      );
+      return u;
     });
 
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      'TASK_DEADLINE_SET',
-      userId,
-      `Deadline set to ${newDeadline.toISOString()}`,
-      { deadline: newDeadline.toISOString() }
-    );
-
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error setting deadline:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1659,12 +1846,18 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
 
 export const requestDeadlineExtension = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId } = req.user!;
     const { reason, proposedDeadline } = req.body;
 
     if (!reason) {
       res.status(400).json({ message: 'A reason is required for deadline extension requests' });
+      return;
+    }
+    const extReasonErr = lengthError(reason, MAX_REASON_LEN, 'reason');
+    if (extReasonErr) {
+      res.status(400).json({ message: extReasonErr });
       return;
     }
 
@@ -1722,7 +1915,7 @@ export const requestDeadlineExtension = async (req: Request, res: Response): Pro
       { reason, proposedDeadline: proposedDeadline ?? null }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error requesting deadline extension:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1733,96 +1926,114 @@ export const requestDeadlineExtension = async (req: Request, res: Response): Pro
 
 export const decideDeadlineExtension = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { extensionIndex, decision, newDeadline } = req.body;
 
-    if (extensionIndex === undefined || extensionIndex === null) {
-      res.status(400).json({ message: 'extensionIndex is required' });
+    if (extensionIndex === undefined || extensionIndex === null || !Number.isInteger(extensionIndex)) {
+      res.status(400).json({ message: 'extensionIndex is required and must be an integer' });
       return;
     }
 
-    if (!decision || !['approve', 'deny'].includes(decision)) {
+    if (!decision || !DEADLINE_DECISIONS.includes(decision)) {
       res.status(400).json({ message: 'decision must be approve or deny' });
       return;
     }
 
-    const task = await prisma.task.findUnique({
-      where: { id, deletedAt: null },
-      select: {
-        id: true,
-        issuerId: true,
-        targetDivisionId: true,
-        status: true,
-        deadline: true,
-        deadlineExtensions: true
-      }
-    });
-
-    if (!task) {
-      res.status(404).json({ message: 'Task not found' });
-      return;
-    }
-
-    // OQ-2: Reviewer = Issuer + Director + Managers of same Division
-    if (!isReviewer(req.user!, task)) {
-      res.status(403).json({ message: 'You do not have permission to decide on deadline extensions' });
-      return;
-    }
-
-    const extensions = (task.deadlineExtensions as any[]) ?? [];
-    if (extensionIndex < 0 || extensionIndex >= extensions.length) {
-      res.status(400).json({ message: 'Invalid extensionIndex' });
-      return;
-    }
-
-    const extension = extensions[extensionIndex];
-    if (extension.decision !== null) {
-      res.status(400).json({ message: 'This extension request has already been decided' });
-      return;
-    }
-
-    extensions[extensionIndex] = {
-      ...extension,
-      decision,
-      decidedAt: new Date().toISOString()
-    };
-
+    // Validate newDeadline format early (before the transaction) to return 400 not 500.
     let deadlineUpdate: Date | undefined;
-    if (decision === 'approve') {
-      const resolvedDeadline = newDeadline ?? extension.proposedDeadline;
-      if (!resolvedDeadline) {
-        res.status(400).json({ message: 'newDeadline is required when approving an extension (or proposedDeadline must have been set in the request)' });
+    if (decision === 'approve' && newDeadline) {
+      deadlineUpdate = new Date(newDeadline);
+      if (isNaN(deadlineUpdate.getTime())) {
+        res.status(400).json({ message: 'Invalid newDeadline date' });
         return;
       }
-      deadlineUpdate = new Date(resolvedDeadline);
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: {
-        deadlineExtensions: extensions,
-        ...(deadlineUpdate ? { deadline: deadlineUpdate } : {})
-      },
-      include: taskInclude()
+    // Wrap in a transaction with a row-level lock to prevent concurrent decide calls
+    // from reading the same stale extensions blob and silently losing one write.
+    const updated = await prisma.$transaction(async (tx) => {
+      // Lock the Task row for the duration of this transaction.
+      await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${id} FOR UPDATE`;
+
+      const task = await tx.task.findUnique({
+        where: { id, deletedAt: null },
+        select: {
+          id: true,
+          issuerId: true,
+          targetDivisionId: true,
+          status: true,
+          deadline: true,
+          deadlineExtensions: true
+        }
+      });
+
+      if (!task) throw new HttpError(404, 'Task not found');
+
+      // OQ-2: Reviewer = Issuer + Director + Managers of same Division
+      if (!isReviewer(req.user!, task)) {
+        throw new HttpError(403, 'You do not have permission to decide on deadline extensions');
+      }
+
+      const extensions = (task.deadlineExtensions as any[]) ?? [];
+      if (extensionIndex < 0 || extensionIndex >= extensions.length) {
+        throw new HttpError(400, 'Invalid extensionIndex');
+      }
+
+      const extension = extensions[extensionIndex];
+      if (extension.decision !== null) {
+        throw new HttpError(400, 'This extension request has already been decided');
+      }
+
+      // Resolve deadline when approving (proposedDeadline from the request is the fallback).
+      if (decision === 'approve' && !deadlineUpdate) {
+        const resolvedDeadline = extension.proposedDeadline;
+        if (!resolvedDeadline) {
+          throw new HttpError(400, 'newDeadline is required when approving an extension (or proposedDeadline must have been set in the request)');
+        }
+        deadlineUpdate = new Date(resolvedDeadline);
+        if (isNaN(deadlineUpdate.getTime())) {
+          throw new HttpError(400, 'Invalid proposedDeadline stored in the extension request');
+        }
+      }
+
+      extensions[extensionIndex] = { ...extension, decision, decidedAt: new Date().toISOString() };
+
+      const u = await tx.task.update({
+        where: { id },
+        data: {
+          deadlineExtensions: extensions,
+          ...(deadlineUpdate ? { deadline: deadlineUpdate } : {})
+        },
+        include: taskInclude()
+      });
+
+      const actionType = decision === 'approve' ? 'TASK_DEADLINE_EXTENSION_APPROVED' : 'TASK_DEADLINE_EXTENSION_DENIED';
+      const content = decision === 'approve'
+        ? `Deadline extension approved. New deadline: ${deadlineUpdate!.toISOString()}`
+        : 'Deadline extension denied. Original deadline stands.';
+
+      await logAuditAndActivity(
+        task.id,
+        String(task.id),
+        actionType,
+        userId,
+        content,
+        { decision, newDeadline: deadlineUpdate?.toISOString() ?? null, extensionIndex },
+        undefined,
+        tx
+      );
+
+      return u;
     });
 
-    const actionType = decision === 'approve' ? 'TASK_DEADLINE_EXTENSION_APPROVED' : 'TASK_DEADLINE_EXTENSION_DENIED';
-    const content = decision === 'approve'
-      ? `Deadline extension approved. New deadline: ${deadlineUpdate!.toISOString()}`
-      : 'Deadline extension denied. Original deadline stands.';
-
-    await logAuditAndActivity(
-      task.id,
-      String(task.id),
-      actionType,
-      userId,
-      content,
-      { decision, newDeadline: deadlineUpdate?.toISOString() ?? null, extensionIndex }
-    );
-
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
     console.error('Error deciding deadline extension:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -1832,7 +2043,8 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
 
 export const rateTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { rating } = req.body;
 
@@ -1926,7 +2138,7 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
       { previousRating, newRating: rating, isRevision }
     );
 
-    res.json({ ...updated, isOverdue: computeIsOverdue(updated), deadlineStatus: computeDeadlineStatus(updated) });
+    res.json(enrichTask(updated, req.user!));
   } catch (error) {
     console.error('Error rating task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1937,7 +2149,8 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
 
 export const getTaskActivity = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
 
     const task = await prisma.task.findUnique({
@@ -1985,12 +2198,19 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
 
 export const postTaskComment = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { content } = req.body;
 
     if (!content || !content.trim()) {
       res.status(400).json({ message: 'content is required' });
+      return;
+    }
+
+    const contentLenErr = lengthError(content, MAX_COMMENT_LEN, 'content');
+    if (contentLenErr) {
+      res.status(400).json({ message: contentLenErr });
       return;
     }
 

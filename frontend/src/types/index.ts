@@ -1,3 +1,9 @@
+// Task API contract literals live in the mirror constants file (kept in sync
+// with the backend authority by a guard test). Re-export the types here so the
+// many `from '../types'` importers keep working.
+import type { TaskStatus, DeadlineDecision } from '../constants/taskStatus';
+export type { TaskStatus, ReviewAction, DeadlineDecision } from '../constants/taskStatus';
+
 export interface Role {
   id: number;
   name: string;
@@ -15,6 +21,7 @@ export interface User {
   email: string;
   role: string; // The backend returns the role name as a string
   divisionId: number | null;
+  forcePasswordChange: boolean;
   preferences?: UserPreferences | null;
 }
 
@@ -43,18 +50,6 @@ export interface PrivilegeMatrix {
   catalog: PrivilegeCatalogItem[];
   roles: RolePrivileges[];
 }
-
-// ── Task status — exactly the 10 DB statuses (isOverdue is a separate boolean)
-export type TaskStatus =
-  | 'Unassigned'
-  | 'Assigned'
-  | 'In Progress'
-  | 'In Review'
-  | 'Follow-up Required'
-  | 'Closed'
-  | 'Rejected'
-  | 'Terminated'
-  | 'Inactive';
 
 export type FormFieldType =
   | 'text'
@@ -113,7 +108,7 @@ export interface DeadlineExtension {
   requestedBy: number;
   reason: string;
   requestedAt: string;
-  decision?: 'approved' | 'denied';
+  decision?: DeadlineDecision;
   decidedAt?: string;
   newDeadline?: string;
 }
@@ -154,6 +149,9 @@ export type DeadlineStatus = 'Due Soon' | 'Due Today' | 'Overdue' | null;
 export interface TaskEnriched extends Task {
   isOverdue: boolean;
   deadlineStatus: DeadlineStatus;
+  // Server-computed (per requesting user): reviewer rights on this task. The
+  // backend is the authority (privilege-aware); the client must not recompute it.
+  isReviewer: boolean;
   lastActivityAt?: string;
   template: { id: number; templateId: string; title: string; allowsFindings?: boolean } | null;
   issuer: { id: number; name: string } | null;
