@@ -256,6 +256,39 @@ describe('Task Backend (Phase 5.2)', () => {
       await prisma.workPackage.delete({ where: { id: wp.id } });
     });
 
+    it('T04c: Staff (WP bypass, no assign_any) cannot create task with a cross-division assignee → 403', async () => {
+      // Regression — security review: the on-create assignee division lock was
+      // gated on role === 'Manager', so a Group Leader / Staff using the
+      // WP-assignment create bypass could seed an assignee in another division.
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: 'TSK-WP-04C001',
+          name: 'WP 04C',
+          type: 'AUDIT',
+          divisionId,
+          timeframeFrom: new Date(),
+          timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: managerId,
+          status: 'Open'
+        }
+      });
+      await prisma.workPackageAssignment.create({
+        data: { wpId: wp.id, userId: staffId }
+      });
+
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${staffToken}`)
+        // own-division target (required by the WP bypass) but a cross-division assignee
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId, wpId: wp.id, assignedToUserId: manager2Id });
+
+      expect(res.status).toBe(403);
+
+      // Cleanup
+      await prisma.workPackageAssignment.deleteMany({ where: { wpId: wp.id } });
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+
     it('T05: Create Task from Archived template → 400', async () => {
       const res = await request(app)
         .post('/api/tasks')

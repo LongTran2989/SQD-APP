@@ -493,10 +493,14 @@ export async function createTaskService(
       select: { id: true, divisionId: true }
     });
     if (!assignee) throw new HttpError(404, 'Assignee user not found');
-    // Division-scope comparison stays hardcoded (Phase 7 separation of concerns):
-    // Director/Admin assign anyone; Manager is locked to their own division.
-    if (role === 'Manager' && assignee.divisionId !== divisionId) {
-      throw new HttpError(403, 'Managers can only assign tasks to users in their own division');
+    // Division lock — mirrors assignTask: only an actor with cross-division reach
+    // (task:assign_any) may seed an assignee outside their own division. This MUST
+    // be privilege-gated, not role-string-gated: the WP-assignment create bypass
+    // (Group Leader / Staff) and any custom role granted task:create would
+    // otherwise skip the check entirely and assign a task to a user in another
+    // division on creation.
+    if (!hasPrivilege(actor, 'task:assign_any') && assignee.divisionId !== divisionId) {
+      throw new HttpError(403, 'You can only assign tasks to users in your own division');
     }
   }
 
@@ -1433,7 +1437,8 @@ export async function reassignTaskService(
 
 export const reassignTask = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
     const { userId, role, divisionId } = req.user!;
     const { newAssigneeId, reason } = req.body;
 
@@ -1831,8 +1836,8 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
     const { userId, role, divisionId } = req.user!;
     const { extensionIndex, decision, newDeadline } = req.body;
 
-    if (extensionIndex === undefined || extensionIndex === null) {
-      res.status(400).json({ message: 'extensionIndex is required' });
+    if (extensionIndex === undefined || extensionIndex === null || !Number.isInteger(extensionIndex)) {
+      res.status(400).json({ message: 'extensionIndex is required and must be an integer' });
       return;
     }
 
