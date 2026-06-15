@@ -1,5 +1,5 @@
 #!/bin/bash
-# SQD-APP — OCI Ubuntu ARM deployment script
+# SQD-APP — Ubuntu VPS deployment script
 # Usage: sudo bash deploy.sh your-subdomain.duckdns.org
 set -e
 
@@ -22,6 +22,22 @@ echo "  SQD-APP Deployment"
 echo "  Domain : $DOMAIN"
 echo "============================================"
 echo ""
+
+# ── 0. Swap space (prevents OOM during Next.js build on 2 GB RAM servers) ────
+echo "→ [0/9] Setting up 4 GB swap space..."
+if [ ! -f /swapfile ]; then
+  fallocate -l 4G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  # Reduce swap aggressiveness — only use swap when RAM is nearly full
+  sysctl vm.swappiness=10
+  echo 'vm.swappiness=10' >> /etc/sysctl.conf
+  echo "  Swap created."
+else
+  echo "  Swap already exists — skipping."
+fi
 
 # ── 1. System packages ────────────────────────────────────────────────────────
 echo "→ [1/9] Updating system and installing packages..."
