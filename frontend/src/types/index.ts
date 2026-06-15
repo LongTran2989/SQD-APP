@@ -312,7 +312,7 @@ export interface RaiseFindingActionPayload {
   departmentId: number;
   description: string;
   fieldId?: string | null;
-  aircraftRegistration?: string | null;
+  aircraftRegistrationCode?: string | null;
   regulatoryReference?: string | null;
 }
 
@@ -394,7 +394,9 @@ export interface Finding {
   dueDate: string | null;
   eventType: string;
   departmentId: number;
-  aircraftRegistration: string | null;
+  aircraftRegistrationCode: string | null;
+  // Populated relation (present on list/detail reads). Null when no aircraft set.
+  aircraftRegistration: { registration: string; description: string | null; operatorCode: string | null } | null;
   regulatoryReference: string | null;
   errorCode: string | null;
   rootCause: string | null;
@@ -620,4 +622,47 @@ export interface AppNotification {
   metadata: Record<string, unknown> | null;
   readAt: string | null;
   createdAt: string;
+}
+
+// ─── Reference Data (aviation) ────────────────────────────────────────────────
+
+export interface Department {
+  id: number;
+  name: string;
+  deletedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Operator {
+  iataCode: string;
+  name: string;
+}
+
+export interface Authority {
+  code: string;
+  fullName: string;
+}
+
+export interface AircraftType {
+  code: string;
+  createdAt?: string;
+}
+
+export interface AircraftRegistration {
+  registration: string;
+  description: string | null;
+  serialNumber: string | null;
+  status: string;
+  aircraftTypeCode: string | null;
+  operatorCode: string | null;
+  authorityCode: string | null;
+  createdAt?: string;
+}
+
+export interface AuthorizationType {
+  id: number;
+  code: string;
+  description: string | null;
+  category: string | null;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { raiseFinding } from '../../api/findingApi';
 import { getDatasource, getDivisions as getDivisionsApi } from '../../api/taskApi';
 import { listAtaChapters, listHazardTags, listEventTypes } from '../../api/taxonomyApi';
@@ -9,6 +9,7 @@ import { AtaChapter, HazardTag, EventType } from '../../types';
 import toast from 'react-hot-toast';
 import { X, AlertTriangle } from 'lucide-react';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
+import SearchableSelect from '../ui/SearchableSelect';
 
 interface Props {
   taskId?: number;
@@ -28,7 +29,10 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
   const [departmentId, setDepartmentId] = useState('');
   const [ataChapterId, setAtaChapterId] = useState('');
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
-  const [aircraftRegistration, setAircraftRegistration] = useState('');
+  const [aircraftRegistrationCode, setAircraftRegistrationCode] = useState('');
+  const [operatorCode, setOperatorCode] = useState('');
+  const [allRegistrations, setAllRegistrations] = useState<{ value: string; label: string; operatorCode?: string | null }[]>([]);
+  const [operators, setOperators] = useState<{ value: string; label: string }[]>([]);
   const [regulatoryReference, setRegulatoryReference] = useState('');
   const [description, setDescription] = useState('');
   const [fieldId, setFieldId] = useState('');
@@ -36,6 +40,8 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
 
   useEffect(() => {
     getDatasource('departments').then(setDepartments).catch(() => {});
+    getDatasource('operators').then(setOperators).catch(() => {});
+    getDatasource('registrations').then(setAllRegistrations).catch(() => {});
     listAtaChapters(true).then(setAtaChapters).catch(() => {});
     listHazardTags(true).then(setHazardTags).catch(() => {});
     listEventTypes(true)
@@ -49,6 +55,28 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
       getDivisionsApi().then(setDivisions).catch(() => {});
     }
   }, [taskId]);
+
+  const filteredRegistrations = useMemo(
+    () => operatorCode ? allRegistrations.filter((r) => r.operatorCode === operatorCode) : allRegistrations,
+    [allRegistrations, operatorCode],
+  );
+
+  const handleSelectOperator = (code: string) => {
+    setOperatorCode(code);
+    // clear aircraft if it no longer belongs to this operator
+    if (code && aircraftRegistrationCode) {
+      const reg = allRegistrations.find((r) => r.value === aircraftRegistrationCode);
+      if (reg && reg.operatorCode !== code) setAircraftRegistrationCode('');
+    }
+  };
+
+  const handleSelectRegistration = (reg: string) => {
+    setAircraftRegistrationCode(reg);
+    if (reg) {
+      const found = allRegistrations.find((r) => r.value === reg);
+      if (found?.operatorCode) setOperatorCode(found.operatorCode);
+    }
+  };
 
   const toggleTag = (id: number) =>
     setSelectedTagIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
@@ -69,7 +97,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
         eventType: resolvedEventType,
         departmentId: Number(departmentId),
         description: description.trim(),
-        aircraftRegistration: aircraftRegistration.trim() || undefined,
+        aircraftRegistrationCode: aircraftRegistrationCode || undefined,
         regulatoryReference: regulatoryReference.trim() || undefined,
         fieldId: fieldId.trim() || undefined,
         ataChapterId: ataChapterId ? Number(ataChapterId) : undefined,
@@ -201,14 +229,25 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
 
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+              Operator
+            </label>
+            <SearchableSelect
+              options={operators}
+              value={operatorCode}
+              onChange={handleSelectOperator}
+              placeholder="Filter by operator… (optional)"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
               Aircraft Registration
             </label>
-            <input
-              type="text"
-              value={aircraftRegistration}
-              onChange={(e) => setAircraftRegistration(e.target.value)}
-              placeholder="Optional"
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            <SearchableSelect
+              options={filteredRegistrations}
+              value={aircraftRegistrationCode}
+              onChange={handleSelectRegistration}
+              placeholder="Select registration… (optional)"
             />
           </div>
 

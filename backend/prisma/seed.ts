@@ -482,7 +482,7 @@ async function main() {
     severity: string | null;
     divisionCode: string;
     deptName: string;
-    aircraftRegistration: string | null;
+    aircraftRegistrationCode: string | null;
     dueDate: Date | null;
     closedAt: Date | null;
     createdAt: Date;
@@ -505,7 +505,7 @@ async function main() {
         severity: null,
         divisionCode: 'QCH',
         deptName: 'HAN BMC',
-        aircraftRegistration: 'VN-A101',
+        aircraftRegistrationCode: 'A323',
         dueDate: null,
         closedAt: null,
         createdAt: daysAgo(5),
@@ -521,7 +521,7 @@ async function main() {
         severity: null,
         divisionCode: 'QCS',
         deptName: 'HCM BMC',
-        aircraftRegistration: 'VN-A205',
+        aircraftRegistrationCode: 'A324',
         dueDate: null,
         closedAt: null,
         createdAt: daysAgo(3),
@@ -539,7 +539,7 @@ async function main() {
         severity: 'Level 1',
         divisionCode: 'QCH',
         deptName: 'HAN RMC',
-        aircraftRegistration: 'VN-A112',
+        aircraftRegistrationCode: 'A325',
         dueDate: daysAgo(-14), // 14 days from now
         closedAt: null,
         createdAt: daysAgo(10),
@@ -558,7 +558,7 @@ async function main() {
         severity: 'Level 2',
         divisionCode: 'QCS',
         deptName: 'HCM RMC',
-        aircraftRegistration: 'VN-A311',
+        aircraftRegistrationCode: 'A886',
         dueDate: daysAgo(-7), // 7 days from now
         closedAt: null,
         createdAt: daysAgo(15),
@@ -579,7 +579,7 @@ async function main() {
         severity: 'Level 1',
         divisionCode: 'QCH',
         deptName: 'EGD',
-        aircraftRegistration: null,
+        aircraftRegistrationCode: null,
         dueDate: null,
         closedAt: null,
         createdAt: daysAgo(25),
@@ -599,7 +599,7 @@ async function main() {
         severity: 'Observation',
         divisionCode: 'QCS',
         deptName: 'DAD BRANCH',
-        aircraftRegistration: null,
+        aircraftRegistrationCode: null,
         dueDate: null,
         closedAt: null,
         createdAt: daysAgo(20),
@@ -621,7 +621,7 @@ async function main() {
         severity: 'Level 2',
         divisionCode: 'QCH',
         deptName: 'HAN BMC',
-        aircraftRegistration: 'VN-A098',
+        aircraftRegistrationCode: 'A326',
         dueDate: null,
         closedAt: daysAgo(2),
         createdAt: daysAgo(30),
@@ -644,7 +644,7 @@ async function main() {
         severity: null,
         divisionCode: 'QCS',
         deptName: 'HCM BMC',
-        aircraftRegistration: 'VN-A402',
+        aircraftRegistrationCode: 'A327',
         dueDate: null,
         closedAt: null,
         createdAt: daysAgo(12),
@@ -679,7 +679,7 @@ async function main() {
           reportedByUserId:    sf.reporterId,
           closedByUserId:      sf.closedById,
           closedAt:            sf.closedAt,
-          aircraftRegistration: sf.aircraftRegistration,
+          aircraftRegistrationCode: sf.aircraftRegistrationCode,
           ataChapterId:        ataChapter?.id ?? null,
           createdAt:           sf.createdAt,
           ...(sf.dueDate && { dueDate: sf.dueDate }),

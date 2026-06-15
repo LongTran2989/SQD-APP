@@ -395,7 +395,7 @@ export const actionEscalation = async (req: Request, res: Response): Promise<voi
             departmentId: payload.departmentId,
             description: payload.description,
             fieldId: payload.fieldId,
-            aircraftRegistration: payload.aircraftRegistration,
+            aircraftRegistrationCode: payload.aircraftRegistrationCode,
             regulatoryReference: payload.regulatoryReference,
           });
           linkedEntityType = 'Finding';

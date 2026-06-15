@@ -19,6 +19,7 @@ model Department {
   findings  Finding[]  @relation("FindingDepartment")
   responseActionTargets FindingResponseActionDepartment[] @relation("ResponseActionDepts")
   targetedWorkPackages  WorkPackage[]                     @relation("WorkPackageTargetDepartment")
+  deletedAt DateTime?  // Soft delete — Department is referenced by compliance records (Findings, WPs)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 }
@@ -140,6 +141,7 @@ model AircraftRegistration {
   operator         Operator?     @relation(fields: [operatorCode], references: [iataCode])
   authorityCode    String?
   authority        Authority?    @relation(fields: [authorityCode], references: [code])
+  findings         Finding[]
   createdAt        DateTime      @default(now())
 }
 
@@ -313,7 +315,8 @@ model Finding {
   fieldId              String?
   dueDate              DateTime?
   eventType            String
-  aircraftRegistration String?
+  aircraftRegistrationCode String?
+  aircraftRegistration AircraftRegistration? @relation(fields: [aircraftRegistrationCode], references: [registration])
   regulatoryReference  String?
   // @deprecated superseded by structured RCA + CAPA
   errorCode        String?

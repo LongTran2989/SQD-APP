@@ -255,7 +255,7 @@ export interface CreateFindingParams {
   departmentId: number;
   description: string;
   fieldId?: string | null;
-  aircraftRegistration?: string | null;
+  aircraftRegistrationCode?: string | null;
   regulatoryReference?: string | null;
   ataChapterId?: number | null;
   hazardTagIds?: number[];
@@ -273,7 +273,7 @@ export async function createFindingService(
   actor: { userId: number },
   params: CreateFindingParams
 ) {
-  const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds } = params;
+  const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds } = params;
 
   if (!eventType || !departmentId || !description) {
     throw new HttpError(400, 'eventType, departmentId, and description are required');
@@ -311,6 +311,15 @@ export async function createFindingService(
   const department = await client.department.findUnique({ where: { id: departmentId }, select: { id: true } });
   if (!department) throw new HttpError(400, 'Department not found');
 
+  // Optional aircraft registration must reference an existing registration.
+  if (aircraftRegistrationCode) {
+    const reg = await client.aircraftRegistration.findUnique({
+      where: { registration: aircraftRegistrationCode },
+      select: { registration: true },
+    });
+    if (!reg) throw new HttpError(400, `Unknown aircraft registration: ${aircraftRegistrationCode}`);
+  }
+
   // Optional taxonomy: ATA chapter + hazard tags must exist AND be active.
   const tagIds = (await validateTaxonomyFields(client, ataChapterId, hazardTagIds)) ?? [];
 
@@ -323,7 +332,7 @@ export async function createFindingService(
       description,
       departmentId,
       fieldId: fieldId ?? null,
-      aircraftRegistration: aircraftRegistration ?? null,
+      aircraftRegistrationCode: aircraftRegistrationCode ?? null,
       regulatoryReference: regulatoryReference ?? null,
       status: 'Open',
       sourceTaskId: taskId ?? null,
@@ -361,10 +370,10 @@ export async function createFindingService(
 export const createFinding = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req.user!;
-    const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds } = req.body;
+    const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds } = req.body;
 
     const finding = await prisma.$transaction((tx) =>
-      createFindingService(tx, { userId }, { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistration, regulatoryReference, description, ataChapterId, hazardTagIds })
+      createFindingService(tx, { userId }, { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds })
     );
 
     // Notify the finding reviewers (finding:review holders in the target
@@ -425,7 +434,8 @@ export const listFindings = async (req: Request, res: Response): Promise<void> =
           sourceTask: { select: { id: true, taskId: true, title: true, status: true, template: { select: { title: true } } } },
           reportedByUser: { select: { id: true, name: true } },
           targetDivision: { select: { id: true, name: true, code: true } },
-          department: { select: { id: true, name: true } }
+          department: { select: { id: true, name: true } },
+          aircraftRegistration: { select: { registration: true, description: true, operatorCode: true } }
         }
       })
     ]);
@@ -462,6 +472,7 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
         closedByUser: { select: { id: true, name: true, role: { select: { name: true } } } },
         targetDivision: { select: { id: true, name: true, code: true } },
         department: { select: { id: true, name: true } },
+        aircraftRegistration: { select: { registration: true, description: true, operatorCode: true } },
         followUpTasks: {
           where: { deletedAt: null },
           select: {

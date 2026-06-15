@@ -159,7 +159,7 @@ export default function FindingDetailPage() {
               <Field label="Department" value={finding.department?.name ?? null} />
               <Field label="ATA Chapter" value={finding.ataChapter ? `${finding.ataChapter.code} — ${finding.ataChapter.title}` : null} />
               <Field label="Hazard Tags" value={finding.hazardTags.length ? finding.hazardTags.map((h) => h.hazardTag.label).join(', ') : null} />
-              <Field label="Aircraft Reg." value={finding.aircraftRegistration} />
+              <Field label="Aircraft Reg." value={finding.aircraftRegistration?.registration ?? null} />
               <Field label="Regulatory Ref." value={finding.regulatoryReference} />
               <Field label="Description" value={finding.description} />
             </dl>
