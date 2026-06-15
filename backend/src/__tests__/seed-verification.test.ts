@@ -56,7 +56,7 @@ describe('Seed Data Verification', () => {
     expect(tpl?.requiresApproval).toBe(false);
   });
 
-  it('should have all 15 departments seeded', async () => {
+  it('should have all 16 departments seeded', async () => {
     const departments = await prisma.department.findMany();
     const names = departments.map(d => d.name);
 
@@ -64,8 +64,9 @@ describe('Seed Data Verification', () => {
     expect(names).toContain('EGD');
     expect(names).toContain('MCC');
     expect(names).toContain('HAN BMC');
-    expect(names).toContain('EXTERNAL');
-    expect(departments.length).toBeGreaterThanOrEqual(15);
+    expect(names).toContain('EXTERNAL_COMPANY');
+    expect(names).toContain('EXTERNAL_AUTHORITY');
+    expect(departments.length).toBeGreaterThanOrEqual(16);
   });
 
   it('should authenticate seeded users by employeeId and return correct roles', async () => {
@@ -87,7 +88,7 @@ describe('Seed Data Verification', () => {
         .post('/api/auth/login')
         .send({
           employeeId: user.employeeId,
-          password: 'Abc@123'
+          password: 'Abc@12345'
         });
       
       // All seeded users have forcePasswordChange: true → expect 202
