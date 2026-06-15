@@ -2,17 +2,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ShieldCheck, Lock, Loader2, AlertTriangle } from 'lucide-react';
-import { useAuthStore } from '../../../../store/authStore';
-import { getPrivileges, publishPrivileges } from '../../../../api/privilegeApi';
-import { PrivilegeCatalogItem, PrivilegeMap, RolePrivileges } from '../../../../types';
-import { apiErrorMessage } from '../../../../api/errorMessage';
+import { useAuthStore } from '../../store/authStore';
+import { getPrivileges, publishPrivileges } from '../../api/privilegeApi';
+import { PrivilegeCatalogItem, PrivilegeMap, RolePrivileges } from '../../types';
+import { apiErrorMessage } from '../../api/errorMessage';
 
-// The Admin floor — these cells render locked-on for Admin and can never change.
 const ADMIN_FLOOR = ['settings:privileges'];
 
-type DraftState = Record<string, PrivilegeMap>; // roleName → key → granted
+type DraftState = Record<string, PrivilegeMap>;
 
-export default function PrivilegesPage() {
+export default function PrivilegesSettings() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'Admin';
 
@@ -20,7 +19,6 @@ export default function PrivilegesPage() {
   const [roleNames, setRoleNames] = useState<string[]>([]);
   const [original, setOriginal] = useState<DraftState>({});
   const [draft, setDraft] = useState<DraftState>({});
-  // Only Admins load the matrix, so non-Admins are never in a loading state.
   const [loading, setLoading] = useState(isAdmin);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -45,12 +43,9 @@ export default function PrivilegesPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [isAdmin]);
 
-  // Catalog grouped by domain, preserving order.
   const groups = useMemo(() => {
     const map = new Map<string, PrivilegeCatalogItem[]>();
     for (const item of catalog) {
@@ -91,8 +86,6 @@ export default function PrivilegesPage() {
         permissions: draft[roleName],
       }));
       await publishPrivileges(payload);
-      // Cache invalidation: force a full reload so any privilege-dependent UI
-      // (and the freshly-resolved permissions) reflect the new state immediately.
       window.location.reload();
     } catch (err) {
       setError(apiErrorMessage(err, 'Failed to publish privileges.'));
@@ -131,7 +124,7 @@ export default function PrivilegesPage() {
             <ShieldCheck className="w-6 h-6 text-blue-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-800">Global Privileges</h1>
+            <h2 className="text-xl font-bold text-slate-800">Global Privileges</h2>
             <p className="text-sm text-slate-500">
               Configure what each role can do system-wide. Changes take effect only after you publish.
             </p>

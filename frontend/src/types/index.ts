@@ -19,6 +19,7 @@ export interface User {
   employeeId: string;
   name: string;
   email: string;
+  phone?: string | null;
   role: string; // The backend returns the role name as a string
   divisionId: number | null;
   forcePasswordChange: boolean;

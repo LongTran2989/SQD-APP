@@ -13,11 +13,10 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  RotateCcw,
   UserX,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuthStore } from '../../../store/authStore';
+import { useAuthStore } from '../../store/authStore';
 import {
   AdminUser,
   UserFormData,
@@ -26,16 +25,15 @@ import {
   updateAdminUser,
   deleteAdminUser,
   adminResetUserPassword,
-} from '../../../api/userApi';
-import { getDivisions } from '../../../api/taskApi';
-import { apiErrorMessage } from '../../../api/errorMessage';
+} from '../../api/userApi';
+import { getDivisions } from '../../api/taskApi';
+import { apiErrorMessage } from '../../api/errorMessage';
 
 const ROLE_NAMES = ['Director', 'Admin', 'Manager', 'Group Leader', 'Staff'];
 const PAGE_SIZE = 20;
 
 type DivisionOption = { value: string; label: string };
 
-// ─── Role badge ───────────────────────────────────────────────────────────────
 function RoleBadge({ role }: { role: string }) {
   const colours: Record<string, string> = {
     Director: 'bg-purple-100 text-purple-700',
@@ -51,7 +49,6 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
-// ─── User form modal ──────────────────────────────────────────────────────────
 interface UserFormModalProps {
   editing: AdminUser | null;
   divisions: DivisionOption[];
@@ -168,7 +165,6 @@ function UserFormModal({ editing, divisions, onClose, onSaved }: UserFormModalPr
   );
 }
 
-// ─── Confirm modal ────────────────────────────────────────────────────────────
 interface ConfirmModalProps {
   title: string;
   message: string;
@@ -206,8 +202,7 @@ function ConfirmModal({ title, message, confirmLabel, danger, onConfirm, onClose
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
-export default function UsersPage() {
+export default function UserManagementSettings() {
   const user = useAuthStore((s) => s.user);
   const canAccess = user?.role === 'Admin' || user?.role === 'Director';
   const canManage = user?.role === 'Admin';
@@ -228,13 +223,11 @@ export default function UsersPage() {
   const [deleteModal, setDeleteModal] = useState<{ open: boolean; target: AdminUser | null; loading: boolean }>({ open: false, target: null, loading: false });
   const [resetModal, setResetModal] = useState<{ open: boolean; target: AdminUser | null; loading: boolean }>({ open: false, target: null, loading: false });
 
-  // Debounce search
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 300);
     return () => clearTimeout(t);
   }, [q]);
 
-  // Fetch divisions on mount
   useEffect(() => {
     if (!canAccess) return;
     getDivisions().then(setDivisions).catch(() => {});
@@ -255,8 +248,6 @@ export default function UsersPage() {
   }, [canAccess, page, debouncedQ, includeDeleted]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
-
-  // Reset to page 1 when search/filter changes
   useEffect(() => { setPage(1); }, [debouncedQ, includeDeleted]);
 
   const handleDelete = async () => {
@@ -300,14 +291,13 @@ export default function UsersPage() {
 
   return (
     <div className="p-8">
-      {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
             <Users className="w-6 h-6 text-blue-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-800">User Management</h1>
+            <h2 className="text-xl font-bold text-slate-800">User Management</h2>
             <p className="text-sm text-slate-500">{total} user{total !== 1 ? 's' : ''} total</p>
           </div>
         </div>
@@ -322,7 +312,6 @@ export default function UsersPage() {
         )}
       </div>
 
-      {/* Toolbar */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -352,7 +341,6 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Table */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-slate-400">
@@ -442,12 +430,9 @@ export default function UsersPage() {
         )}
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4 text-sm text-slate-600">
-          <span>
-            Page {page} of {totalPages} — {total} users
-          </span>
+          <span>Page {page} of {totalPages} — {total} users</span>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -467,7 +452,6 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Create / Edit modal */}
       {formModal.open && (
         <UserFormModal
           editing={formModal.target}
@@ -480,7 +464,6 @@ export default function UsersPage() {
         />
       )}
 
-      {/* Delete confirmation */}
       {deleteModal.open && deleteModal.target && (
         <ConfirmModal
           title="Delete user?"
@@ -493,7 +476,6 @@ export default function UsersPage() {
         />
       )}
 
-      {/* Reset password confirmation */}
       {resetModal.open && resetModal.target && (
         <ConfirmModal
           title="Reset password?"

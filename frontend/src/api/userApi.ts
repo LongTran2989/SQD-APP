@@ -5,6 +5,12 @@ import { UserPreferences } from '../types';
 export const updateMyPreferences = (preferences: UserPreferences): Promise<{ preferences: UserPreferences }> =>
   apiClient.patch('/users/me/preferences', { preferences }).then((r) => r.data);
 
+export const updateMyProfile = (data: {
+  email?: string | null;
+  phone?: string | null;
+}): Promise<{ message: string; user: { id: number; email: string | null; phone: string | null } }> =>
+  apiClient.patch('/users/me/profile', data).then((r) => r.data);
+
 // ─── Admin User Management ─────────────────────────────────────────────────────
 
 export interface AdminUser {

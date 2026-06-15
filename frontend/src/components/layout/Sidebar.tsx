@@ -15,10 +15,7 @@ import {
   LayoutPanelTop,
   Globe,
   Flag,
-  Users,
   Settings,
-  ShieldCheck,
-  Tags,
   BarChart2
 } from 'lucide-react';
 
@@ -57,9 +54,6 @@ export default function Sidebar() {
     { name: 'Escalations', href: '/dashboard/escalations', icon: Flag, roles: ESCALATION_ACTION_ROLES },
     { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart2, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Template Builder', href: '/dashboard/templates', icon: FileCheck2, roles: ['Admin', 'Director', 'Manager'] },
-    { name: 'User Management', href: '/dashboard/users', icon: Users, roles: ['Admin', 'Director'] },
-    { name: 'Taxonomy', href: '/dashboard/settings/taxonomy', icon: Tags, roles: ['Admin', 'Director'] },
-    { name: 'Privileges', href: '/dashboard/settings/privileges', icon: ShieldCheck, roles: ['Admin'] },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
   ];
 
