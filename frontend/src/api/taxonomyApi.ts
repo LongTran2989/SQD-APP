@@ -1,5 +1,6 @@
 import { apiClient } from './client';
 import { AtaChapter, CauseCode, HazardTag, EventType, WpType } from '../types';
+import { ShiftType } from './scheduleApi';
 
 // ─── Reads (any authenticated user — used by pickers) ─────────────────────────
 
@@ -51,3 +52,36 @@ export const updateEventType = (id: number, payload: Partial<{ code: string; des
 
 export const updateWpType = (id: number, payload: Partial<{ code: string; description: string; isActive: boolean }>): Promise<WpType> =>
   apiClient.put(`/taxonomy/wp-types/${id}`, payload).then((r) => r.data);
+
+export const listShiftTypes = (activeOnly = false): Promise<ShiftType[]> =>
+  apiClient.get('/taxonomy/shift-types', { params: { activeOnly } }).then((r) => r.data);
+
+export const createShiftType = (payload: {
+  code: string;
+  name: string;
+  groupCode?: string;
+  groupName?: string;
+  color?: string;
+  startTime?: string;
+  endTime?: string;
+  isWorkDay?: boolean;
+  sortOrder?: number;
+}): Promise<ShiftType> =>
+  apiClient.post('/taxonomy/shift-types', payload).then((r) => r.data);
+
+export const updateShiftType = (
+  id: number,
+  payload: Partial<{
+    code: string;
+    name: string;
+    groupCode: string;
+    groupName: string;
+    color: string;
+    startTime: string;
+    endTime: string;
+    isWorkDay: boolean;
+    isActive: boolean;
+    sortOrder: number;
+  }>
+): Promise<ShiftType> =>
+  apiClient.put(`/taxonomy/shift-types/${id}`, payload).then((r) => r.data);

@@ -21,6 +21,7 @@ import analyticsRoutes from './routes/analytics.routes';
 import privilegeRoutes from './routes/privilege.routes';
 import notificationRoutes from './routes/notification.routes';
 import realtimeRoutes from './routes/realtime.routes';
+import scheduleRoutes from './routes/schedule.routes';
 import { startRealtimeListener } from './realtime/pgEvents';
 import { purgeOldNotifications } from './services/notificationService';
 
@@ -54,6 +55,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/settings/privileges', privilegeRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/events', realtimeRoutes);
+app.use('/api/schedules', scheduleRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {

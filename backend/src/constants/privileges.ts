@@ -57,7 +57,11 @@ export type PrivilegeKey =
   // Settings
   | 'settings:wptype'
   | 'settings:taxonomy'
-  | 'settings:privileges';
+  | 'settings:privileges'
+  // Schedule
+  | 'schedule:view'
+  | 'schedule:edit'
+  | 'schedule:publish';
 
 export type PrivilegeMap = Partial<Record<PrivilegeKey, boolean>>;
 
@@ -111,6 +115,10 @@ export const PRIVILEGE_CATALOG: PrivilegeCatalogItem[] = [
   { key: 'settings:wptype', group: 'Settings', label: 'Manage work package types' },
   { key: 'settings:taxonomy', group: 'Settings', label: 'Manage reference taxonomies' },
   { key: 'settings:privileges', group: 'Settings', label: 'Manage the privilege matrix' },
+
+  { key: 'schedule:view', group: 'Schedule', label: 'View staff schedules' },
+  { key: 'schedule:edit', group: 'Schedule', label: 'Edit draft schedule for own division' },
+  { key: 'schedule:publish', group: 'Schedule', label: 'Publish schedule for own division' },
 ];
 
 export const PRIVILEGE_KEYS: PrivilegeKey[] = PRIVILEGE_CATALOG.map((c) => c.key);
@@ -135,7 +143,8 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
     'user:create',
     'escalation:review',
     'timebooking:override',
-    'settings:taxonomy'
+    'settings:taxonomy',
+    'schedule:view', 'schedule:edit', 'schedule:publish'
   ),
   Admin: grant(
     'task:create', 'task:relink_any', 'task:assign_any', 'task:reopen', 'task:inactivate',
@@ -146,7 +155,8 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
     'user:create', 'user:manage_roles',
     'escalation:review',
     'timebooking:override',
-    'settings:wptype', 'settings:taxonomy', 'settings:privileges'
+    'settings:wptype', 'settings:taxonomy', 'settings:privileges',
+    'schedule:view', 'schedule:edit', 'schedule:publish'
   ),
   Manager: grant(
     'task:create', 'task:relink_any', 'task:assign_div', 'task:review_div',
@@ -154,8 +164,9 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
     'wp:create', 'wp:edit', 'wp:assign',
     'finding:review', 'finding:manage_analysis',
     'analytics:view',
-    'escalation:review'
+    'escalation:review',
+    'schedule:view', 'schedule:edit', 'schedule:publish'
   ),
-  'Group Leader': grant(),
-  Staff: grant(),
+  'Group Leader': grant('schedule:view'),
+  Staff: grant('schedule:view'),
 };

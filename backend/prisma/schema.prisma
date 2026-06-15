@@ -101,6 +101,8 @@ model User {
   // never the compliance record (AuditLog remains the source of truth).
   notifications Notification[] @relation("UserNotifications")
 
+  scheduleEntries ScheduleEntry[] @relation("UserScheduleEntries")
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -262,6 +264,9 @@ model Task {
   // CAPA reverse relations (virtual — no columns added, no behaviour change)
   capaLinks      CapaTaskLink[]         @relation("CapaLinkedTasks")
   responseAction FindingResponseAction? @relation("TaskResponseAction")
+
+  assignedAt  DateTime? // stamped when task first transitions to Assigned; anchor for schedule bar
+  startDate   DateTime? // optional manager override for schedule bar left anchor
 
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
@@ -814,4 +819,66 @@ model Attachment {
   entityId     String
   uploadedById Int
   createdAt    DateTime @default(now())
+}
+
+// -----------------------------------------------------------------------
+// Staff Work Schedules
+// -----------------------------------------------------------------------
+
+model ShiftType {
+  id          Int             @id @default(autoincrement())
+  code        String          @unique // e.g. "C1_1", "OFF_B", "CTn"
+  name        String                  // "Ca 1 từ 04h00 – 12h00"
+  groupCode   String?                 // e.g. "C1", "C2", "OFF", "CT" — for palette grouping
+  groupName   String?                 // display label for the group
+  color       String          @default("#6B7280") // hex for grid chip
+  startTime   String?                 // "04:00" (display only)
+  endTime     String?                 // "12:00" (display only)
+  isWorkDay   Boolean         @default(true)  // false → warn when task due on this day
+  isActive    Boolean         @default(true)
+  sortOrder   Int             @default(0)
+  entries     ScheduleEntry[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model ScheduleEntry {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  user        User      @relation("UserScheduleEntries", fields: [userId], references: [id])
+  divisionId  Int                    // denormalized for fast division-scoped queries
+  date        DateTime               // UTC midnight (date only, no time component)
+  slotIndex   Int       @default(0) // 0,1,2… supports multiple shifts per day
+  shiftTypeId Int
+  shiftType   ShiftType @relation(fields: [shiftTypeId], references: [id])
+  note        String?               // free text (e.g. trip destination)
+  publishedAt DateTime?             // null = draft; non-null = timestamp when published
+  publishedBy Int?                  // userId who pressed Publish
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, date, deletedAt])
+  @@index([divisionId, date, publishedAt, deletedAt])
+}
+
+// Soft advisory lock — one row per division while a manager has the draft open.
+// Not a compliance record; no soft-delete needed (row is deleted on release/takeover).
+model ScheduleEditLock {
+  divisionId     Int      @id
+  lockedByUserId Int
+  lockExpiresAt  DateTime
+  updatedAt      DateTime @updatedAt
+}
+
+// Saved rotation templates for the pattern builder.
+model SchedulePattern {
+  id              Int      @id @default(autoincrement())
+  name            String
+  divisionId      Int?     // null = global (Director-created); non-null = division-private
+  weekTemplate    Json     // { mon: shiftTypeId, tue: …, sun: shiftTypeId }
+  createdByUserId Int
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

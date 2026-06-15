@@ -923,10 +923,15 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
+    const now = new Date();
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.task.update({
         where: { id },
-        data: { assignedToUserId, status: 'Assigned' },
+        data: {
+          assignedToUserId,
+          status: 'Assigned',
+          assignedAt: task.assignedAt ?? now, // stamp on first assignment only
+        },
         include: taskInclude()
       });
       await logAuditAndActivity(
@@ -957,7 +962,39 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
       [userId]
     );
 
-    res.json(enrichTask(updated, req.user!));
+    // Conflict check: warn if assignee is off/sick on the deadline day
+    let scheduleConflict: { date: string; shiftTypeName: string; isDraft: boolean } | null = null;
+    if (task.deadline && assignedToUserId) {
+      const dayStart = new Date(task.deadline);
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+
+      const entries = await prisma.scheduleEntry.findMany({
+        where: { userId: assignedToUserId, date: { gte: dayStart, lt: dayEnd }, deletedAt: null },
+        include: { shiftType: true },
+        orderBy: [{ slotIndex: 'asc' }, { publishedAt: 'asc' }],
+      });
+      if (entries.length > 0) {
+        // Draft wins over published for the same slot
+        const bySlot = new Map<number, typeof entries[number]>();
+        for (const e of entries) {
+          const ex = bySlot.get(e.slotIndex);
+          if (!ex || ex.publishedAt !== null) bySlot.set(e.slotIndex, e);
+        }
+        const first = [...bySlot.values()][0];
+        if (first && !first.shiftType.isWorkDay) {
+          scheduleConflict = {
+            date: dayStart.toISOString().slice(0, 10),
+            shiftTypeName: first.shiftType.name,
+            isDraft: first.publishedAt === null,
+          };
+        }
+      }
+    }
+
+    const response = enrichTask(updated, req.user!);
+    res.json(scheduleConflict ? { ...response, scheduleConflict } : response);
   } catch (error) {
     console.error('Error assigning task:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -996,10 +1033,15 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    const now = new Date();
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.task.update({
         where: { id },
-        data: { assignedToUserId: userId, status: 'Assigned' },
+        data: {
+          assignedToUserId: userId,
+          status: 'Assigned',
+          assignedAt: task.assignedAt ?? now,
+        },
         include: taskInclude()
       });
       await logAuditAndActivity(
@@ -1362,7 +1404,8 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
         issuerId: true,
         assignedToUserId: true,
         targetDivisionId: true,
-        status: true
+        status: true,
+        assignedAt: true,
       }
     });
 
@@ -1410,7 +1453,8 @@ export const postRejectionAction = async (req: Request, res: Response): Promise<
       updateData = {
         status: 'Assigned',
         assignedToUserId: newAssigneeId,
-        rejectionReason: null
+        rejectionReason: null,
+        assignedAt: task.assignedAt ?? new Date(),
       };
       actionType = 'TASK_REASSIGNED';
       content = `Task reassigned to ${newAssignee.name} after rejection. Status: Rejected → Assigned`;
@@ -1476,7 +1520,7 @@ export async function reassignTaskService(
 
   const task = await client.task.findUnique({
     where: { id, deletedAt: null },
-    select: { id: true, issuerId: true, assignedToUserId: true, targetDivisionId: true, status: true }
+    select: { id: true, issuerId: true, assignedToUserId: true, targetDivisionId: true, status: true, assignedAt: true }
   });
   if (!task) throw new HttpError(404, 'Task not found');
 
@@ -1509,7 +1553,8 @@ export async function reassignTaskService(
     where: { id },
     data: {
       assignedToUserId: newAssigneeId,
-      status: 'Assigned'
+      status: 'Assigned',
+      assignedAt: task.assignedAt ?? new Date(), // preserve original stamp on reassign
       // TaskData is preserved — not cleared
     },
     include: taskInclude()

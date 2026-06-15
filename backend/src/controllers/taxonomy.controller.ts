@@ -265,6 +265,88 @@ export const upsertWpType = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+// ─── Shift Types ──────────────────────────────────────────────────────────────
+
+export const listShiftTypes = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const types = await prisma.shiftType.findMany({
+      where: activeOnly(req) ? { isActive: true } : {},
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+    });
+    res.json(types);
+  } catch (error) {
+    console.error('Error listing shift types:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const upsertShiftType = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!hasPrivilege(req.user!, 'settings:taxonomy')) {
+      res.status(403).json({ message: 'Only an Admin or Director can manage shift types' });
+      return;
+    }
+    const idParam = req.params.id;
+    const { code, name, groupCode, groupName, color, startTime, endTime, isWorkDay, isActive, sortOrder } = req.body;
+
+    const lenErr = lengthError([
+      { label: 'code', value: code, max: MAX_CODE_LEN },
+      { label: 'name', value: name, max: MAX_TEXT_LEN },
+      { label: 'groupCode', value: groupCode, max: MAX_CODE_LEN },
+      { label: 'groupName', value: groupName, max: MAX_TEXT_LEN },
+      { label: 'color', value: color, max: 7 },
+      { label: 'startTime', value: startTime, max: 5 },
+      { label: 'endTime', value: endTime, max: 5 },
+    ]);
+    if (lenErr) {
+      res.status(400).json({ message: lenErr });
+      return;
+    }
+
+    if (idParam) {
+      const updated = await prisma.shiftType.update({
+        where: { id: parseInt(String(idParam), 10) },
+        data: {
+          ...(code !== undefined ? { code } : {}),
+          ...(name !== undefined ? { name } : {}),
+          ...(groupCode !== undefined ? { groupCode } : {}),
+          ...(groupName !== undefined ? { groupName } : {}),
+          ...(color !== undefined ? { color } : {}),
+          ...(startTime !== undefined ? { startTime } : {}),
+          ...(endTime !== undefined ? { endTime } : {}),
+          ...(isWorkDay !== undefined ? { isWorkDay } : {}),
+          ...(isActive !== undefined ? { isActive } : {}),
+          ...(sortOrder !== undefined ? { sortOrder } : {}),
+        },
+      });
+      res.json(updated);
+      return;
+    }
+    if (!code || !name) {
+      res.status(400).json({ message: 'code and name are required' });
+      return;
+    }
+    const created = await prisma.shiftType.create({
+      data: {
+        code,
+        name,
+        groupCode: groupCode ?? null,
+        groupName: groupName ?? null,
+        color: color ?? '#6B7280',
+        startTime: startTime ?? null,
+        endTime: endTime ?? null,
+        isWorkDay: isWorkDay ?? true,
+        isActive: isActive ?? true,
+        sortOrder: sortOrder ?? 0,
+      },
+    });
+    res.status(201).json(created);
+  } catch (error) {
+    console.error('Error upserting shift type:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // ─── Hazard Tags ──────────────────────────────────────────────────────────────
 
 export const listHazardTags = async (req: Request, res: Response): Promise<void> => {

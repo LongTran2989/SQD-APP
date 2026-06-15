@@ -11,6 +11,8 @@ import {
   upsertEventType,
   listWpTypes,
   upsertWpType,
+  listShiftTypes,
+  upsertShiftType,
 } from '../controllers/taxonomy.controller';
 
 const router = Router();
@@ -40,5 +42,10 @@ router.put('/event-types/:id', upsertEventType);
 router.get('/wp-types', listWpTypes);
 router.post('/wp-types', upsertWpType);
 router.put('/wp-types/:id', upsertWpType);
+
+// ─── Shift types ─────────────────────────────────────────────────────
+router.get('/shift-types', listShiftTypes);
+router.post('/shift-types', upsertShiftType);
+router.put('/shift-types/:id', upsertShiftType);
 
 export default router;
