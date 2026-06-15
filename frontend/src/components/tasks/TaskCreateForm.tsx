@@ -10,7 +10,9 @@ import { getPublishedTemplates } from '../../api/templateApi';
 import SearchableSelect from '../ui/SearchableSelect';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
-import { FileCheck2, Clock, Info, FolderOpen } from 'lucide-react';
+import { FileCheck2, Clock, Info, FolderOpen, AlertTriangle } from 'lucide-react';
+import WorkloadPreview from '../../app/dashboard/schedule/components/WorkloadPreview';
+import { conflictCheck } from '../../api/scheduleApi';
 
 interface SelectOption {
   value: string;
@@ -40,6 +42,8 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [requiresApproval, setRequiresApproval] = useState(true);
   const [skillLevel, setSkillLevel] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
+  const [workloadUserId, setWorkloadUserId] = useState<number | null>(null);
+  const [scheduleConflict, setScheduleConflict] = useState<{ shiftTypeName: string; isDraft: boolean } | null>(null);
 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [divisions, setDivisions] = useState<SelectOption[]>([]);
@@ -245,7 +249,17 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             id="assignee-select"
             options={assigneeOptions}
             value={assignedToUserId ? String(assignedToUserId) : ''}
-            onChange={(val) => setAssignedToUserId(val ? Number(val) : '')}
+            onChange={(val) => {
+              setAssignedToUserId(val ? Number(val) : '');
+              const newUserId = val ? Number(val) : null;
+              setWorkloadUserId(newUserId);
+              setScheduleConflict(null);
+              if (newUserId && deadline) {
+                conflictCheck(newUserId, deadline).then((r) => {
+                  if (r.entry && !r.entry.isWorkDay) setScheduleConflict(r.entry);
+                }).catch(() => {});
+              }
+            }}
             placeholder={
               targetDivisionId
                 ? assigneeOptions.length === 0
@@ -263,6 +277,24 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
           )}
         </div>
 
+        {/* Workload preview + schedule conflict */}
+        {workloadUserId && (
+          <WorkloadPreview
+            userId={workloadUserId}
+            userName={assigneeOptions.find((o) => o.value === String(workloadUserId))?.label?.split(' — ')[0]}
+          />
+        )}
+        {scheduleConflict && (
+          <div className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+            <span>
+              <strong>Schedule conflict:</strong> Assignee is scheduled as{' '}
+              <strong>{scheduleConflict.shiftTypeName}</strong> (non-work day) on the deadline date.
+              {scheduleConflict.isDraft && ' (Draft schedule — not yet published.)'}
+            </span>
+          </div>
+        )}
+
         {/* Deadline */}
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="deadline-input">
@@ -274,7 +306,14 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             value={deadline}
             min={new Date().toISOString().split('T')[0]}
             max="9999-12-31"
-            onChange={(e) => setDeadline(e.target.value)}
+            onChange={(e) => {
+              setDeadline(e.target.value);
+              if (assignedToUserId && e.target.value) {
+                conflictCheck(Number(assignedToUserId), e.target.value).then((r) => {
+                  setScheduleConflict(r.entry && !r.entry.isWorkDay ? r.entry : null);
+                }).catch(() => {});
+              }
+            }}
             className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
           />
         </div>

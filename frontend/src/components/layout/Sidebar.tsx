@@ -19,7 +19,8 @@ import {
   Settings,
   ShieldCheck,
   Tags,
-  BarChart2
+  BarChart2,
+  CalendarRange
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -51,6 +52,7 @@ export default function Sidebar() {
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
     { name: 'Tasks', href: '/dashboard/tasks', icon: ClipboardList, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
     { name: 'Work Packages', href: '/dashboard/work-packages', icon: FolderOpen, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
+    { name: 'Schedule', href: '/dashboard/schedule', icon: CalendarRange, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
     { name: 'Findings', href: '/dashboard/findings', icon: AlertTriangle, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'], badge: openFindings },
     { name: 'Division Board', href: '/dashboard/division-board', icon: LayoutPanelTop, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
     { name: 'Org Feed', href: '/dashboard/org-feed', icon: Globe, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
