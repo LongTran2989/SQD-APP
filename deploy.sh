@@ -44,16 +44,17 @@ echo "→ [1/9] Updating system and installing packages..."
 apt-get update -y && apt-get upgrade -y
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs git nginx certbot python3-certbot-nginx \
-  postgresql postgresql-contrib iptables-persistent
+  postgresql postgresql-contrib ufw
 
 echo "→ Installing PM2..."
 npm install -g pm2
 
 # ── 2. Open OS firewall ───────────────────────────────────────────────────────
 echo "→ [2/9] Opening firewall ports 80 and 443..."
-iptables -I INPUT -p tcp --dport 80 -j ACCEPT  2>/dev/null || true
-iptables -I INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
-netfilter-persistent save 2>/dev/null || true
+ufw allow OpenSSH   2>/dev/null || true
+ufw allow 80/tcp    2>/dev/null || true
+ufw allow 443/tcp   2>/dev/null || true
+ufw --force enable  2>/dev/null || true
 
 # ── 3. PostgreSQL ─────────────────────────────────────────────────────────────
 echo "→ [3/9] Setting up PostgreSQL..."
