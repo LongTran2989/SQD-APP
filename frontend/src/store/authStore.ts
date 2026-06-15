@@ -8,6 +8,7 @@ interface AuthState {
   login: (user: User) => void;
   logout: () => void;
   setPreferences: (preferences: UserPreferences) => void;
+  updateProfile: (updates: { email?: string | null; phone?: string | null }) => void;
 }
 
 // The JWT lives only in an httpOnly cookie (set by the backend) and is never
@@ -22,6 +23,8 @@ export const useAuthStore = create<AuthState>()(
       logout: () => set({ user: null, isAuthenticated: false }),
       setPreferences: (preferences) =>
         set((state) => (state.user ? { user: { ...state.user, preferences } } : {})),
+      updateProfile: (updates) =>
+        set((state) => (state.user ? { user: { ...state.user, ...updates } } : {})),
     }),
     {
       name: 'auth-storage', // key in sessionStorage

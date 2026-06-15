@@ -386,6 +386,65 @@ export const updateUserRole = async (req: Request, res: Response): Promise<void>
   }
 };
 
+// ─── PATCH /api/users/me/profile ──────────────────────────────────────────────
+export const updateMyProfile = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user!.userId;
+    const { email, phone } = req.body;
+
+    const updateData: Record<string, unknown> = {};
+
+    if (email !== undefined) {
+      if (email !== null && email !== '') {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+          res.status(400).json({ message: 'Invalid email format' });
+          return;
+        }
+        const current = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+        if (email !== current?.email) {
+          const conflict = await prisma.user.findUnique({ where: { email } });
+          if (conflict) {
+            res.status(400).json({ message: `Email "${email}" is already in use` });
+            return;
+          }
+        }
+        updateData.email = email;
+      } else {
+        updateData.email = null;
+      }
+    }
+
+    if (phone !== undefined) {
+      if (phone !== null && phone !== '') {
+        if (!/^\d{1,12}$/.test(phone)) {
+          res.status(400).json({ message: 'Phone must contain digits only and be at most 12 digits' });
+          return;
+        }
+        updateData.phone = phone;
+      } else {
+        updateData.phone = null;
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      res.status(400).json({ message: 'No fields to update' });
+      return;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId, deletedAt: null },
+      data: updateData,
+      select: { id: true, email: true, phone: true },
+    });
+
+    res.json({ message: 'Profile updated successfully', user: updated });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // Top-level keys the client is allowed to persist in User.preferences.
 const ALLOWED_PREFERENCE_KEYS = ['taskColumns', 'taskFilters'] as const;
 // Hard cap on the serialized preferences blob (defensive — it is user-controlled).
