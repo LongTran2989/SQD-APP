@@ -24,8 +24,10 @@ interface FileUploadFieldProps {
   onChange?: (attachmentIds: number[]) => void;
 }
 
+// Rounding matches the backend formatBytes (attachmentService.ts) so the limit
+// strings in server 4xx messages and the UI hint never disagree.
 function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} B`;
 }
@@ -42,7 +44,6 @@ export default function FileUploadField({
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -55,6 +56,9 @@ export default function FileUploadField({
     let active = true;
     // `loading` starts true; we don't re-set it synchronously here (the file set
     // is keyed by entity, so this effect effectively runs once per mount).
+    // NOTE: do NOT emit() here — pushing ids to the parent on a pure read would
+    // mark the host task form dirty before any user action (and clobber saved
+    // TaskData). Only upload/delete emit.
     Promise.all([
       listAttachments(entityType, entityId, fieldId),
       getUploadConfig().catch(() => null),
@@ -63,22 +67,18 @@ export default function FileUploadField({
         if (!active) return;
         setAttachments(list);
         setConfig(cfg);
-        emit(list);
       })
-      .catch(() => active && setError('Failed to load attachments'))
+      .catch(() => active && toast.error('Failed to load attachments'))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-    // entityId/fieldId identify the file set; re-run only when they change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, entityId, fieldId]);
 
   const acceptTypes = config?.categories.flatMap((c) => c.mimeTypes).join(',');
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    setError(null);
     setUploading(true);
     try {
       // Upload sequentially so the per-entity total quota is checked file-by-file.
@@ -92,9 +92,7 @@ export default function FileUploadField({
       }
       emit(current);
     } catch (err) {
-      const msg = apiErrorMessage(err, 'Upload failed');
-      setError(msg);
-      toast.error(msg);
+      toast.error(apiErrorMessage(err, 'Upload failed'));
     } finally {
       setUploading(false);
       setProgress(0);
@@ -104,7 +102,6 @@ export default function FileUploadField({
 
   async function handleDelete(id: number) {
     setBusyId(id);
-    setError(null);
     try {
       await deleteAttachment(id);
       const next = attachments.filter((a) => a.id !== id);
@@ -112,9 +109,7 @@ export default function FileUploadField({
       emit(next);
       toast.success('File removed');
     } catch (err) {
-      const msg = apiErrorMessage(err, 'Could not remove file');
-      setError(msg);
-      toast.error(msg);
+      toast.error(apiErrorMessage(err, 'Could not remove file'));
     } finally {
       setBusyId(null);
     }
@@ -125,9 +120,7 @@ export default function FileUploadField({
     try {
       await downloadAttachment(att.id, att.fileName);
     } catch (err) {
-      const msg = apiErrorMessage(err, 'Download failed');
-      setError(msg);
-      toast.error(msg);
+      toast.error(apiErrorMessage(err, 'Download failed'));
     } finally {
       setBusyId(null);
     }
@@ -223,8 +216,6 @@ export default function FileUploadField({
       {disabled && attachments.length === 0 && (
         <p className="text-sm text-slate-400">No files attached.</p>
       )}
-
-      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
 }

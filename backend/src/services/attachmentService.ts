@@ -4,6 +4,7 @@ import prisma from '../lib/prisma';
 import { HttpError } from '../utils/httpError';
 import { createFeedPost, FeedScope } from './feedService';
 import { getStorage } from './storage';
+import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
 import {
   FILE_UPLOAD_CONFIG_KEY,
   DEFAULT_FILE_UPLOAD_CONFIG,
@@ -18,9 +19,6 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 export const ATTACHMENT_UPLOADED = 'ATTACHMENT_UPLOADED';
 export const ATTACHMENT_DELETED = 'ATTACHMENT_DELETED';
-
-/** Roles that may delete any attachment (not just their own uploads). */
-const ELEVATED_DELETE_ROLES = ['Director', 'Admin', 'Manager'];
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -109,7 +107,8 @@ export interface UploadFileInput {
   fileName: string;
   mimeType: string;
   size: number;
-  buffer: Buffer;
+  /** Path to the multipart temp file on disk (consumed by the storage adapter). */
+  sourcePath: string;
 }
 
 /**
@@ -149,8 +148,9 @@ export async function createAttachmentService(actor: { userId: number }, input: 
   const safeName = sanitizeFilename(input.fileName);
   const storageKey = `${input.entityType}/${input.entityId}/${randomUUID()}-${safeName}`;
 
-  // Store bytes first; if the DB write fails we remove the orphan object below.
-  await getStorage().put(bucket, storageKey, input.buffer, input.mimeType);
+  // Move the temp file into storage first; if the DB write fails we remove the
+  // orphan object below. Streaming from a path keeps large uploads off the heap.
+  await getStorage().putFile(bucket, storageKey, input.sourcePath, input.mimeType);
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -204,12 +204,17 @@ export async function createAttachmentService(actor: { userId: number }, input: 
  * NOT removed — evidence files are an aviation compliance record. Allowed for the
  * original uploader or an elevated role.
  */
-export async function deleteAttachmentService(actor: { userId: number; role: string }, id: number) {
+export async function deleteAttachmentService(
+  actor: { userId: number } & PrivilegeActor,
+  id: number
+) {
   const attachment = await prisma.attachment.findFirst({ where: { id, deletedAt: null } });
   if (!attachment) throw new HttpError(404, 'Attachment not found');
 
-  const elevated = ELEVATED_DELETE_ROLES.includes(actor.role);
-  if (attachment.uploadedById !== actor.userId && !elevated) {
+  // The uploader may always remove their own file; otherwise the actor needs the
+  // DB-driven attachment:delete_any privilege (Phase 7 matrix, not a role array).
+  const canDeleteAny = hasPrivilege(actor, 'attachment:delete_any');
+  if (attachment.uploadedById !== actor.userId && !canDeleteAny) {
     throw new HttpError(403, 'You do not have permission to delete this attachment');
   }
 

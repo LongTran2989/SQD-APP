@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import fsp from 'fs/promises';
+import { Attachment } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { isHttpError } from '../utils/httpError';
 import { getStorage, ObjectNotFoundError } from '../services/storage';
@@ -9,7 +11,7 @@ import {
 } from '../services/attachmentService';
 import { isAttachmentEntityType } from '../constants/fileUpload';
 
-// Metadata returned to clients — never exposes the internal storageKey.
+// Metadata returned to clients — never exposes the internal storageKey / bucket.
 const PUBLIC_SELECT = {
   id: true,
   fileName: true,
@@ -21,6 +23,22 @@ const PUBLIC_SELECT = {
   uploadedById: true,
   createdAt: true,
 } as const;
+
+// Single JS projector for the write path (service returns the full row). Mirrors
+// PUBLIC_SELECT so the upload response and the list response share one shape.
+function toPublic(a: Attachment) {
+  return {
+    id: a.id,
+    fileName: a.fileName,
+    fileType: a.fileType,
+    fileSize: a.fileSize,
+    entityType: a.entityType,
+    entityId: a.entityId,
+    fieldId: a.fieldId,
+    uploadedById: a.uploadedById,
+    createdAt: a.createdAt,
+  };
+}
 
 function fail(res: Response, error: unknown, context: string): void {
   if (isHttpError(error)) {
@@ -44,9 +62,9 @@ export const getUploadConfig = async (_req: Request, res: Response): Promise<voi
 // ─── POST /api/attachments ─────────────────────────────────────────────────────
 // Multipart: `file` part + `entityType`, `entityId`, optional `fieldId` fields.
 export const uploadAttachment = async (req: Request, res: Response): Promise<void> => {
+  const file = req.file;
   try {
     const { userId } = req.user!;
-    const file = req.file;
     if (!file) {
       res.status(400).json({ message: 'No file provided (expected multipart field "file")' });
       return;
@@ -71,23 +89,17 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
         fileName: file.originalname,
         mimeType: file.mimetype,
         size: file.size,
-        buffer: file.buffer,
+        sourcePath: file.path,
       }
     );
 
-    res.status(201).json({
-      id: attachment.id,
-      fileName: attachment.fileName,
-      fileType: attachment.fileType,
-      fileSize: attachment.fileSize,
-      entityType: attachment.entityType,
-      entityId: attachment.entityId,
-      fieldId: attachment.fieldId,
-      uploadedById: attachment.uploadedById,
-      createdAt: attachment.createdAt,
-    });
+    res.status(201).json(toPublic(attachment));
   } catch (error) {
     fail(res, error, 'Error uploading attachment:');
+  } finally {
+    // Remove the multipart temp file. On success the storage adapter already
+    // moved it (unlink → ENOENT, ignored); on any rejection this is the cleanup.
+    if (file?.path) await fsp.unlink(file.path).catch(() => undefined);
   }
 };
 
@@ -170,14 +182,14 @@ export const downloadAttachment = async (req: Request, res: Response): Promise<v
 // ─── DELETE /api/attachments/:id ───────────────────────────────────────────────
 export const deleteAttachment = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { userId, role } = req.user!;
+    const { userId, role, permissions } = req.user!;
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
       res.status(400).json({ message: 'Invalid attachment id' });
       return;
     }
 
-    await deleteAttachmentService({ userId, role }, id);
+    await deleteAttachmentService({ userId, role, permissions }, id);
     res.json({ message: 'Attachment deleted' });
   } catch (error) {
     fail(res, error, 'Error deleting attachment:');

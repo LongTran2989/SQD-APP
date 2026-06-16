@@ -54,6 +54,8 @@ export type PrivilegeKey =
   | 'escalation:review'
   // Time booking
   | 'timebooking:override'
+  // Attachments
+  | 'attachment:delete_any'
   // Settings
   | 'settings:wptype'
   | 'settings:taxonomy'
@@ -108,6 +110,8 @@ export const PRIVILEGE_CATALOG: PrivilegeCatalogItem[] = [
 
   { key: 'timebooking:override', group: 'Time Booking', label: 'Override another user\'s time booking' },
 
+  { key: 'attachment:delete_any', group: 'Attachments', label: 'Delete any attachment (not just own uploads)' },
+
   { key: 'settings:wptype', group: 'Settings', label: 'Manage work package types' },
   { key: 'settings:taxonomy', group: 'Settings', label: 'Manage reference taxonomies' },
   { key: 'settings:privileges', group: 'Settings', label: 'Manage the privilege matrix' },
@@ -135,6 +139,7 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
     'user:create',
     'escalation:review',
     'timebooking:override',
+    'attachment:delete_any',
     'settings:taxonomy'
   ),
   Admin: grant(
@@ -146,6 +151,7 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
     'user:create', 'user:manage_roles',
     'escalation:review',
     'timebooking:override',
+    'attachment:delete_any',
     'settings:wptype', 'settings:taxonomy', 'settings:privileges'
   ),
   Manager: grant(
@@ -154,7 +160,8 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
     'wp:create', 'wp:edit', 'wp:assign',
     'finding:review', 'finding:manage_analysis',
     'analytics:view',
-    'escalation:review'
+    'escalation:review',
+    'attachment:delete_any'
   ),
   'Group Leader': grant(),
   Staff: grant(),

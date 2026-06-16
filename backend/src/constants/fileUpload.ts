@@ -37,7 +37,9 @@ export const ENTITY_BUCKET: Record<AttachmentEntityType, string> = {
   TEMPLATE: 'sqd-templates',
 };
 
-export const ALL_BUCKETS = ['sqd-tasks', 'sqd-findings', 'sqd-templates'] as const;
+// Derived from ENTITY_BUCKET so a new entity→bucket mapping is initialised by
+// storage.ensureReady() automatically (single source of truth).
+export const ALL_BUCKETS: string[] = Array.from(new Set(Object.values(ENTITY_BUCKET)));
 
 export interface FileCategoryRule {
   label: string;
@@ -95,7 +97,11 @@ export function parseFileUploadConfig(value: unknown): FileUploadConfig | null {
     categories.push({
       label: c.label,
       mimeTypes: (c.mimeTypes as string[]).map((m) => m.toLowerCase()),
-      maxSizeBytes: c.maxSizeBytes,
+      // Clamp to the hard infrastructure ceiling. A larger Admin-set value can
+      // never take effect — the multipart parser and nginx reject the request
+      // before the policy is consulted — so we surface the effective limit here
+      // instead of silently advertising one the server can't honour.
+      maxSizeBytes: Math.min(c.maxSizeBytes, ABSOLUTE_MAX_UPLOAD_BYTES),
     });
   }
   if (categories.length === 0) return null;

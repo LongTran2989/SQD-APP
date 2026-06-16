@@ -1,9 +1,22 @@
 import { apiClient, API_BASE_URL } from './client';
 import { Attachment, AttachmentEntityType, FileUploadConfig } from '../types';
 
-// Returns the active (Admin-configurable) upload policy.
-export const getUploadConfig = (): Promise<FileUploadConfig> =>
-  apiClient.get('/attachments/config').then((r) => r.data);
+// Returns the active (Admin-configurable) upload policy. The policy is a single
+// process-wide value, so the in-flight/resolved Promise is cached at module
+// scope: a task form with N file_upload fields then triggers ONE request, not N.
+let configPromise: Promise<FileUploadConfig> | null = null;
+export const getUploadConfig = (): Promise<FileUploadConfig> => {
+  if (!configPromise) {
+    configPromise = apiClient
+      .get('/attachments/config')
+      .then((r) => r.data as FileUploadConfig)
+      .catch((err) => {
+        configPromise = null; // allow a retry on the next mount after a failure
+        throw err;
+      });
+  }
+  return configPromise;
+};
 
 // Lists non-deleted attachments for an entity, optionally scoped to one form field.
 export const listAttachments = (

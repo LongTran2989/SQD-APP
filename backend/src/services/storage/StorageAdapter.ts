@@ -9,8 +9,13 @@ export interface StorageAdapter {
   /** Create buckets / root dirs if missing. Called once at startup. */
   ensureReady(buckets: readonly string[]): Promise<void>;
 
-  /** Store an object. Overwrites any object already at (bucket, key). */
-  put(bucket: string, key: string, body: Buffer, contentType: string): Promise<void>;
+  /**
+   * Store an object by ingesting a file already written to a local path (the
+   * multipart temp file). The source path is consumed (moved) — callers must not
+   * reuse it afterwards. Overwrites any object already at (bucket, key). Taking a
+   * path rather than a Buffer keeps large uploads off the Node heap.
+   */
+  putFile(bucket: string, key: string, sourcePath: string, contentType: string): Promise<void>;
 
   /**
    * Open a readable stream for an object. Rejects with an Error whose `code` is

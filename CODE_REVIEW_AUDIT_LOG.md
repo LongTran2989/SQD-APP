@@ -13,6 +13,35 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-16 — File Upload Infrastructure Code Review (high effort)
+
+**Branch:** `claude/file-upload-infrastructure-28r4m5`
+**Scope:** The File Upload feature only (commits `f49fac5` + `a8480b2`) — `backend/src/services/attachmentService.ts`, `controllers/attachment.controller.ts`, `routes/attachment.routes.ts`, `services/storage/*`, `constants/fileUpload.ts`, `constants/privileges.ts`, `frontend/src/components/ui/FileUploadField.tsx`, `api/attachmentApi.ts`, `FILE_UPLOAD_DEV_GUIDE.md`, `deploy.sh`.
+**Tests after all fixes:** 444 / 444 passing (19 suites). Frontend `tsc`/lint/`next build` clean.
+**Method:** 8 finder angles → verify pass. All 10 surviving findings fixed (user accepted "apply all fixes").
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| FU-1 | High (bug) | `FileUploadField.tsx` | Mount load-effect called `emit(list)` → `onChange` → `handleDataChange`, marking the task form **dirty on view** (even in read-only statuses) and overwriting saved `TaskData`. | ✅ Fixed — `emit` only after an upload/delete, never on the initial read |
+| FU-2 | Medium (doc) | `FILE_UPLOAD_DEV_GUIDE.md` | Guide claimed downloads "re-check RBAC on every download"; `download`/`list` actually require only authentication. | ✅ Fixed — doc rewritten to describe the transparency model honestly + name the single seam (`assertEntityExists`) to tighten later |
+| FU-3 | Medium (altitude) | `attachmentService.ts` | Delete RBAC used a hardcoded `['Director','Admin','Manager']` array, bypassing the Phase-7 privilege matrix; not Admin-configurable. | ✅ Fixed — new `attachment:delete_any` `PrivilegeKey` (default D/A/M) resolved via `hasPrivilege` |
+| FU-4 | Medium (efficiency) | `attachmentApi.ts` | `getUploadConfig()` fetched once per `FileUploadField` mount → N identical requests on a multi-file-field form. | ✅ Fixed — module-scope cached Promise (retryable on failure) |
+| FU-5 | Medium (efficiency/VPS) | `attachment.routes.ts` / `LocalDiskAdapter.ts` | `multer.memoryStorage()` buffered whole files in RAM; adapter then wrote to disk → peak RAM = Σ concurrent uploads on the small VPS. | ✅ Fixed — `diskStorage` temp file + `putFile` (rename, EXDEV copy fallback); controller `unlink`s temp in `finally`; `getStream` drops the extra `access()` syscall |
+| FU-6 | Low (security) | `attachmentService.ts` | MIME type trusted from client `req.file.mimetype` (spoofable). | ✅ Mitigated/Documented — download forces `Content-Disposition: attachment` (no inline render → not an XSS vector); doc now states the allow-list is advisory, not content-sniffed |
+| FU-7 | Low (correctness) | `attachmentService.ts` | Non-transactional existence/quota check; orphan object if the process dies between `putFile` and the tx. | ✔ Accepted-as-is — acknowledged race for an internal tool; documented in the dev guide |
+| FU-8 | Low (cleanup) | `attachment.controller.ts` | Upload response hand-spread the 9 public fields already enumerated by `PUBLIC_SELECT`. | ✅ Fixed — shared `toPublic()` projector |
+| FU-9 | Low (cleanup) | `fileUpload.ts` | `ALL_BUCKETS` was a parallel literal of `ENTITY_BUCKET`'s values. | ✅ Fixed — derived via `new Set(Object.values(ENTITY_BUCKET))` |
+| FU-10 | Low (cleanup) | `FileUploadField.tsx` | Redundant `error` state alongside the toast (never auto-cleared); `formatBytes` rounded differently from the backend. | ✅ Fixed — dropped `error` state (toast only); frontend `formatBytes` rounding aligned to backend |
+
+**Rule-10 follow-up (noted, not a regression):** `FILE_UPLOAD_CONFIG` is seeded + read per request and is now clamped to the 100 MB hard ceiling, but there is still **no write endpoint** — limits are only changeable via a direct DB upsert until a settings-panel `PUT` is added. Tracked as DEF-5 below.
+
+| ID | Priority | Item | Reason for deferral |
+|----|----------|------|---------------------|
+| DEF-5 | Low | No `PUT` endpoint for `FILE_UPLOAD_CONFIG`; "Admin-configurable" (Rule 10) currently means a manual DB upsert. | Settings-panel endpoint is a follow-up feature, not a review bug. Default policy + clamp behave correctly meanwhile. |
+| DEF-6 | Low | `download`/`list` are auth-only (no per-entity scope), consistent with the app's transparency model. If finding/task/WP visibility is ever tightened, attachments won't follow until a scope check is added at `assertEntityExists`. | Matches current product design (`buildFindingScope → {}`); revisit only if visibility is locked down. |
+
+---
+
 ## Session: 2026-06-14 — Task Slice Code Review + Security Review
 
 **Branch:** `claude/exciting-rubin-hqkxma`

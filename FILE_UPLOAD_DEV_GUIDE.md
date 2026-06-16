@@ -33,12 +33,23 @@ pluggable adapter** instead, because:
    bytes). MinIO's headline features — the S3 API and presigned URLs — are
    therefore never used, so running a separate MinIO daemon (~150–300 MB RAM)
    buys nothing on the VPS.
-2. **Proxying re-checks RBAC on every download** and never exposes storage
-   publicly — a stronger compliance posture than time-limited presigned URLs,
-   which can't be revoked mid-window.
+2. **Storage is never exposed publicly** — the bytes only ever leave through an
+   authenticated backend route, not a public/presigned URL that can't be revoked
+   mid-window. This is a real advantage over presigned URLs.
 3. **The adapter interface keeps the §3.5 intent**: switching to MinIO / S3 / R2
    later is a one-file change (implement `MinioAdapter`, set
    `STORAGE_DRIVER=minio`), not a rewrite.
+
+> **Authorization scope — read honestly.** `list` and `download` currently
+> require only **authentication**, not per-entity authorization. This matches the
+> app's deliberate *transparency model* (findings are globally readable —
+> `buildFindingScope` returns `{}` — and tasks/WPs are viewable system-wide), so
+> attachments being readable by any authenticated user is consistent with how
+> their parent records already behave. It is **not** a per-download RBAC check. If
+> visibility is ever tightened, add the scope check in **one** place —
+> `assertEntityExists` in `attachmentService.ts` is the natural seam — so download
+> doesn't become the read path that bypasses scoping. **Delete** is authorized:
+> the uploader, or a holder of the `attachment:delete_any` privilege.
 
 The §3.5 bucket *names* are preserved as logical roots (`sqd-tasks`,
 `sqd-findings`, `sqd-templates`) so the migration path stays clean.
@@ -54,9 +65,9 @@ The §3.5 bucket *names* are preserved as logical roots (`sqd-tasks`,
 | `src/services/storage/StorageAdapter.ts` | The `StorageAdapter` interface + `ObjectNotFoundError`. |
 | `src/services/storage/LocalDiskAdapter.ts` | Filesystem implementation (path-traversal guarded). |
 | `src/services/storage/index.ts` | `getStorage()` factory (cached) + `initStorage()`. |
-| `src/services/attachmentService.ts` | Config load, validation, atomic create + dual-write, soft-delete. |
-| `src/controllers/attachment.controller.ts` | HTTP handlers; never leaks `storageKey`. |
-| `src/routes/attachment.routes.ts` | Multer (memory, single file) + route wiring. |
+| `src/services/attachmentService.ts` | Config load, validation, atomic create + dual-write, privilege-gated soft-delete. |
+| `src/controllers/attachment.controller.ts` | HTTP handlers; never leaks `storageKey`; `toPublic()` projector + temp-file cleanup. |
+| `src/routes/attachment.routes.ts` | Multer (**disk** temp storage, single file) + route wiring. |
 
 ### Storage key format
 
@@ -68,21 +79,29 @@ capped) before they ever touch disk.
 
 ## 4. Upload flow & invariants
 
-1. **Multer** buffers one `file` part in memory, bounded by
-   `ABSOLUTE_MAX_UPLOAD_BYTES` (100 MB) — a fixed memory-safety ceiling, **not**
-   the business limit. Multer's `LIMIT_FILE_SIZE` → `413`.
+1. **Multer** streams one `file` part to a **temp file on disk** (`diskStorage`,
+   `os.tmpdir()`) — NOT buffered in memory, so concurrent large uploads don't pin
+   RAM on the VPS. Bounded by `ABSOLUTE_MAX_UPLOAD_BYTES` (100 MB) — a fixed
+   memory/disk-safety ceiling, **not** the business limit. `LIMIT_FILE_SIZE` →
+   `413`. The controller `unlink`s the temp file in a `finally` on every path.
 2. **`createAttachmentService`** then enforces the *policy* (Admin-configurable):
    - MIME type must match a category in `FILE_UPLOAD_CONFIG` → else `415`.
+     (Type is the client-declared `mimetype`; combined with forced
+     `Content-Disposition: attachment` on download it is not an XSS vector, but
+     it is not content-sniffed — treat the allow-list as advisory, not a
+     security boundary.)
    - File size ≤ that category's `maxSizeBytes` → else `413`.
    - Owning entity must exist (soft-delete filtered) → else `404`.
    - Sum of existing (non-deleted) attachment sizes + this file ≤
      `totalPerEntityBytes` → else `413`.
-3. **Bytes are stored first**, then the row + audit + feed post are written in a
+3. **The temp file is moved into storage first** (`putFile` → `rename`, with an
+   `EXDEV` copy fallback), then the row + audit + feed post are written in a
    single `prisma.$transaction`. If the DB write fails, the stored object is
    removed (orphan-file is the safe failure direction; a committed row always
    has its bytes). The total-quota check is **not** row-locked — a tiny
-   over-limit is possible under a concurrent race (acceptable for an internal
-   tool; documented here).
+   over-limit is possible under a concurrent race, and the existence check is not
+   transactional with the create (acceptable for an internal tool; documented
+   here).
 
 ### Dual write (RULE 3)
 
@@ -95,8 +114,11 @@ Every upload **and** soft-delete writes:
 
 `DELETE /:id` sets `Attachment.deletedAt`. **The stored object is intentionally
 NOT removed** — evidence files are an aviation compliance record. Soft-deleted
-rows are filtered from list/download. Allowed for the original uploader or an
-elevated role (Director / Admin / Manager).
+rows are filtered from list/download. Allowed for the original uploader, or any
+actor holding the **`attachment:delete_any`** privilege — a DB-driven key in the
+Phase-7 `PRIVILEGE_CATALOG` (default: Director / Admin / Manager), resolved via
+`hasPrivilege`, **not** a hardcoded role array. An Admin can now reconfigure who
+may delete others' evidence from the Privilege Management panel.
 
 ---
 
@@ -121,8 +143,11 @@ All routes require auth (cookie JWT). Base: `/api/attachments`.
   save), `deleteAttachment`.
 - `src/components/ui/FileUploadField.tsx` — self-contained: loads the existing
   file set + policy on mount, uploads sequentially (so the per-entity quota is
-  checked file-by-file), download/delete per row, surfaces server error messages.
-  Calls `onChange(attachmentIds)` so the host form can persist the id list.
+  checked file-by-file), download/delete per row, surfaces failures as toasts.
+  `getUploadConfig()` is cached at module scope, so a form with N file fields
+  fetches the policy once. Calls `onChange(attachmentIds)` **only after an
+  upload/delete** — never on the initial read — so merely viewing a task does not
+  dirty the form or clobber saved `TaskData`.
 - **Task form**: `TaskFormPanel` threads `taskId` into the `file_upload` field
   renderer; attachment ids are stored in `TaskData` for that field. The field is
   read-only in the same statuses as the rest of the form.
@@ -158,8 +183,21 @@ Stored in `SystemSetting` key `FILE_UPLOAD_CONFIG` as JSON, seeded from
 }
 ```
 
-A future Admin settings panel can `PUT` this row; `loadFileUploadConfig()` reads
-it per request and falls back to the default if the row is missing/invalid.
+`loadFileUploadConfig()` reads this row per request and falls back to the default
+if it is missing/invalid.
+
+**Known limitations (call out before relying on Rule 10):**
+- **No write endpoint yet.** The row is seeded (`update: {}`, so a re-seed never
+  clobbers a customised value) but there is no `PUT /api/settings/file-upload`.
+  Until one is added, "Admin-configurable" means a direct DB upsert of
+  `SystemSetting['FILE_UPLOAD_CONFIG']`. A settings-panel endpoint is the next
+  step to fully satisfy Rule 10.
+- **Hard ceiling.** A category `maxSizeBytes` is clamped to
+  `ABSOLUTE_MAX_UPLOAD_BYTES` (100 MB) by `parseFileUploadConfig`, and nginx caps
+  the body at `100M`. An Admin cannot raise a per-file limit above the ceiling
+  without also raising both the constant and the nginx config (a redeploy). The
+  config endpoint returns the **clamped** value, so the UI never advertises a
+  limit the server would reject.
 
 ---
 

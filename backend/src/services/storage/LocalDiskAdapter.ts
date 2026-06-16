@@ -31,20 +31,35 @@ export class LocalDiskAdapter implements StorageAdapter {
     }
   }
 
-  async put(bucket: string, key: string, body: Buffer, _contentType: string): Promise<void> {
+  async putFile(bucket: string, key: string, sourcePath: string, _contentType: string): Promise<void> {
     const full = this.resolveSafe(bucket, key);
     await fsp.mkdir(path.dirname(full), { recursive: true });
-    await fsp.writeFile(full, body);
+    try {
+      // Fast path: same filesystem — atomic move, no buffering.
+      await fsp.rename(sourcePath, full);
+    } catch (err: unknown) {
+      // Cross-device (e.g. tmp on a different mount): stream-copy then unlink.
+      if ((err as NodeJS.ErrnoException)?.code === 'EXDEV') {
+        await fsp.copyFile(sourcePath, full);
+        await fsp.unlink(sourcePath).catch(() => undefined);
+      } else {
+        throw err;
+      }
+    }
   }
 
   async getStream(bucket: string, key: string): Promise<Readable> {
     const full = this.resolveSafe(bucket, key);
-    try {
-      await fsp.access(full, fs.constants.R_OK);
-    } catch {
-      throw new ObjectNotFoundError();
-    }
-    return fs.createReadStream(full);
+    // Open via the stream itself (one syscall) instead of a separate access()
+    // stat; map ENOENT on 'open' failure to ObjectNotFoundError for a clean 404.
+    const stream = fs.createReadStream(full);
+    await new Promise<void>((resolve, reject) => {
+      stream.once('open', () => resolve());
+      stream.once('error', (err: NodeJS.ErrnoException) =>
+        reject(err.code === 'ENOENT' ? new ObjectNotFoundError() : err)
+      );
+    });
+    return stream;
   }
 
   async remove(bucket: string, key: string): Promise<void> {
