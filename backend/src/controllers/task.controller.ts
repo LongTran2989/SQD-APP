@@ -908,11 +908,16 @@ export const assignTask = async (req: Request, res: Response): Promise<void> => 
 
     const assignee = await prisma.user.findUnique({
       where: { id: assignedToUserId, deletedAt: null },
-      select: { id: true, name: true, divisionId: true }
+      select: { id: true, name: true, divisionId: true, role: { select: { name: true } } }
     });
 
     if (!assignee) {
       res.status(404).json({ message: 'Assignee user not found' });
+      return;
+    }
+
+    if (assignee.role.name === 'Admin') {
+      res.status(400).json({ message: 'Admin users cannot be assigned tasks' });
       return;
     }
 
@@ -981,15 +986,19 @@ export const selfAssignTask = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    if (role === 'Admin') {
+      res.status(403).json({ message: 'Admin users cannot be assigned tasks' });
+      return;
+    }
+
     if (task.status !== 'Unassigned') {
       res.status(400).json({ message: 'Task is no longer available for self-assignment' });
       return;
     }
 
-    // Self-assign visibility: Division-scoped for non-Admin/Director
+    // Self-assign visibility: Division-scoped for non-Director
     if (
       role !== 'Director' &&
-      role !== 'Admin' &&
       task.targetDivisionId !== divisionId
     ) {
       res.status(403).json({ message: 'You can only self-assign tasks in your own division' });
@@ -1494,9 +1503,13 @@ export async function reassignTaskService(
 
   const newAssignee = await client.user.findUnique({
     where: { id: newAssigneeId, deletedAt: null },
-    select: { id: true, name: true, divisionId: true }
+    select: { id: true, name: true, divisionId: true, role: { select: { name: true } } }
   });
   if (!newAssignee) throw new HttpError(404, 'New assignee not found');
+
+  if (newAssignee.role.name === 'Admin') {
+    throw new HttpError(400, 'Admin users cannot be assigned tasks');
+  }
 
   // Division lock: mirrors assignTask — block cross-division unless assign_any.
   if (!hasPrivilege(actor, 'task:assign_any') && newAssignee.divisionId !== actor.divisionId) {
