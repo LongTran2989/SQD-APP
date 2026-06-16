@@ -52,6 +52,21 @@ export interface PrivilegeMatrix {
   roles: RolePrivileges[];
 }
 
+// ── Notification event configuration (Settings → Notifications) ──────────────
+export interface NotificationEventCatalogItem {
+  key: string;
+  group: string;
+  label: string;
+  description: string;
+  recipientsFromPrivileges: boolean;
+}
+
+export interface NotificationEventConfig {
+  eventKey: string;
+  enabled: boolean;
+  ccManagers: boolean;
+}
+
 export type FormFieldType =
   | 'text'
   | 'textarea'

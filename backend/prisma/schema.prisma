@@ -102,6 +102,9 @@ model User {
   // never the compliance record (AuditLog remains the source of truth).
   notifications Notification[] @relation("UserNotifications")
 
+  // Notification event config rows this user last updated (admin panel).
+  notifConfigUpdates NotificationEventConfig[] @relation("NotifConfigUpdatedBy")
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -633,6 +636,27 @@ model Notification {
 
   @@index([userId, readAt])
   @@index([userId, createdAt])
+}
+
+// -----------------------------------------------------------------------
+// Notification Event Configuration (admin-configurable per event class)
+// -----------------------------------------------------------------------
+//
+// Drives the Settings → Notifications panel: each row toggles whether a
+// notification event class fires (`enabled`) and whether all Managers in the
+// recipient's division are CC'd (`ccManagers`). Enforced at the single
+// createNotifications chokepoint. Like Notification, this is a config artifact,
+// NOT soft-delete protected; AuditLog records every change (Rule 3). Reading is
+// fail-open: a missing/unreadable row defaults to enabled (notifications are
+// never silently lost).
+model NotificationEventConfig {
+  eventKey   String  @id // TASK_ASSIGNED | TASK_SUBMITTED | TASK_REVIEWED | FINDING_CREATED | ESCALATION_QUEUED | FEED_ACTIVITY_TASK | FEED_ACTIVITY_WP
+  enabled    Boolean @default(true)
+  ccManagers Boolean @default(false) // CC all Managers in the recipient's division
+
+  updatedAt   DateTime @updatedAt
+  updatedById Int?
+  updatedBy   User?    @relation("NotifConfigUpdatedBy", fields: [updatedById], references: [id])
 }
 
 // -----------------------------------------------------------------------

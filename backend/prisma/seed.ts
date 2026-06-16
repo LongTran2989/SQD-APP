@@ -114,6 +114,30 @@ async function main() {
   });
   console.log('✅ System settings seeded');
 
+  // ── NOTIFICATION EVENT CONFIG ────────────────────────────────────────────────
+  // Seed the configurable event classes at their defaults (enabled, no CC).
+  // Defaults are also merged at read time, so this is purely to populate the
+  // Settings → Notifications panel on first load.
+  const notificationEventKeys = [
+    'TASK_ASSIGNED',
+    'TASK_SUBMITTED',
+    'TASK_REVIEWED',
+    'FINDING_CREATED',
+    'ESCALATION_QUEUED',
+    'FEED_ACTIVITY_TASK',
+    'FEED_ACTIVITY_WP',
+  ];
+  await Promise.all(
+    notificationEventKeys.map((eventKey) =>
+      prisma.notificationEventConfig.upsert({
+        where:  { eventKey },
+        update: {},
+        create: { eventKey, enabled: true, ccManagers: false },
+      })
+    )
+  );
+  console.log(`✅ Notification event config seeded (${notificationEventKeys.length})`);
+
   // ── WP TYPES ───────────────────────────────────────────────────────────────
   const wpTypes = [
     { code: 'CHECK',         description: 'Check' },

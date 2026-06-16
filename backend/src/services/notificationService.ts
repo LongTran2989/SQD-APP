@@ -2,6 +2,12 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { hasPrivilege } from '../utils/privilegeAccess';
 import { PrivilegeKey } from '../constants/privileges';
 import { emitRealtimeEvent } from '../realtime/pgEvents';
+import {
+  getEventConfigMap,
+  isNotificationEventKey,
+  NotificationEventKey,
+  EventConfigMap,
+} from './notificationConfigService';
 
 // Retain read notifications for this many days before purging.
 const NOTIFICATION_RETENTION_DAYS = 30;
@@ -61,11 +67,24 @@ export async function createNotifications(
   excludeUserIds: Array<number | null | undefined> = []
 ): Promise<void> {
   const exclude = new Set(excludeUserIds.filter((id): id is number => typeof id === 'number'));
+
+  // Apply admin notification config (Settings → Notifications): drop disabled
+  // event classes and CC division Managers where configured. Fail-open — any
+  // config problem leaves the original inputs untouched (notifications are never
+  // silently lost).
+  const configMap = await getEventConfigMap(client);
+  const enabledInputs = inputs.filter((input) => {
+    const key = eventKeyOf(input);
+    return key == null ? true : configMap[key].enabled;
+  });
+  const ccInputs = await resolveCcManagerInputs(client, enabledInputs, configMap);
+  const effectiveInputs = [...enabledInputs, ...ccInputs];
+
   // De-dup identical (user,type,linkScope,linkId) tuples within this batch.
   const seen = new Set<string>();
   const recipients = new Set<number>();
 
-  for (const input of inputs) {
+  for (const input of effectiveInputs) {
     if (exclude.has(input.userId)) continue;
     const key = `${input.userId}|${input.type}|${input.linkScope ?? ''}|${input.linkId ?? ''}`;
     if (seen.has(key)) continue;
@@ -87,6 +106,78 @@ export async function createNotifications(
     } catch (err) {
       console.error('[notifications] signal failed for user', userId, '(non-fatal):', err);
     }
+  }
+}
+
+/**
+ * Maps a notification input to its configurable event key. FEED_ACTIVITY splits
+ * by linkScope into FEED_ACTIVITY_TASK / FEED_ACTIVITY_WP. Returns null for any
+ * input that doesn't map to a known key (treated as always-enabled, never CC'd).
+ */
+function eventKeyOf(input: NotificationInput): NotificationEventKey | null {
+  if (input.type === 'FEED_ACTIVITY') {
+    if (input.linkScope === 'WP') return 'FEED_ACTIVITY_WP';
+    if (input.linkScope === 'TASK') return 'FEED_ACTIVITY_TASK';
+    return null;
+  }
+  return isNotificationEventKey(input.type) ? input.type : null;
+}
+
+/**
+ * For every input whose event key is configured with ccManagers, produces extra
+ * inputs targeting all Managers in that recipient's division. These flow through
+ * the same exclude + de-dup loop as the originals. Best-effort: any failure
+ * yields no CC entries (the base notifications still send).
+ */
+async function resolveCcManagerInputs(
+  client: PrismaLike,
+  inputs: NotificationInput[],
+  configMap: EventConfigMap
+): Promise<NotificationInput[]> {
+  try {
+    const ccBase = inputs.filter((input) => {
+      const key = eventKeyOf(input);
+      return key != null && configMap[key].ccManagers;
+    });
+    if (ccBase.length === 0) return [];
+
+    const recipientIds = Array.from(new Set(ccBase.map((i) => i.userId)));
+    const recipients = await client.user.findMany({
+      where: { deletedAt: null, id: { in: recipientIds } },
+      select: { id: true, divisionId: true },
+    });
+    const divisionByUser = new Map(recipients.map((u) => [u.id, u.divisionId]));
+
+    const managerRole = await client.role.findUnique({ where: { name: 'Manager' }, select: { id: true } });
+    if (!managerRole) return [];
+
+    // Cache the manager set per division so a multi-recipient batch hits the DB
+    // once per distinct division rather than once per recipient.
+    const managersByDivision = new Map<number, number[]>();
+    const managersFor = async (divisionId: number): Promise<number[]> => {
+      const cached = managersByDivision.get(divisionId);
+      if (cached) return cached;
+      const managers = await client.user.findMany({
+        where: { deletedAt: null, roleId: managerRole.id, divisionId },
+        select: { id: true },
+      });
+      const ids = managers.map((m) => m.id);
+      managersByDivision.set(divisionId, ids);
+      return ids;
+    };
+
+    const out: NotificationInput[] = [];
+    for (const input of ccBase) {
+      const divisionId = divisionByUser.get(input.userId);
+      if (divisionId == null) continue;
+      for (const managerId of await managersFor(divisionId)) {
+        out.push({ ...input, userId: managerId });
+      }
+    }
+    return out;
+  } catch (err) {
+    console.error('[notifications] CC manager expansion failed (non-fatal):', err);
+    return [];
   }
 }
 
