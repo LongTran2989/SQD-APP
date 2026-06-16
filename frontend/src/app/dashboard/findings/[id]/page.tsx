@@ -15,6 +15,7 @@ import RelatedFindingsPanel from '../../../../components/findings/RelatedFinding
 import TrendBanner from '../../../../components/findings/TrendBanner';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
 import FindingActivityFeed from '../../../../components/findings/FindingActivityFeed';
+import FileUploadField from '../../../../components/ui/FileUploadField';
 import toast from 'react-hot-toast';
 import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X } from 'lucide-react';
 
@@ -166,6 +167,16 @@ export default function FindingDetailPage() {
             <p className="text-xs text-slate-400 mt-4">
               Reported by {finding.reportedByUser?.name ?? 'Unknown'} on {formatDate(finding.createdAt)}
             </p>
+          </div>
+
+          {/* Section 2b — Evidence attachments */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-4">Evidence</h3>
+            <FileUploadField
+              entityType="FINDING"
+              entityId={finding.id}
+              disabled={finding.status === 'Closed' || finding.status === 'Dismissed'}
+            />
           </div>
 
           {/* Section 3 — Review */}

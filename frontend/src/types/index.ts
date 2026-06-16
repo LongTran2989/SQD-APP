@@ -369,16 +369,31 @@ export interface TimeBooking {
   updatedAt: string;
 }
 
+export type AttachmentEntityType = 'TASK' | 'FINDING' | 'TEMPLATE' | 'WP';
+
+// Public attachment metadata as returned by the API. The internal storageKey /
+// bucket are never exposed — downloads go through the backend stream endpoint.
 export interface Attachment {
   id: number;
   fileName: string;
   fileType: string;
   fileSize: number;
-  storageKey: string;
-  entityType: string;
+  entityType: AttachmentEntityType | string;
   entityId: string;
+  fieldId: string | null;
   uploadedById: number;
   createdAt: string;
+}
+
+export interface FileCategoryRule {
+  label: string;
+  mimeTypes: string[];
+  maxSizeBytes: number;
+}
+
+export interface FileUploadConfig {
+  categories: FileCategoryRule[];
+  totalPerEntityBytes: number;
 }
 
 export type FindingSeverity = 'Observation' | 'Level 1' | 'Level 2';

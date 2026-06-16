@@ -22,8 +22,10 @@ import privilegeRoutes from './routes/privilege.routes';
 import notificationRoutes from './routes/notification.routes';
 import realtimeRoutes from './routes/realtime.routes';
 import referenceDataRoutes from './routes/referenceData.routes';
+import attachmentRoutes from './routes/attachment.routes';
 import { startRealtimeListener } from './realtime/pgEvents';
 import { purgeOldNotifications } from './services/notificationService';
+import { initStorage } from './services/storage';
 
 dotenv.config();
 
@@ -56,6 +58,7 @@ app.use('/api/settings/privileges', privilegeRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/events', realtimeRoutes);
 app.use('/api/admin/reference-data', referenceDataRoutes);
+app.use('/api/attachments', attachmentRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {
@@ -95,6 +98,8 @@ if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
   });
+  // Create the storage buckets / root dirs (best-effort — log and continue).
+  void initStorage().catch((err) => console.error('[Storage init failed]', err));
   // Start the cross-instance realtime LISTEN bridge (never under test — Jest
   // must not hold an open DB connection past the suite).
   void startRealtimeListener();

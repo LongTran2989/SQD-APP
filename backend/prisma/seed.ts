@@ -21,6 +21,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import 'dotenv/config';
 import { seedPrivileges } from '../src/seeds/seed-privileges';
+import { FILE_UPLOAD_CONFIG_KEY, DEFAULT_FILE_UPLOAD_CONFIG } from '../src/constants/fileUpload';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -110,6 +111,19 @@ async function main() {
       key:         'ENFORCE_SINGLE_SESSION',
       value:       'false',
       description: 'If true, logging in on a new device invalidates all other active sessions.',
+    },
+  });
+
+  // Admin-configurable file-upload policy (Rule 10). Seeded from the defaults in
+  // src/constants/fileUpload.ts (mirrors CLAUDE_HANDOVER.md §3.5). Idempotent —
+  // `update: {}` never clobbers an Admin's customised value.
+  await prisma.systemSetting.upsert({
+    where:  { key: FILE_UPLOAD_CONFIG_KEY },
+    update: {},
+    create: {
+      key:         FILE_UPLOAD_CONFIG_KEY,
+      value:       JSON.stringify(DEFAULT_FILE_UPLOAD_CONFIG),
+      description: 'Allowed file types and size limits for uploads (per-category + total per record).',
     },
   });
   console.log('✅ System settings seeded');
