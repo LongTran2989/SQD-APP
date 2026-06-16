@@ -544,11 +544,16 @@ export const assignUserToWp = async (req: Request, res: Response): Promise<void>
     // Managers can only assign users in the same division
     const targetUser = await prisma.user.findUnique({
       where: { id: userId, deletedAt: null },
-      select: { id: true, name: true, divisionId: true }
+      select: { id: true, name: true, divisionId: true, role: { select: { name: true } } }
     });
 
     if (!targetUser) {
       res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    if (targetUser.role.name === 'Admin') {
+      res.status(400).json({ message: 'Admin users cannot be assigned to Work Packages' });
       return;
     }
 

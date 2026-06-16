@@ -34,7 +34,7 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
       case 'users': {
         const users = await prisma.user.findMany({
           select: { id: true, name: true, employeeId: true, divisionId: true },
-          where: { deletedAt: null },
+          where: { deletedAt: null, role: { name: { not: 'Admin' } } },
           orderBy: { name: 'asc' }
         });
         res.json(users.map(u => ({ value: String(u.id), label: `${u.name} (${u.employeeId ?? ''})`, divisionId: u.divisionId })));

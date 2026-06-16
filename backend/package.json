@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon src/index.ts",
+    "build": "npx prisma generate && tsc -p tsconfig.build.json",
+    "start": "npx prisma generate && npx ts-node src/index.ts",
     "test": "dotenv -e .env.test -- jest --runInBand",
     "test:setup": "dotenv -e .env.test -- node node_modules/prisma/build/index.js db push --accept-data-loss"
   },
@@ -23,7 +25,9 @@
     "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
-    "prisma": "^6.19.3"
+    "prisma": "^6.19.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
@@ -39,9 +43,7 @@
     "jest": "^30.3.0",
     "nodemon": "^3.1.14",
     "supertest": "^7.2.2",
-    "ts-jest": "^29.4.9",
-    "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "ts-jest": "^29.4.9"
   },
   "prisma": {
     "seed": "node_modules/.bin/ts-node prisma/seed.ts"
