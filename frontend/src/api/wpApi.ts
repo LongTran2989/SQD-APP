@@ -12,10 +12,10 @@ export const getWorkPackageById = (id: number): Promise<WorkPackageDetail> =>
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export const getWpTypes = (): Promise<WpType[]> =>
-  apiClient.get('/work-packages/types').then((r) => r.data);
+  apiClient.get('/taxonomy/wp-types').then((r) => r.data);
 
 export const createWpType = (code: string, description?: string): Promise<WpType> =>
-  apiClient.post('/work-packages/types', { code, description }).then((r) => r.data);
+  apiClient.post('/taxonomy/wp-types', { code, description }).then((r) => r.data);
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
