@@ -129,7 +129,7 @@ const TABS: TabConfig[] = [
       { key: 'serialNumber', label: 'Serial Number' },
     ],
     list: () => asRows(listRefRegistrations()),
-    create: (p) => asRow(createRefRegistration(p as RegistrationPayload)),
+    create: (p) => asRow(createRefRegistration(p as unknown as RegistrationPayload)),
     update: (id, p) => asRow(updateRefRegistration(id, { ...p, registration: id })),
     remove: (id) => deleteRefRegistration(id),
   },
