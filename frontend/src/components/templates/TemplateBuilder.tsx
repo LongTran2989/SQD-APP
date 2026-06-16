@@ -335,6 +335,7 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                 <button onClick={() => addField('checkbox_group')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Checkboxes</button>
                 <button onClick={() => addField('checkbox_single')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Toggle</button>
                 <button onClick={() => addField('rich_text')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Rich Text</button>
+                <button onClick={() => addField('file_upload')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> File Upload</button>
               </div>
             </div>
           </div>
@@ -491,6 +492,11 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                       {f.type === 'rich_text' && (
                         <div className="pointer-events-none mt-1">
                           <RichTextEditor value="" disabled />
+                        </div>
+                      )}
+                      {f.type === 'file_upload' && (
+                        <div className="mt-1 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-sm text-slate-400 flex items-center justify-center gap-2">
+                          <Plus className="w-4 h-4" /> File upload (documents / images)
                         </div>
                       )}
                     </div>

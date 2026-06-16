@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Paperclip, Download, Trash2, Loader2, UploadCloud, FileText } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Attachment, AttachmentEntityType, FileUploadConfig } from '../../types';
 import {
   listAttachments,
@@ -87,10 +88,13 @@ export default function FileUploadField({
         const created = await uploadAttachment(file, { entityType, entityId, fieldId }, setProgress);
         current = [...current, created];
         setAttachments(current);
+        toast.success(`Uploaded ${created.fileName}`);
       }
       emit(current);
     } catch (err) {
-      setError(apiErrorMessage(err, 'Upload failed'));
+      const msg = apiErrorMessage(err, 'Upload failed');
+      setError(msg);
+      toast.error(msg);
     } finally {
       setUploading(false);
       setProgress(0);
@@ -106,8 +110,11 @@ export default function FileUploadField({
       const next = attachments.filter((a) => a.id !== id);
       setAttachments(next);
       emit(next);
+      toast.success('File removed');
     } catch (err) {
-      setError(apiErrorMessage(err, 'Could not remove file'));
+      const msg = apiErrorMessage(err, 'Could not remove file');
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusyId(null);
     }
@@ -118,7 +125,9 @@ export default function FileUploadField({
     try {
       await downloadAttachment(att.id, att.fileName);
     } catch (err) {
-      setError(apiErrorMessage(err, 'Download failed'));
+      const msg = apiErrorMessage(err, 'Download failed');
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusyId(null);
     }
