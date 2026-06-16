@@ -347,6 +347,45 @@ describe('Authentication & Session Management Endpoints', () => {
       const clearCookie = logoutRes.headers['set-cookie'];
       expect(clearCookie).toBeDefined();
     });
+
+    // Multi-tab identity guard: the JWT cookie is shared browser-wide, so a
+    // login in a second tab can leave a first tab rendering one user while its
+    // requests carry another user's cookie. Browser clients stamp requests with
+    // the user id the tab believes it is acting as; a mismatch against the token
+    // must be rejected so the stale tab is forced to re-authenticate rather than
+    // silently acting with the other user's privileges.
+    it('rejects a request whose X-Acting-User-Id does not match the cookie token', async () => {
+      const user = await prisma.user.create({
+        data: {
+          employeeId: 'TST-TAB',
+          name: 'Tab User',
+          passwordHash: await bcrypt.hash('password123', 10),
+          forcePasswordChange: false,
+          divisionId,
+          roleId: adminRoleId
+        }
+      });
+
+      const loginRes = await request(app).post('/api/auth/login').send({ employeeId: 'TST-TAB', password: 'password123' });
+      const setCookie = loginRes.headers['set-cookie'];
+      const cookieHeaders = Array.isArray(setCookie) ? setCookie : [setCookie as unknown as string];
+      const cookieValue = cookieHeaders.find((c) => c.startsWith('token='))!.split(';')[0];
+
+      // Same tab claiming its own id is accepted.
+      const matched = await request(app)
+        .get('/api/templates')
+        .set('Cookie', cookieValue)
+        .set('X-Acting-User-Id', String(user.id));
+      expect(matched.status).not.toBe(401);
+
+      // A stale tab claiming a different user id (its cookie was overwritten by
+      // another tab's login) is rejected.
+      const mismatched = await request(app)
+        .get('/api/templates')
+        .set('Cookie', cookieValue)
+        .set('X-Acting-User-Id', String(user.id + 9999));
+      expect(mismatched.status).toBe(401);
+    });
   });
 
   describe('Session lifecycle & revocation', () => {
