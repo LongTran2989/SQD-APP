@@ -54,6 +54,19 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
       }
       const authPayload = decoded as AuthPayload;
 
+      // Multi-tab identity guard. Browser clients stamp each request with the
+      // user id the tab believes it is acting as (X-Acting-User-Id). Because the
+      // JWT cookie is shared browser-wide, a login in another tab can leave this
+      // tab rendering one user while its cookie carries another's token. If the
+      // claimed identity does not match the token, reject so the stale tab is
+      // forced to re-authenticate instead of silently acting as the other user.
+      // Header-only clients (API/tests) omit the header and are unaffected.
+      const actingUserId = req.headers['x-acting-user-id'];
+      if (typeof actingUserId === 'string' && actingUserId !== String(authPayload.userId)) {
+        res.status(401).json({ message: 'Session changed in another tab. Please log in again.' });
+        return;
+      }
+
       // Enforce password change policy
       if (authPayload.forcePasswordChange && req.path !== UPDATE_PASSWORD_PATH) {
         res.status(403).json({ message: 'Forbidden: Password change required' });
