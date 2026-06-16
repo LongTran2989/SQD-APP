@@ -50,7 +50,7 @@ export interface RaiseFindingPayload {
   eventType: string;
   departmentId: number;
   description: string;
-  aircraftRegistration?: string;
+  aircraftRegistrationCode?: string;
   regulatoryReference?: string;
   fieldId?: string;
   ataChapterId?: number;

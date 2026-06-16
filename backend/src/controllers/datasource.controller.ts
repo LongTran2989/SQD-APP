@@ -4,8 +4,8 @@ import { PrismaClient } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
 /**
- * Returns data for dynamic dropdowns in the template builder.
- * Supports: departments, divisions, users, aircrafts
+ * Returns data for dynamic dropdowns in the template builder and forms.
+ * Supports: departments, divisions, users, aircrafts, operators, registrations
  */
 export const getDataSource = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -42,12 +42,33 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
       }
       case 'aircrafts': {
         const aircrafts = await prisma.aircraftType.findMany({
-          select: { id: true, icaoCode: true, manufacturer: true, model: true },
-          orderBy: { icaoCode: 'asc' }
+          select: { code: true },
+          orderBy: { code: 'asc' }
         });
-        res.json(aircrafts.map(a => ({
-          value: String(a.id),
-          label: `${a.icaoCode} — ${a.manufacturer} ${a.model}`
+        res.json(aircrafts.map(a => ({ value: a.code, label: a.code })));
+        return;
+      }
+      case 'operators': {
+        const operators = await prisma.operator.findMany({
+          select: { iataCode: true, name: true },
+          orderBy: { iataCode: 'asc' }
+        });
+        res.json(operators.map(o => ({ value: o.iataCode, label: `${o.iataCode} — ${o.name}` })));
+        return;
+      }
+      case 'registrations': {
+        // Used by the finding form's cascading Operator → Aircraft dropdowns.
+        // Each option carries operatorCode so the UI can filter by operator and
+        // auto-fill the operator when an aircraft is chosen.
+        const registrations = await prisma.aircraftRegistration.findMany({
+          select: { registration: true, description: true, operatorCode: true, aircraftTypeCode: true },
+          orderBy: { registration: 'asc' }
+        });
+        res.json(registrations.map(r => ({
+          value: r.registration,
+          label: r.description ? `${r.registration} — ${r.description}` : r.registration,
+          operatorCode: r.operatorCode,
+          aircraftTypeCode: r.aircraftTypeCode,
         })));
         return;
       }
