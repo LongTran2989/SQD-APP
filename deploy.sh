@@ -13,8 +13,16 @@ REPO_URL="https://github.com/LongTran2989/SQD-APP.git"
 BRANCH="TEST_P1"
 DB_NAME="sqd_qa_db"
 DB_USER="sqd_user"
-DB_PASSWORD=$(openssl rand -hex 16)
-JWT_SECRET=$(openssl rand -hex 32)
+
+# Reuse existing credentials if the app was already deployed, so re-runs
+# don't generate a new password that mismatches the existing PostgreSQL user.
+if [ -f /app/backend/.env ]; then
+  DB_PASSWORD=$(grep -oP '(?<=sqd_user:)[^@]+' /app/backend/.env)
+  JWT_SECRET=$(grep -oP '(?<=JWT_SECRET=")[^"]+' /app/backend/.env)
+else
+  DB_PASSWORD=$(openssl rand -hex 16)
+  JWT_SECRET=$(openssl rand -hex 32)
+fi
 
 echo ""
 echo "============================================"
@@ -66,6 +74,8 @@ sudo -u postgres psql -c "
     END IF;
   END
   \$\$;"
+# Always sync the password so re-runs stay consistent with .env
+sudo -u postgres psql -c "ALTER USER $DB_USER WITH PASSWORD '$DB_PASSWORD';" 2>/dev/null || true
 sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;" 2>/dev/null \
   || echo "  (database already exists — skipping)"
 
