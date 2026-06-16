@@ -24,7 +24,7 @@ export const useAuthStore = create<AuthState>()(
       setPreferences: (preferences) =>
         set((state) => (state.user ? { user: { ...state.user, preferences } } : {})),
       updateProfile: (updates) =>
-        set((state) => (state.user ? { user: { ...state.user, ...updates } } : {})),
+        set((state) => (state.user ? { user: { ...state.user, ...updates } as User } : {})),
     }),
     {
       name: 'auth-storage', // key in sessionStorage
