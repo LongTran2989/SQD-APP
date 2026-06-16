@@ -10,7 +10,7 @@ fi
 
 DOMAIN=$1
 REPO_URL="https://github.com/LongTran2989/SQD-APP.git"
-BRANCH="claude/hosting-options-testing-sd615t"
+BRANCH="TEST_P1"
 DB_NAME="sqd_qa_db"
 DB_USER="sqd_user"
 DB_PASSWORD=$(openssl rand -hex 16)
