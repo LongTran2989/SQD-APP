@@ -57,7 +57,8 @@ export type PrivilegeKey =
   // Settings
   | 'settings:wptype'
   | 'settings:taxonomy'
-  | 'settings:privileges';
+  | 'settings:privileges'
+  | 'settings:notifications';
 
 export type PrivilegeMap = Partial<Record<PrivilegeKey, boolean>>;
 
@@ -111,6 +112,7 @@ export const PRIVILEGE_CATALOG: PrivilegeCatalogItem[] = [
   { key: 'settings:wptype', group: 'Settings', label: 'Manage work package types' },
   { key: 'settings:taxonomy', group: 'Settings', label: 'Manage reference taxonomies' },
   { key: 'settings:privileges', group: 'Settings', label: 'Manage the privilege matrix' },
+  { key: 'settings:notifications', group: 'Settings', label: 'Manage notification event configuration' },
 ];
 
 export const PRIVILEGE_KEYS: PrivilegeKey[] = PRIVILEGE_CATALOG.map((c) => c.key);
@@ -135,7 +137,7 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
     'user:create',
     'escalation:review',
     'timebooking:override',
-    'settings:taxonomy'
+    'settings:taxonomy', 'settings:notifications'
   ),
   Admin: grant(
     'task:create', 'task:relink_any', 'task:assign_any', 'task:reopen', 'task:inactivate',
@@ -146,7 +148,7 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
     'user:create', 'user:manage_roles',
     'escalation:review',
     'timebooking:override',
-    'settings:wptype', 'settings:taxonomy', 'settings:privileges'
+    'settings:wptype', 'settings:taxonomy', 'settings:privileges', 'settings:notifications'
   ),
   Manager: grant(
     'task:create', 'task:relink_any', 'task:assign_div', 'task:review_div',

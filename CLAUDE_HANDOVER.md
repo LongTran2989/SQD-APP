@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-15 (rev 15). Supersedes all previous versions.*
+*Last updated: 2026-06-16 (rev 16). Supersedes all previous versions.*
 
 ---
 
@@ -17,6 +17,48 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 ## 2. CURRENT IMPLEMENTATION STATUS
 
 ### Completed
+- **Configurable Notification Events Panel** (✅ **COMPLETE**, 2026-06-16 — branch `claude/zealous-bohr-3g1ch9`)
+  > **439 backend tests passing (+9 new in `notificationConfig.test.ts`). Backend `tsc --noEmit` clean (production code; pre-existing `notification.test.ts` strict-optional warnings only). Frontend `tsc`/ESLint clean for all new/changed files. Additive `NotificationEventConfig` model + reversible migration. Developer notes appended to `REALTIME_DEV_GUIDE.md` §§ 3.5, 7, 8.**
+
+  Admin/Director-configurable panel inside **Settings → Notifications** to control which notification event classes fire and whether all Managers in the recipient's division are CC'd. Enforced at the single `createNotifications` chokepoint with no changes to any trigger call site.
+
+  **New privilege key:** `settings:notifications` — granted to Director and Admin by default. Visible in the Privileges matrix (additive row). Does **not** carry an Admin floor (unlike `settings:privileges`).
+
+  **New DB model (`NotificationEventConfig`):** `eventKey String @id`, `enabled Boolean @default(true)`, `ccManagers Boolean @default(false)`, `updatedAt DateTime @updatedAt`, `updatedById Int?` (FK→User `ON DELETE SET NULL`). Not soft-delete protected (config artifact). Migration `backend/prisma/migrations/20260616000000_add_notification_event_config/`.
+
+  **7 configurable event keys** (maps `Notification.type` to independent knobs; `FEED_ACTIVITY` is split by `linkScope`):
+  `TASK_ASSIGNED`, `TASK_SUBMITTED`, `TASK_REVIEWED`, `FINDING_CREATED`, `ESCALATION_QUEUED`, `FEED_ACTIVITY_TASK`, `FEED_ACTIVITY_WP`.
+
+  **Backend (new files):**
+  - `services/notificationConfigService.ts` — `NOTIFICATION_EVENT_CATALOG` (7 items, labels/descriptions/group), `getEventConfigMap` (60s in-memory read cache, fail-open: returns all-enabled defaults on any DB error), `getAllConfigs` (GET endpoint), `upsertConfig` (validates key, upserts, clears cache, dual-writes `NOTIFICATION_CONFIG_UPDATED` AuditLog — **no FeedPost**, not task-scoped). Cache disabled under test (`NODE_ENV==='test'`).
+  - `controllers/notificationConfig.controller.ts` — `GET /` returns catalog + current values; `PUT /:eventKey` validates `{enabled:boolean, ccManagers:boolean}` body.
+  - `routes/notificationConfig.routes.ts` — both routes behind `requirePrivilege('settings:notifications')`.
+
+  **Backend (modified):**
+  - `services/notificationService.ts` — `createNotifications` chokepoint now: (1) loads config map, (2) filters out inputs whose event class is `enabled:false`, (3) for surviving inputs with `ccManagers:true`, batch-resolves Manager-role users in the recipient's division and appends synthetic CC inputs. CC expansion is best-effort (fail-safe: errors yield no CC, base notifications still send). Synthetic inputs flow through the existing exclude + de-dup loop, so the actor is excluded even if they are a Manager.
+  - `constants/privileges.ts` — new key + catalog entry + Director/Admin grants.
+  - `index.ts` — mounts `app.use('/api/settings/notification-config', notificationConfigRoutes)`.
+  - `prisma/seed.ts` — seeds 7 default rows (idempotent upsert).
+
+  **Frontend (new files):**
+  - `api/notificationConfigApi.ts` — `getNotificationConfig()`, `updateNotificationConfig(key, body)`.
+  - `components/settings/NotificationConfigSettings.tsx` — table with one row per event class: label, description, **Enabled** checkbox, **CC division managers** checkbox (disabled when event is off). Save button shows dirty count; per-row updates sent sequentially. Admin/Director guard with lock screen. Privilege-based events (`FINDING_CREATED`, `ESCALATION_QUEUED`) show a note linking to the Privileges tab.
+  - `types/index.ts` — `NotificationEventCatalogItem`, `NotificationEventConfig` interfaces.
+
+  **Frontend (modified):**
+  - `app/dashboard/settings/page.tsx` — `SettingsTab` union + `Bell` tab (show: `isAdminDirector`), `resolveTab` guard for `'notifications'`, tab content render.
+
+  **Boundary (intentional):** disabling `ESCALATION_QUEUED` silences the **inbox notification** only. The separate red-bell `emitRealtimeEvent({kind:'escalation'})` is a different realtime signal unaffected by this config.
+
+  **Tests (`notificationConfig.test.ts`, 9 tests):**
+  - Fail-open: no config rows → events still fire.
+  - `enabled:false` → no `Notification` rows written.
+  - `ccManagers:true` → all Managers in the assignee's division notified; other divisions not.
+  - Actor-exclusion holds even when actor is a CC-eligible Manager.
+  - `GET` returns catalog + 7 configs to authorised user.
+  - `PUT` persists row + writes `NOTIFICATION_CONFIG_UPDATED` AuditLog.
+  - Invalid event key → 400. Non-boolean body → 400. Staff → 403.
+
 - **Settings Hub & UI Restructuring** (✅ **COMPLETE**, 2026-06-15 — branch `claude/settings-user-management-3661zs`)
   > **Backend `tsc --noEmit` clean. No schema change. No new backend tests (no new status-machine logic). Frontend: all modified files type-clean.**
 
@@ -394,6 +436,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
 ### Test Suite
+- **Configurable Notification Events Panel (branch `claude/zealous-bohr-3g1ch9`, 2026-06-16): 439 backend tests passing.** +9 new tests in `notificationConfig.test.ts` (fail-open, disable, CC managers, actor-exclude, REST guard, audit, validation). Backend `tsc --noEmit` clean for all production files; pre-existing `notification.test.ts` strict-optional warnings are unchanged. Frontend `tsc`/ESLint clean for all new/modified files.
 - **Settings Hub & UI Restructuring (branch `claude/settings-user-management-3661zs`, 2026-06-15):** No new backend tests (no new status-machine logic). Backend `tsc --noEmit` clean. Prior baseline is 423 tests on `claude/exciting-rubin-hqkxma` — run `npm test` locally to confirm no regressions before merging.
 - **423 backend tests on branch `claude/exciting-rubin-hqkxma` (Task Slice Review, 2026-06-14): all 423 passing.** +2 new regression tests (T04c cross-division assignee on create, T54a issuer-transfer role restriction). New `contractSync.test.ts` suite validates frontend/backend literal parity. Frontend `tsc --noEmit` clean for all modified files.
 - **Branch `claude/exciting-darwin-gyohuf` (Phase 7 Deferred Items, 2026-06-12): backend `tsc --noEmit` clean; tests could not be executed in the remote build container (no PostgreSQL). Run `npm test` locally against `sqd_qa_test_db` to verify baseline 381 tests still pass before merging.**
@@ -1139,6 +1182,7 @@ All changes needed before Phase 5 development begins:
 | **NEW** | CREATE model | `WpType` (DB table, Admin-extensible — not hardcoded enum) |
 | **NEW** | CREATE model | `PrivilegeConfig` (Phase 7 — stores Admin-configurable role permissions) |
 | **NEW** | CREATE model | `Attachment` — `fileName`, `fileType`, `fileSize`, `storageKey`, `entityType`, `entityId`, `uploadedById` |
+| **NEW (2026-06-16)** | CREATE model | `NotificationEventConfig` — `eventKey String @id`, `enabled Boolean`, `ccManagers Boolean`, `updatedAt DateTime`, `updatedById Int?`. Admin-configurable per-event notification switches. Not soft-delete protected. Migration `20260616000000_add_notification_event_config`. |
 
 ---
 
