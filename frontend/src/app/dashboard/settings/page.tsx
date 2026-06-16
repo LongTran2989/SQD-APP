@@ -3,14 +3,15 @@
 import { useEffect } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Settings, User, Users, Tags, ShieldCheck } from 'lucide-react';
+import { Settings, User, Users, Tags, ShieldCheck, Database } from 'lucide-react';
 import { useAuthStore } from '../../../store/authStore';
 import AccountSettings from '../../../components/settings/AccountSettings';
 import UserManagementSettings from '../../../components/settings/UserManagementSettings';
 import TaxonomySettings from '../../../components/settings/TaxonomySettings';
 import PrivilegesSettings from '../../../components/settings/PrivilegesSettings';
+import ReferenceDataSettings from '../../../components/settings/ReferenceDataSettings';
 
-type SettingsTab = 'my-account' | 'user-management' | 'taxonomy' | 'privileges';
+type SettingsTab = 'my-account' | 'user-management' | 'taxonomy' | 'privileges' | 'reference-data';
 
 const ADMIN_DIRECTOR = ['Admin', 'Director'];
 const ADMIN_ONLY = ['Admin'];
@@ -31,7 +32,7 @@ export default function SettingsPage() {
   // Clamp to valid + accessible tab.
   const resolveTab = (t: SettingsTab | null): SettingsTab => {
     if (!t) return defaultTab;
-    if (t === 'privileges' && !isAdmin) return defaultTab;
+    if ((t === 'privileges' || t === 'reference-data') && !isAdmin) return defaultTab;
     if ((t === 'user-management' || t === 'taxonomy') && !isAdminDirector) return 'my-account';
     return t;
   };
@@ -50,10 +51,11 @@ export default function SettingsPage() {
   };
 
   const tabs: { key: SettingsTab; label: string; Icon: LucideIcon; show: boolean }[] = [
-    { key: 'my-account',       label: 'My Account',       Icon: User,       show: true },
-    { key: 'user-management',  label: 'User Management',  Icon: Users,      show: isAdminDirector },
-    { key: 'taxonomy',         label: 'Taxonomy',         Icon: Tags,       show: isAdminDirector },
+    { key: 'my-account',       label: 'My Account',       Icon: User,        show: true },
+    { key: 'user-management',  label: 'User Management',  Icon: Users,       show: isAdminDirector },
+    { key: 'taxonomy',         label: 'Taxonomy',         Icon: Tags,        show: isAdminDirector },
     { key: 'privileges',       label: 'Privileges',       Icon: ShieldCheck, show: isAdmin },
+    { key: 'reference-data',   label: 'Reference Data',   Icon: Database,    show: isAdmin },
   ];
 
   return (
@@ -93,6 +95,7 @@ export default function SettingsPage() {
       {activeTab === 'user-management' && <UserManagementSettings />}
       {activeTab === 'taxonomy'        && <TaxonomySettings />}
       {activeTab === 'privileges'      && <PrivilegesSettings />}
+      {activeTab === 'reference-data'  && <ReferenceDataSettings />}
     </div>
   );
 }

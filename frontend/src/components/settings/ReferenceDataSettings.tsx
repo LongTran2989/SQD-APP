@@ -1,11 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Database, Plus, Pencil, Trash2, Loader2, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuthStore } from '../../../store/authStore';
-import { apiErrorMessage } from '../../../api/errorMessage';
-import SearchableSelect from '../../../components/ui/SearchableSelect';
+import { apiErrorMessage } from '../../api/errorMessage';
+import SearchableSelect from '../ui/SearchableSelect';
 import {
   listRefDepartments, createRefDepartment, updateRefDepartment, deleteRefDepartment,
   listRefOperators, createRefOperator, updateRefOperator, deleteRefOperator,
@@ -13,21 +12,16 @@ import {
   listRefAircraftTypes, createRefAircraftType, deleteRefAircraftType,
   listRefRegistrations, createRefRegistration, updateRefRegistration, deleteRefRegistration,
   listRefAuthorizationTypes, createRefAuthorizationType, updateRefAuthorizationType, deleteRefAuthorizationType,
-} from '../../../api/referenceDataApi';
-import {
-  Operator, Authority, AircraftType, AircraftRegistration, AuthorizationType,
-} from '../../../types';
+} from '../../api/referenceDataApi';
+import { Operator, Authority, AircraftType } from '../../types';
 
 type Row = Record<string, unknown>;
 
 interface ColumnDef { key: string; header: string; mono?: boolean }
-// A field on the add/edit form. `kind` 'select' renders a SearchableSelect whose
-// options are resolved at render time from the loaded reference lists.
 interface FieldDef {
   key: string;
   label: string;
   required?: boolean;
-  // Identifier (PK) fields cannot be edited once created.
   pkField?: boolean;
   kind?: 'text' | 'select';
   selectSource?: 'operators' | 'authorities' | 'aircraftTypes';
@@ -37,11 +31,8 @@ interface FieldDef {
 interface TabConfig {
   id: string;
   label: string;
-  /** PK column key — used as React key and identifier in update/delete calls. */
   idKey: string;
-  /** True when the entity supports editing (false for code-PK aircraft types). */
   editable: boolean;
-  /** Soft-delete entities show a gentler confirm copy. */
   softDelete?: boolean;
   columns: ColumnDef[];
   fields: FieldDef[];
@@ -163,22 +154,16 @@ const TABS: TabConfig[] = [
   },
 ];
 
-export default function ReferenceDataPage() {
-  const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === 'Admin';
-
+export default function ReferenceDataSettings() {
   const [activeTab, setActiveTab] = useState(TABS[0].id);
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
 
-  // Reference lists for select fields (operators/authorities/types on the
-  // registration form).
   const [operators, setOperators] = useState<Operator[]>([]);
   const [authorities, setAuthorities] = useState<Authority[]>([]);
   const [aircraftTypes, setAircraftTypes] = useState<AircraftType[]>([]);
 
-  // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -195,26 +180,15 @@ export default function ReferenceDataPage() {
   }, [tab]);
 
   useEffect(() => {
-    if (!isAdmin) return;
     setQuery('');
     loadRows();
-  }, [isAdmin, loadRows]);
+  }, [loadRows]);
 
-  // Load select sources once (used by the registration form).
   useEffect(() => {
-    if (!isAdmin) return;
     listRefOperators().then(setOperators).catch(() => {});
     listRefAuthorities().then(setAuthorities).catch(() => {});
     listRefAircraftTypes().then(setAircraftTypes).catch(() => {});
-  }, [isAdmin]);
-
-  if (!isAdmin) {
-    return (
-      <div className="p-8">
-        <p className="text-slate-500">Reference Data management is available to Admins only.</p>
-      </div>
-    );
-  }
+  }, []);
 
   const openCreate = () => {
     setEditingId(null);
@@ -234,7 +208,6 @@ export default function ReferenceDataPage() {
   };
 
   const handleSave = async () => {
-    // Required-field validation
     for (const f of tab.fields) {
       if (f.required && !((form[f.key] ?? '').trim())) {
         toast.error(`${f.label} is required`);
@@ -252,7 +225,6 @@ export default function ReferenceDataPage() {
       }
       setModalOpen(false);
       loadRows();
-      // refresh select sources if we changed one of them
       if (tab.id === 'operators') listRefOperators().then(setOperators).catch(() => {});
       if (tab.id === 'authorities') listRefAuthorities().then(setAuthorities).catch(() => {});
       if (tab.id === 'aircraft-types') listRefAircraftTypes().then(setAircraftTypes).catch(() => {});
@@ -293,18 +265,8 @@ export default function ReferenceDataPage() {
     : rows;
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
-          <Database className="w-5 h-5 text-blue-600" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Reference Data</h1>
-          <p className="text-sm text-slate-500">Manage departments and aviation reference tables.</p>
-        </div>
-      </div>
-
-      {/* Tabs */}
+    <div className="px-8 py-6">
+      {/* Sub-tabs */}
       <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4">
         {TABS.map((t) => (
           <button
