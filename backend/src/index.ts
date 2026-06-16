@@ -21,6 +21,7 @@ import analyticsRoutes from './routes/analytics.routes';
 import privilegeRoutes from './routes/privilege.routes';
 import notificationRoutes from './routes/notification.routes';
 import realtimeRoutes from './routes/realtime.routes';
+import referenceDataRoutes from './routes/referenceData.routes';
 import { startRealtimeListener } from './realtime/pgEvents';
 import { purgeOldNotifications } from './services/notificationService';
 
@@ -29,7 +30,7 @@ dotenv.config();
 import { prisma } from './lib/prisma';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 // Auth now rides an httpOnly cookie, so CORS must allow credentials and name an
 // explicit origin (a wildcard origin is incompatible with credentialed
@@ -54,6 +55,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/settings/privileges', privilegeRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/events', realtimeRoutes);
+app.use('/api/admin/reference-data', referenceDataRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {

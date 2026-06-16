@@ -647,6 +647,23 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
       createTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
     );
 
+    // Notify the initial assignee if one was provided at creation time (best-effort,
+    // post-commit). Skips self-assignment (actor is in the exclude list).
+    if (assignedToUserId) {
+      await createNotifications(
+        prisma,
+        [{
+          userId: assignedToUserId,
+          type: 'TASK_ASSIGNED',
+          title: 'New task assigned to you',
+          body: `${task.taskId} was assigned to you.`,
+          linkScope: 'TASK',
+          linkId: task.id,
+        }],
+        [userId]
+      );
+    }
+
     res.status(201).json(enrichTask(task, req.user!));
   } catch (error) {
     if (isHttpError(error)) {

@@ -1,5 +1,5 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-14 (rev 14). Supersedes all previous versions.*
+*Last updated: 2026-06-15 (rev 15). Supersedes all previous versions.*
 
 ---
 
@@ -17,6 +17,40 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 ## 2. CURRENT IMPLEMENTATION STATUS
 
 ### Completed
+- **Settings Hub & UI Restructuring** (✅ **COMPLETE**, 2026-06-15 — branch `claude/settings-user-management-3661zs`)
+  > **Backend `tsc --noEmit` clean. No schema change. No new backend tests (no new status-machine logic). Frontend: all modified files type-clean.**
+
+  Consolidated scattered top-level pages (User Management, Taxonomy, Privileges) into a single tabbed Settings hub; added self-service profile editing (email + phone); extracted Quick Task as a tab inside Create Task.
+
+  **Backend:**
+  - **`PATCH /api/users/me/profile`** (new endpoint in `user.controller.ts` + `user.routes.ts`): self-service email and phone update. Validates email format (`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`) + uniqueness (allowing same email as current user). Phone must match `/^\d{1,12}$/` (digits only, max 12). Soft-delete guard (`where: { deletedAt: null }`). Returns `{ message, user: { id, email, phone } }`.
+
+  **Frontend — new files:**
+  - `frontend/src/components/settings/AccountSettings.tsx` — My Account tab: inline Edit/Save for email and phone; phone strips non-digits live (`v.replace(/\D/g, '').slice(0, 12)`); Change Password section; `forcePasswordChange` banner when applicable.
+  - `frontend/src/components/settings/UserManagementSettings.tsx` — lifted from deleted `app/dashboard/users/page.tsx`; import paths corrected (4→2 levels); export renamed; header uses `h2`.
+  - `frontend/src/components/settings/TaxonomySettings.tsx` — lifted from deleted `app/dashboard/settings/taxonomy/page.tsx`; import paths corrected; export renamed.
+  - `frontend/src/components/settings/PrivilegesSettings.tsx` — lifted from deleted `app/dashboard/settings/privileges/page.tsx`; import paths corrected; export renamed; retains `window.location.reload()` on publish.
+  - `frontend/src/components/tasks/QuickTaskForm.tsx` — extracted Quick Task form as a standalone component; calls `createQuickTask` from `taskApi`; navigates to task detail on success.
+
+  **Frontend — modified files:**
+  - `frontend/src/app/dashboard/settings/page.tsx` — full rewrite into a tabbed hub. Tab routing via `?tab=` query param (`useSearchParams` + `router.replace/push`). Tabs: `my-account` (all roles), `user-management` (Admin/Director), `taxonomy` (Admin/Director), `privileges` (Admin only). Default tab for Admin/Director: `user-management`; for everyone else: `my-account`. Uses `LucideIcon` type for tab icon props (avoids importing React namespace).
+  - `frontend/src/app/dashboard/tasks/new/page.tsx` — added "From Template" / "Quick Task" tabs driven by `?mode=` query param. Tabs shown only when `canQuickTask && !prefilledWpId`. Quick Task tab renders `QuickTaskForm`; Template tab (or wp-prefill) renders `TaskCreateForm`.
+  - `frontend/src/app/dashboard/tasks/page.tsx` — removed Quick Task button and modal entirely. Header now has a single "Create Task" button linking to `/dashboard/tasks/new`.
+  - `frontend/src/components/layout/Sidebar.tsx` — removed User Management, Taxonomy, and Privileges nav items. Settings is the single entry point for all of these.
+  - `frontend/src/api/userApi.ts` — added `updateMyProfile` function.
+  - `frontend/src/store/authStore.ts` — added `updateProfile` action (merges `email`/`phone` into the stored user without a full re-fetch).
+  - `frontend/src/types/index.ts` — added `phone?: string | null` to the `User` interface.
+
+  **Deleted files:**
+  - `frontend/src/app/dashboard/users/page.tsx`
+  - `frontend/src/app/dashboard/settings/taxonomy/page.tsx`
+  - `frontend/src/app/dashboard/settings/privileges/page.tsx`
+
+  **Design decisions:**
+  - Query-param tab routing (not sub-routes) keeps the Settings sidebar item always-active and avoids new route segments.
+  - `LucideIcon` type (not `React.ReactNode`) for tab icons because Next.js 15 uses automatic JSX transform — importing the React namespace solely for its types is unnecessary.
+  - Phone validation: digits only, max 12 — enforced identically on both backend (`/^\d{1,12}$/`) and frontend (live strip + same regex on submit).
+
 - **Task Slice Code Review, Security Review & Architectural Improvements** (✅ **COMPLETE**, 2026-06-14 — branch `claude/exciting-rubin-hqkxma`)
   > **423 backend tests passing (+ 2 new regression tests). `tsc --noEmit` clean for all modified files. See `CODE_REVIEW_AUDIT_LOG.md` for the complete finding-by-finding record.**
 
@@ -360,6 +394,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
 ### Test Suite
+- **Settings Hub & UI Restructuring (branch `claude/settings-user-management-3661zs`, 2026-06-15):** No new backend tests (no new status-machine logic). Backend `tsc --noEmit` clean. Prior baseline is 423 tests on `claude/exciting-rubin-hqkxma` — run `npm test` locally to confirm no regressions before merging.
 - **423 backend tests on branch `claude/exciting-rubin-hqkxma` (Task Slice Review, 2026-06-14): all 423 passing.** +2 new regression tests (T04c cross-division assignee on create, T54a issuer-transfer role restriction). New `contractSync.test.ts` suite validates frontend/backend literal parity. Frontend `tsc --noEmit` clean for all modified files.
 - **Branch `claude/exciting-darwin-gyohuf` (Phase 7 Deferred Items, 2026-06-12): backend `tsc --noEmit` clean; tests could not be executed in the remote build container (no PostgreSQL). Run `npm test` locally against `sqd_qa_test_db` to verify baseline 381 tests still pass before merging.**
 - **381 backend tests on branch `claude/eloquent-gauss-3lonuo` (Phase 7 — Global Privilege Management, 2026-06-12): all 381 passing.** +11 new tests in `privilege.test.ts`. `DEFAULT_PRIVILEGES` fallback guarantees all prior 370 tests pass without `PrivilegeConfig` seeds. Frontend `tsc --noEmit` and `next build` clean.

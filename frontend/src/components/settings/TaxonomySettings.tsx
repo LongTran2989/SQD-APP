@@ -3,21 +3,16 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Tags, Plus, Pencil, Lock, Loader2, AlertTriangle, Check, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuthStore } from '../../../../store/authStore';
-import { apiErrorMessage } from '../../../../api/errorMessage';
+import { useAuthStore } from '../../store/authStore';
+import { apiErrorMessage } from '../../api/errorMessage';
 import {
   listWpTypes, createWpType, updateWpType,
   listEventTypes, createEventType, updateEventType,
   listAtaChapters, createAtaChapter, updateAtaChapter,
   listCauseCodes, createCauseCode, updateCauseCode,
   listHazardTags, createHazardTag, updateHazardTag,
-} from '../../../../api/taxonomyApi';
+} from '../../api/taxonomyApi';
 
-// ─── Generic row + config model ───────────────────────────────────────────────
-// Each taxonomy is a flat record with a numeric id and an isActive flag. The
-// page is fully config-driven: a single table + modal render every taxonomy by
-// reading its column and field definitions, so adding a sixth taxonomy later is
-// just one more entry in TAXONOMIES.
 type Row = { id: number; isActive: boolean } & Record<string, unknown>;
 
 interface ColumnDef { key: string; header: string; mono?: boolean }
@@ -26,7 +21,6 @@ interface FieldDef { key: string; label: string; required?: boolean }
 interface TaxonomyConfig {
   id: string;
   label: string;
-  // The privilege the backend enforces for writes — drives the access hint only.
   writePrivilege: 'settings:taxonomy' | 'settings:wptype';
   columns: ColumnDef[];
   fields: FieldDef[];
@@ -35,9 +29,6 @@ interface TaxonomyConfig {
   update: (id: number, payload: Record<string, unknown>) => Promise<Row>;
 }
 
-// The concrete taxonomy interfaces (WpType, EventType, …) are structurally a
-// superset of Row at runtime but lack its index signature, so TS won't narrow
-// them directly. These bridges localise the one unavoidable cast.
 const asRows = <T,>(p: Promise<T[]>): Promise<Row[]> => p as unknown as Promise<Row[]>;
 const asRow = <T,>(p: Promise<T>): Promise<Row> => p as unknown as Promise<Row>;
 
@@ -128,7 +119,6 @@ const TAXONOMIES: TaxonomyConfig[] = [
   },
 ];
 
-// ─── Upsert modal ─────────────────────────────────────────────────────────────
 interface UpsertModalProps {
   config: TaxonomyConfig;
   editing: Row | null;
@@ -158,7 +148,6 @@ function UpsertModal({ config, editing, onClose, onSaved }: UpsertModalProps) {
     setSaving(true);
     try {
       if (editing) {
-        // Only send fields that changed; always permitted via the upsert PUT.
         const payload: Record<string, unknown> = {};
         for (const f of config.fields) payload[f.key] = form[f.key];
         await config.update(editing.id, payload);
@@ -226,11 +215,8 @@ function UpsertModal({ config, editing, onClose, onSaved }: UpsertModalProps) {
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
-export default function TaxonomyPage() {
+export default function TaxonomySettings() {
   const user = useAuthStore((s) => s.user);
-  // Default holders of settings:taxonomy / settings:wptype. Backend enforces the
-  // real privilege per action; this just gates page entry like the rest of the app.
   const canAccess = user?.role === 'Admin' || user?.role === 'Director';
 
   const [activeTab, setActiveTab] = useState(0);
@@ -280,14 +266,13 @@ export default function TaxonomyPage() {
 
   return (
     <div className="p-8">
-      {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
             <Tags className="w-6 h-6 text-blue-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-800">Taxonomy Management</h1>
+            <h2 className="text-xl font-bold text-slate-800">Taxonomy Management</h2>
             <p className="text-sm text-slate-500">Manage reference data used across findings and work packages</p>
           </div>
         </div>
@@ -300,7 +285,6 @@ export default function TaxonomyPage() {
         </button>
       </div>
 
-      {/* Tabs */}
       <div className="flex items-center gap-1 mb-4 border-b border-slate-200">
         {TAXONOMIES.map((t, i) => (
           <button
@@ -324,7 +308,6 @@ export default function TaxonomyPage() {
         </div>
       )}
 
-      {/* Table */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-slate-400">
@@ -399,7 +382,6 @@ export default function TaxonomyPage() {
         )}
       </div>
 
-      {/* Upsert modal */}
       {modal.open && (
         <UpsertModal
           config={config}

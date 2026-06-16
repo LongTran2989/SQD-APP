@@ -19,6 +19,7 @@ model Department {
   findings  Finding[]  @relation("FindingDepartment")
   responseActionTargets FindingResponseActionDepartment[] @relation("ResponseActionDepts")
   targetedWorkPackages  WorkPackage[]                     @relation("WorkPackageTargetDepartment")
+  deletedAt DateTime?  // Soft delete — Department is referenced by compliance records (Findings, WPs)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 }
@@ -110,41 +111,55 @@ model User {
 // Aircraft (Authorization + Registration)
 // -----------------------------------------------------------------------
 
+model Operator {
+  iataCode      String                 @id
+  name          String
+  registrations AircraftRegistration[]
+}
+
+model Authority {
+  code          String                 @id
+  fullName      String
+  registrations AircraftRegistration[]
+}
+
 model AircraftType {
-  id             Int                         @id @default(autoincrement())
-  iataCode       String                      @unique // e.g. 737, 320
-  icaoCode       String                      @unique // e.g. B737, A320
-  manufacturer   String // e.g. Boeing, Airbus
-  model          String // e.g. 737-800, A320neo
+  code           String                      @id // e.g. A320, B737, ATR72
   registrations  AircraftRegistration[]
   authorizations UserAircraftAuthorization[]
   createdAt      DateTime                    @default(now())
 }
 
 model AircraftRegistration {
-  id             Int          @id @default(autoincrement())
-  registration   String       @unique // e.g. VN-A361
-  operator       String // e.g. Vietnam Airlines
-  authority      String // e.g. CAAV
-  aircraftTypeId Int
-  aircraftType   AircraftType @relation(fields: [aircraftTypeId], references: [id])
-  createdAt      DateTime     @default(now())
+  registration     String        @id
+  description      String?
+  serialNumber     String?
+  status           String        @default("Active")
+  aircraftTypeCode String?
+  aircraftType     AircraftType? @relation(fields: [aircraftTypeCode], references: [code])
+  operatorCode     String?
+  operator         Operator?     @relation(fields: [operatorCode], references: [iataCode])
+  authorityCode    String?
+  authority        Authority?    @relation(fields: [authorityCode], references: [code])
+  findings         Finding[]
+  createdAt        DateTime      @default(now())
 }
 
 model UserAircraftAuthorization {
-  id             Int          @id @default(autoincrement())
-  userId         Int
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  aircraftTypeId Int
-  aircraftType   AircraftType @relation(fields: [aircraftTypeId], references: [id], onDelete: Cascade)
+  id               Int          @id @default(autoincrement())
+  userId           Int
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aircraftTypeCode String
+  aircraftType     AircraftType @relation(fields: [aircraftTypeCode], references: [code], onDelete: Cascade)
 
-  @@unique([userId, aircraftTypeId])
+  @@unique([userId, aircraftTypeCode])
 }
 
 model AuthorizationType {
   id             Int                    @id @default(autoincrement())
-  code           String                 @unique // e.g. INSPECTOR, MECHANIC
+  code           String                 @unique
   description    String?
+  category       String?
   authorizations UserJobAuthorization[]
 }
 
@@ -300,7 +315,8 @@ model Finding {
   fieldId              String?
   dueDate              DateTime?
   eventType            String
-  aircraftRegistration String?
+  aircraftRegistrationCode String?
+  aircraftRegistration AircraftRegistration? @relation(fields: [aircraftRegistrationCode], references: [registration])
   regulatoryReference  String?
   // @deprecated superseded by structured RCA + CAPA
   errorCode        String?

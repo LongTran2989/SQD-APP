@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
 import { TaskEnriched, TaskStatus, DeadlineStatus } from '../../../types';
-import { getTasks, getMyTasks, getUnassignedTasks, selfAssignTask, createQuickTask } from '../../../api/taskApi';
+import { getTasks, getMyTasks, getUnassignedTasks, selfAssignTask } from '../../../api/taskApi';
 import { updateMyPreferences } from '../../../api/userApi';
 import TaskStatusBadge, { STATUS_CONFIG } from '../../../components/tasks/TaskStatusBadge';
 import toast from 'react-hot-toast';
@@ -115,15 +115,6 @@ export default function TaskListPage() {
   const [loading, setLoading] = useState(true);
   const [selfAssigning, setSelfAssigning] = useState<number | null>(null);
 
-  // Quick Task modal
-  const [showQuickTask, setShowQuickTask] = useState(false);
-  const [qtTitle, setQtTitle] = useState('');
-  const [qtNote, setQtNote] = useState('');
-  const [qtDeadline, setQtDeadline] = useState('');
-  const [qtSkillLevel, setQtSkillLevel] = useState(0);
-  const [qtRequiresApproval, setQtRequiresApproval] = useState(true);
-  const [qtSubmitting, setQtSubmitting] = useState(false);
-
   // ── Fetch on tab change ──
   const fetchTasks = useCallback(async () => {
     setLoading(true);
@@ -198,28 +189,6 @@ export default function TaskListPage() {
 
   const canCreateTask = user && TASK_CREATOR_ROLES.includes(user.role);
 
-  const handleQuickTaskSubmit = async () => {
-    if (!qtTitle.trim()) { toast.error('Title is required'); return; }
-    setQtSubmitting(true);
-    try {
-      const task = await createQuickTask({
-        title: qtTitle.trim(),
-        issuanceNote: qtNote.trim() || undefined,
-        deadline: qtDeadline || undefined,
-        skillLevel: qtSkillLevel,
-        requiresApproval: qtRequiresApproval,
-      });
-      toast.success(`Quick task ${task.taskId} created`);
-      setShowQuickTask(false);
-      setQtTitle(''); setQtNote(''); setQtDeadline(''); setQtSkillLevel(0); setQtRequiresApproval(true);
-      router.push(`/dashboard/tasks/${task.id}`);
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to create quick task');
-    } finally {
-      setQtSubmitting(false);
-    }
-  };
-
   // ─── Loading state ───────────────────────────────────────────────────────────
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -231,23 +200,13 @@ export default function TaskListPage() {
           <p className="text-slate-500 mt-1">Manage and track QA audit tasks</p>
         </div>
         {canCreateTask && (
-          <div className="flex items-center gap-2">
-            <button
-              id="quick-task-button"
-              onClick={() => setShowQuickTask(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl shadow-sm transition-all"
-            >
-              <Zap className="w-5 h-5" />
-              Quick Task
-            </button>
-            <Link
-              href="/dashboard/tasks/new"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all"
-            >
-              <Plus className="w-5 h-5" />
-              New Task
-            </Link>
-          </div>
+          <Link
+            href="/dashboard/tasks/new"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all"
+          >
+            <Plus className="w-5 h-5" />
+            Create Task
+          </Link>
         )}
       </div>
 
@@ -587,59 +546,6 @@ export default function TaskListPage() {
         )}
       </div>
 
-      {/* Quick Task modal */}
-      {showQuickTask && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                <Zap className="w-4 h-4 text-amber-500" /> Quick Task
-              </h3>
-              <button onClick={() => setShowQuickTask(false)} className="text-slate-400 hover:text-slate-600 text-sm">Close</button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-title">Title *</label>
-                <input id="qt-title" type="text" value={qtTitle} onChange={(e) => setQtTitle(e.target.value)}
-                  placeholder="What needs doing?"
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-note">Instruction / Note</label>
-                <textarea id="qt-note" rows={3} value={qtNote} onChange={(e) => setQtNote(e.target.value)}
-                  placeholder="Optional context or guidance"
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-deadline">Deadline</label>
-                  <input id="qt-deadline" type="date" value={qtDeadline} min={new Date().toISOString().split('T')[0]}
-                    onChange={(e) => setQtDeadline(e.target.value)}
-                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-skill">Skill Level</label>
-                  <select id="qt-skill" value={qtSkillLevel} onChange={(e) => setQtSkillLevel(Number(e.target.value))}
-                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
-                    {[0, 1, 2, 3, 4].map((l) => <option key={l} value={l}>Level {l}</option>)}
-                  </select>
-                </div>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={qtRequiresApproval} onChange={(e) => setQtRequiresApproval(e.target.checked)} className="w-4 h-4 text-blue-600 rounded" />
-                <span className="text-sm font-medium text-slate-700">Requires Approval</span>
-              </label>
-            </div>
-            <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
-              <button onClick={() => setShowQuickTask(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancel</button>
-              <button onClick={handleQuickTaskSubmit} disabled={qtSubmitting}
-                className="px-4 py-2 text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-xl disabled:opacity-50">
-                {qtSubmitting ? 'Creating…' : 'Issue Task'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

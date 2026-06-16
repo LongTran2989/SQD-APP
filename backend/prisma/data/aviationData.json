@@ -1,0 +1,4080 @@
+{
+  "operators": [
+    {
+      "iataCode": "5J",
+      "name": "Cebu Pacific"
+    },
+    {
+      "iataCode": "3U",
+      "name": "Sichuan Airlines"
+    },
+    {
+      "iataCode": "9G",
+      "name": "Sun Phu Quoc Airways"
+    },
+    {
+      "iataCode": "AK",
+      "name": "AirAsia"
+    },
+    {
+      "iataCode": "BL",
+      "name": "Pacific Airlines"
+    },
+    {
+      "iataCode": "BX",
+      "name": "Air Busan"
+    },
+    {
+      "iataCode": "K6",
+      "name": "Cambodia Angkor Air"
+    },
+    {
+      "iataCode": "KE",
+      "name": "Korean Air"
+    },
+    {
+      "iataCode": "LH",
+      "name": "Lufthansa"
+    },
+    {
+      "iataCode": "LX",
+      "name": "Lanexang Airways"
+    },
+    {
+      "iataCode": "PAL",
+      "name": "Philippine Airlines"
+    },
+    {
+      "iataCode": "QH",
+      "name": "Bamboo Airways"
+    },
+    {
+      "iataCode": "QR",
+      "name": "Qatar Airways"
+    },
+    {
+      "iataCode": "2E",
+      "name": "ETF Airways"
+    },
+    {
+      "iataCode": "5F",
+      "name": "FLYONE"
+    },
+    {
+      "iataCode": "6Y",
+      "name": "SmartLynx Airlines"
+    },
+    {
+      "iataCode": "7L",
+      "name": "Silk Way West Airlines"
+    },
+    {
+      "iataCode": "AE",
+      "name": "Mandarin Airlines"
+    },
+    {
+      "iataCode": "B4",
+      "name": "Beond"
+    },
+    {
+      "iataCode": "BSA",
+      "name": "Bluesky Airways"
+    },
+    {
+      "iataCode": "CA",
+      "name": "Air China"
+    },
+    {
+      "iataCode": "CX",
+      "name": "Cathay Pacific"
+    },
+    {
+      "iataCode": "FD",
+      "name": "Thai AirAsia"
+    },
+    {
+      "iataCode": "FTAI",
+      "name": "FTAI Aviation"
+    },
+    {
+      "iataCode": "FWCAS",
+      "name": "FWCAS"
+    },
+    {
+      "iataCode": "GASL",
+      "name": "Genesis"
+    },
+    {
+      "iataCode": "HAI",
+      "name": "Hai Au Aviation"
+    },
+    {
+      "iataCode": "HTX",
+      "name": "Hai Au Aviation"
+    },
+    {
+      "iataCode": "MGW",
+      "name": "MIAT Mongolian Airlines"
+    },
+    {
+      "iataCode": "NH",
+      "name": "ANA All Nippon Airways"
+    },
+    {
+      "iataCode": "OZ",
+      "name": "Asiana Airlines"
+    },
+    {
+      "iataCode": "PTW",
+      "name": "Pattaya Airways"
+    },
+    {
+      "iataCode": "QV",
+      "name": "Lao Airlines"
+    },
+    {
+      "iataCode": "RF",
+      "name": "Aero K"
+    },
+    {
+      "iataCode": "RS",
+      "name": "Air Seoul"
+    },
+    {
+      "iataCode": "RYL",
+      "name": "Royal Air Philippines"
+    },
+    {
+      "iataCode": "SA",
+      "name": "Sun Air"
+    },
+    {
+      "iataCode": "T6",
+      "name": "AirSWIFT"
+    },
+    {
+      "iataCode": "TOK",
+      "name": "PNG Air"
+    },
+    {
+      "iataCode": "X9",
+      "name": "Avion Express"
+    },
+    {
+      "iataCode": "XFLY",
+      "name": "Nordica"
+    },
+    {
+      "iataCode": "VFC",
+      "name": "VASCO"
+    },
+    {
+      "iataCode": "VJ",
+      "name": "VietJet Air"
+    },
+    {
+      "iataCode": "VN",
+      "name": "Vietnam Airlines"
+    },
+    {
+      "iataCode": "VU",
+      "name": "Vietravel Airlines"
+    }
+  ],
+  "authorities": [
+    {
+      "code": "CAATWN",
+      "fullName": "Civil Aeronautics Administration Taiwan"
+    },
+    {
+      "code": "2-REG",
+      "fullName": "Guernsey Registry"
+    },
+    {
+      "code": "DCAL",
+      "fullName": "Department of Civil Aviation Laos"
+    },
+    {
+      "code": "MOLIT",
+      "fullName": "Ministry of Land, Infrastructure and Transport"
+    },
+    {
+      "code": "EASA",
+      "fullName": "European Union Aviation Safety Agency"
+    },
+    {
+      "code": "CAAM",
+      "fullName": "Civil Aviation Authority of Malaysia"
+    },
+    {
+      "code": "CAAV",
+      "fullName": "Civil Aviation Authority of Vietnam"
+    },
+    {
+      "code": "CF-HAN",
+      "fullName": "CF-HAN"
+    },
+    {
+      "code": "CAAP",
+      "fullName": "Civil Aviation Authority of the Philippines"
+    },
+    {
+      "code": "CAAT",
+      "fullName": "Civil Aviation Authority of Thailand"
+    },
+    {
+      "code": "MCAA",
+      "fullName": "Mongolian Civil Aviation Authority"
+    },
+    {
+      "code": "CAACI",
+      "fullName": "Civil Aviation Authority of the Cayman Islands"
+    },
+    {
+      "code": "SSCA",
+      "fullName": "State Secretariat of Civil Aviation"
+    }
+  ],
+  "aircraftTypes": [
+    "8X",
+    "A319",
+    "A320",
+    "A321",
+    "A330",
+    "A350",
+    "ATR72",
+    "B737",
+    "B747",
+    "B777",
+    "B787",
+    "C909",
+    "CARAVA",
+    "G650ER",
+    "G700"
+  ],
+  "authorizationTypes": [
+    {
+      "code": "A",
+      "description": "Category A",
+      "category": "License"
+    },
+    {
+      "code": "B1",
+      "description": "Category B1",
+      "category": "License"
+    },
+    {
+      "code": "B2",
+      "description": "Category B2",
+      "category": "License"
+    },
+    {
+      "code": "C",
+      "description": "Category C",
+      "category": "License"
+    },
+    {
+      "code": "AUD L1",
+      "description": "Auditor Level 1",
+      "category": "Auditor"
+    },
+    {
+      "code": "AUD L2",
+      "description": "Auditor Level 2",
+      "category": "Auditor"
+    },
+    {
+      "code": "SI",
+      "description": "Investigator",
+      "category": "Special"
+    },
+    {
+      "code": "PRT",
+      "description": "Proctor",
+      "category": "Special"
+    },
+    {
+      "code": "QCI",
+      "description": "Quality Control Inspector",
+      "category": "Special"
+    },
+    {
+      "code": "RII",
+      "description": "Required Inspection Item",
+      "category": "Special"
+    }
+  ],
+  "registrations": [
+    {
+      "registration": "00005",
+      "description": "FLYONE A320",
+      "serialNumber": "05934",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5F",
+      "authorityCode": null
+    },
+    {
+      "registration": "16851",
+      "description": "MANDARIN ATR72",
+      "serialNumber": "1460",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "AE",
+      "authorityCode": "CAATWN"
+    },
+    {
+      "registration": "16853",
+      "description": "MANDARIN ATR72",
+      "serialNumber": "1473",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "AE",
+      "authorityCode": "CAATWN"
+    },
+    {
+      "registration": "2-FWCA",
+      "description": "FWCAS A321 AIRCRAFT",
+      "serialNumber": "008577",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "FWCAS",
+      "authorityCode": "2-REG"
+    },
+    {
+      "registration": "2-FWCB",
+      "description": "FWCAS A321 AIRCRAFT",
+      "serialNumber": "008592",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "FWCAS",
+      "authorityCode": "2-REG"
+    },
+    {
+      "registration": "2-FWCC",
+      "description": "FWCAS A321 AIRCRAFT",
+      "serialNumber": "008906",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "FWCAS",
+      "authorityCode": "2-REG"
+    },
+    {
+      "registration": "2-FWCD",
+      "description": "FWCAS A321 AIRCRAFT",
+      "serialNumber": "008937",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "REMO",
+      "authorityCode": "2-REG"
+    },
+    {
+      "registration": "2-SSAG",
+      "description": "FTAI A320 AIRCRAFT",
+      "serialNumber": "5407",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "FTAI",
+      "authorityCode": "2-REG"
+    },
+    {
+      "registration": "34159",
+      "description": "LANEXANG AIRWAY ATR",
+      "serialNumber": null,
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "LX",
+      "authorityCode": "DCAL"
+    },
+    {
+      "registration": "34163",
+      "description": "LANEXANG ATR72",
+      "serialNumber": null,
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "LX",
+      "authorityCode": "DCAL"
+    },
+    {
+      "registration": "34228",
+      "description": "LAO AIRLINES ATR72",
+      "serialNumber": "1189",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "QV",
+      "authorityCode": null
+    },
+    {
+      "registration": "4K-BCH",
+      "description": "SILK WAY WEST B747",
+      "serialNumber": "30804",
+      "status": "Active",
+      "aircraftTypeCode": "B747",
+      "operatorCode": "7L",
+      "authorityCode": null
+    },
+    {
+      "registration": "7211",
+      "description": "AIR BUSAN A321",
+      "serialNumber": "7915",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "BX",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "7753",
+      "description": "AIR BUSAN A320",
+      "serialNumber": "2943",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "BX",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "8Q-FBA",
+      "description": "BEOND A320",
+      "serialNumber": "2119",
+      "status": "Active",
+      "aircraftTypeCode": "A319",
+      "operatorCode": "B4",
+      "authorityCode": null
+    },
+    {
+      "registration": "8Q-FBB",
+      "description": "BEOND A320",
+      "serialNumber": "1711",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "B4",
+      "authorityCode": null
+    },
+    {
+      "registration": "9A-ATR",
+      "description": "ETF AIRWAYS",
+      "serialNumber": "1387",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "2E",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "9H-MLE",
+      "description": "AVION EXPRESS",
+      "serialNumber": "4767",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "X9",
+      "authorityCode": null
+    },
+    {
+      "registration": "9H-MLO",
+      "description": "AVION EXPRESS",
+      "serialNumber": "5653",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "X9",
+      "authorityCode": null
+    },
+    {
+      "registration": "9H-MLW",
+      "description": "AVION EXPRESS A320",
+      "serialNumber": "02964",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "X9",
+      "authorityCode": null
+    },
+    {
+      "registration": "9H-MLX",
+      "description": "AVION EXPRESS",
+      "serialNumber": "4888",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "X9",
+      "authorityCode": null
+    },
+    {
+      "registration": "9H-MLY",
+      "description": "AVION EXPRESS",
+      "serialNumber": "3943",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "X9",
+      "authorityCode": null
+    },
+    {
+      "registration": "9M-AQI",
+      "description": "AIR ASIA BERHAD A320",
+      "serialNumber": "4486",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "AK",
+      "authorityCode": null
+    },
+    {
+      "registration": "9M-RAM",
+      "description": "AIR ASIA A320",
+      "serialNumber": "8795",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "AK",
+      "authorityCode": "CAAM"
+    },
+    {
+      "registration": "9M-RAT",
+      "description": "AIR ASIA BERHAD A320",
+      "serialNumber": "9130",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "AK",
+      "authorityCode": "CAAM"
+    },
+    {
+      "registration": "A129",
+      "description": "VIETRAVEL A321",
+      "serialNumber": "6672",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VU",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A136",
+      "description": "VIETRAVEL A320",
+      "serialNumber": "8696",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VU",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A138",
+      "description": "VIETRAVEL A321",
+      "serialNumber": "7596",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VU",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A227",
+      "description": "BAMBOO A321 AIRCRAFT",
+      "serialNumber": "05485",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "QH",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A238",
+      "description": "BLUESKY FALCON 2000S",
+      "serialNumber": "000744",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "BSA",
+      "authorityCode": null
+    },
+    {
+      "registration": "A278",
+      "description": "VIETRAVEL AIRLINES A321",
+      "serialNumber": "6376",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VU",
+      "authorityCode": null
+    },
+    {
+      "registration": "A279",
+      "description": "SUN PHU QUOC AIRWAYS A321",
+      "serialNumber": "8577",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "9G",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A280",
+      "description": "SUN PHU QUOC AIRWAYS A321",
+      "serialNumber": "8592",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "9G",
+      "authorityCode": null
+    },
+    {
+      "registration": "A281",
+      "description": "SUN PHU QUOC AIRWAYS A321",
+      "serialNumber": "12578",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "9G",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A282",
+      "description": "SUN PHU QUOC AIRWAYS A321",
+      "serialNumber": "12612",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "9G",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A284",
+      "description": "SUN PHU QUOC AIRWAYS A321",
+      "serialNumber": "12886",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "9G",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A285",
+      "description": "SUN PHU QUOC AIRWAYS",
+      "serialNumber": "12901",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "9G",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A286",
+      "description": "SUN PHU QUOC AIRWAYS A321",
+      "serialNumber": "12803",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "9G",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A288",
+      "description": "VIETRAVEL A321",
+      "serialNumber": "6979",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VU",
+      "authorityCode": null
+    },
+    {
+      "registration": "A289",
+      "description": "VIETRAVEL A321 AIRCRAFT",
+      "serialNumber": "006168",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VU",
+      "authorityCode": "CF-HAN"
+    },
+    {
+      "registration": "A298",
+      "description": "GULFSTREAM",
+      "serialNumber": "6498",
+      "status": "Active",
+      "aircraftTypeCode": "G650ER",
+      "operatorCode": "SA",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A323",
+      "description": "AIRBUS A321C A323",
+      "serialNumber": "004669",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A324",
+      "description": "AIRBUS A321C A324",
+      "serialNumber": "004703",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A325",
+      "description": "AIRBUS A321C A325",
+      "serialNumber": "004737",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A326",
+      "description": "AIRBUS A321C A326",
+      "serialNumber": "004783",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A327",
+      "description": "AIRBUS A321C A327",
+      "serialNumber": "004826",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A329",
+      "description": "AIRBUS A321C A329",
+      "serialNumber": "004863",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A331",
+      "description": "AIRBUS A321C A331",
+      "serialNumber": "004945",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A332",
+      "description": "AIRBUS A321C A332",
+      "serialNumber": "004971",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A334",
+      "description": "AIRBUS A321C A334",
+      "serialNumber": "005164",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A335",
+      "description": "AIRBUS A321C A335",
+      "serialNumber": "005241",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A336",
+      "description": "AIRBUS A321C A336",
+      "serialNumber": "005247",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A338",
+      "description": "AIRBUS A321C A338",
+      "serialNumber": "005251",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A339",
+      "description": "AIRBUS A321C A339",
+      "serialNumber": "005275",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A353",
+      "description": "AIRBUS A321C A353",
+      "serialNumber": "003022",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A354",
+      "description": "AIRBUS A321C A354",
+      "serialNumber": "003198",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "BL",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A356",
+      "description": "AIRBUS A321C A356",
+      "serialNumber": "003315",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A357",
+      "description": "AIRBUS A321C A357",
+      "serialNumber": "003355",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A358",
+      "description": "AIRBUS A321C A358",
+      "serialNumber": "003600",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A359",
+      "description": "AIRBUS A321C A359",
+      "serialNumber": "003737",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "BL",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A363",
+      "description": "AIRBUS A321C A363",
+      "serialNumber": "004136",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "BL",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A388",
+      "description": "AIRBUS A321C A388",
+      "serialNumber": "3397",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A389",
+      "description": "AIRBUS A320C A389",
+      "serialNumber": "005407",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VN",
+      "authorityCode": null
+    },
+    {
+      "registration": "A390",
+      "description": "AIRBUS A321C A390",
+      "serialNumber": "005297",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A392",
+      "description": "AIRBUS A321C A392",
+      "serialNumber": "005306",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A393",
+      "description": "AIRBUS A321C A393",
+      "serialNumber": "005340",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A395",
+      "description": "AIRBUS A321C A395",
+      "serialNumber": "005385",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A396",
+      "description": "AIRBUS A321C A396",
+      "serialNumber": "005392",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": null
+    },
+    {
+      "registration": "A397",
+      "description": "AIRBUS A321C A397",
+      "serialNumber": "005418",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A398",
+      "description": "AIRBUS A321C A398",
+      "serialNumber": "005427",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A399",
+      "description": "AIRBUS A321C A399",
+      "serialNumber": "005438",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A489",
+      "description": "HAIAU FALCON 8X",
+      "serialNumber": "000489",
+      "status": "Active",
+      "aircraftTypeCode": "8X",
+      "operatorCode": "HAI",
+      "authorityCode": null
+    },
+    {
+      "registration": "A499",
+      "description": "HAIAU FALCON 8X",
+      "serialNumber": "000447",
+      "status": "Active",
+      "aircraftTypeCode": "8X",
+      "operatorCode": "HAI",
+      "authorityCode": null
+    },
+    {
+      "registration": "A501",
+      "description": "AIRBUS A321N A501",
+      "serialNumber": "008669",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A503",
+      "description": "AIRBUS A321N A503",
+      "serialNumber": "008769",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A505",
+      "description": "AIRBUS A321N A505",
+      "serialNumber": "008924",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A506",
+      "description": "AIRBUS A321N A506",
+      "serialNumber": "008985",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A507",
+      "description": "AIRBUS A321N A507",
+      "serialNumber": "009051",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A508",
+      "description": "AIRBUS A321N A508",
+      "serialNumber": "009108",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A509",
+      "description": "AIRBUS A321N A509",
+      "serialNumber": "009161",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A510",
+      "description": "AIRBUS A321N A510",
+      "serialNumber": "009241",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A511",
+      "description": "AIRBUS A321N A511",
+      "serialNumber": "009242",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A512",
+      "description": "AIRBUS A321N A512",
+      "serialNumber": "009294",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A513",
+      "description": "AIRBUS A320N A513",
+      "serialNumber": "12148",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A514",
+      "description": "AIRBUS A320N A514",
+      "serialNumber": "12253",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A515",
+      "description": "AIRBUS A320N A515",
+      "serialNumber": "12298",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A521",
+      "description": "VIETJET A321",
+      "serialNumber": "09011",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A522",
+      "description": "VIETJET A321",
+      "serialNumber": "06615",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A523",
+      "description": "VIETJET A321",
+      "serialNumber": "9364",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A524",
+      "description": "VIETJET A321",
+      "serialNumber": "009401",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A525",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "11422",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A526",
+      "description": "VIETJET A321",
+      "serialNumber": "10434",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A527",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "10317",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A528",
+      "description": "VIETJET AIR A321NEO/PW1100",
+      "serialNumber": "10380",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A529",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "10441",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A530",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "11453",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A531",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "009059",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A532",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "006526",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A533",
+      "description": "VIETJET A321",
+      "serialNumber": "9515",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A534",
+      "description": "VIETJET A321NEO",
+      "serialNumber": "10084",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A535",
+      "description": "VIETJET A321NEO",
+      "serialNumber": "07003",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A536",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "11507",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A537",
+      "description": "VIETJET A321",
+      "serialNumber": "12080",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A538",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "11562",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A540",
+      "description": "VIETJET A321",
+      "serialNumber": "6673",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A542",
+      "description": "VIETJET A321",
+      "serialNumber": "07048",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A543",
+      "description": "VIETJET A321",
+      "serialNumber": "12241",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A544",
+      "description": "VIETJET A321",
+      "serialNumber": "07055",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A545",
+      "description": "VIETJET A321 NEO",
+      "serialNumber": "11107",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A546",
+      "description": "VIETJET A321",
+      "serialNumber": "12186",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A547",
+      "description": "VIETJET A321",
+      "serialNumber": "12010",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A550",
+      "description": "VIETJET AIR A321NEO/PW1100",
+      "serialNumber": "12266",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A553",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "12894",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A569",
+      "description": "PACIFIC A320 AIRCRAFT",
+      "serialNumber": "007760",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "BL",
+      "authorityCode": null
+    },
+    {
+      "registration": "A573",
+      "description": "PACIFIC A320 AIRCRAFT",
+      "serialNumber": "007809",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "BL",
+      "authorityCode": null
+    },
+    {
+      "registration": "A579",
+      "description": "SUN AIR G650ER",
+      "serialNumber": "6488",
+      "status": "Active",
+      "aircraftTypeCode": "G650ER",
+      "operatorCode": "SA",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A583",
+      "description": "BAMBOO A320",
+      "serialNumber": "3902",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "QH",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A585",
+      "description": "BAMBOO A321 AIRCRAFT",
+      "serialNumber": "005044",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "QH",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A594",
+      "description": "BAMBOO A321 AIRCRAFT",
+      "serialNumber": "005059",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "QH",
+      "authorityCode": null
+    },
+    {
+      "registration": "A596",
+      "description": "BAMBOO A320",
+      "serialNumber": "9306",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "QH",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A597",
+      "description": "BAMBOO A321 AIRCRAFT",
+      "serialNumber": "005271",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "QH",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A600",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008762",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A601",
+      "description": "AIRBUS A321C A601",
+      "serialNumber": "005456",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A602",
+      "description": "AIRBUS A321C A602",
+      "serialNumber": "005469",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A603",
+      "description": "AIRBUS A321C A603",
+      "serialNumber": "005495",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A604",
+      "description": "AIRBUS A321C A604",
+      "serialNumber": "005555",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A605",
+      "description": "AIRBUS A321C A605",
+      "serialNumber": "005699",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A606",
+      "description": "AIRBUS A321C A606",
+      "serialNumber": "005709",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A608",
+      "description": "AIRBUS A321C A608",
+      "serialNumber": "005916",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A609",
+      "description": "AIRBUS A321C A609",
+      "serialNumber": "005958",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A610",
+      "description": "AIRBUS A321C A610",
+      "serialNumber": "005994",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A611",
+      "description": "AIRBUS A321C A611",
+      "serialNumber": "006266",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A612",
+      "description": "AIRBUS A321C A612",
+      "serialNumber": "006344",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A613",
+      "description": "AIRBUS A321C A613",
+      "serialNumber": "006748",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A614",
+      "description": "AIRBUS A321C A614",
+      "serialNumber": "006810",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A615",
+      "description": "AIRBUS A321C A615",
+      "serialNumber": "006880",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A616",
+      "description": "AIRBUS A321N A616",
+      "serialNumber": "008501",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A617",
+      "description": "AIRBUS A321N A617",
+      "serialNumber": "008545",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A618",
+      "description": "AIRBUS A321N A618",
+      "serialNumber": "008589",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A619",
+      "description": "AIRBUS A321N A619",
+      "serialNumber": "008678",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A620",
+      "description": "AIRBUS A321N A620",
+      "serialNumber": "008649",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A621",
+      "description": "AIRBUS A321N A621",
+      "serialNumber": "008699",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A622",
+      "description": "AIRBUS A321N A622",
+      "serialNumber": "008703",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A623",
+      "description": "AIRBUS A321N A623",
+      "serialNumber": "008729",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A624",
+      "description": "AIRBUS A321N A624",
+      "serialNumber": "008747",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A625",
+      "description": "AIRBUS A321N A625",
+      "serialNumber": "008753",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A629",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "08605",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A630",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "7655",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A631",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "07675",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A632",
+      "description": "VIETJET A321",
+      "serialNumber": "07888",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A634",
+      "description": "VIETJET A321",
+      "serialNumber": "07898",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A635",
+      "description": "VIETJET A321",
+      "serialNumber": "07919",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A636",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "7933",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A637",
+      "description": "VIETJET A321",
+      "serialNumber": "7998",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A639",
+      "description": "VIETJET A321",
+      "serialNumber": "8034",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A641",
+      "description": "VIETJET A321",
+      "serialNumber": "07684",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A642",
+      "description": "VIETJET A321",
+      "serialNumber": "7689",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A643",
+      "description": "VIETJET A321",
+      "serialNumber": "07940",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A644",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "07953",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A645",
+      "description": "VIETJET A321",
+      "serialNumber": "07962",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A646",
+      "description": "VIETJET A321 NEO",
+      "serialNumber": "7991",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A647",
+      "description": "VIETJET A321",
+      "serialNumber": "8061",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A648",
+      "description": "VIETJET A321",
+      "serialNumber": "08076",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A649",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "08153",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A650",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "006457",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A651",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "005295",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A652",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008461",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A653",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "08199",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A654",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008274",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A655",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "006498",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A656",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "06584",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A657",
+      "description": "VIETJET A321",
+      "serialNumber": "08215",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A658",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "006341",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A661",
+      "description": "VIETJET AIR A321",
+      "serialNumber": "8670",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A662",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "6738",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A663",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "6779",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A666",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "003739",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A667",
+      "description": "VIETJET A321",
+      "serialNumber": "6936",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A668",
+      "description": "VIETJET A320",
+      "serialNumber": "3791",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A669",
+      "description": "VIETJET A321",
+      "serialNumber": "4049",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A670",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008676",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A671",
+      "description": "VIETJET A320",
+      "serialNumber": "6958",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A672",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "006997",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A674",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008302",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A676",
+      "description": "VIETJET A320",
+      "serialNumber": "07170",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A677",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "07241",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A679",
+      "description": "VIETJET A320",
+      "serialNumber": "2745",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A683",
+      "description": "VIETJET A321 A/C",
+      "serialNumber": "07278",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A684",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "7342",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A685",
+      "description": "VIETJET A321",
+      "serialNumber": "07427",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A687",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "7454",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A689",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "004190",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A690",
+      "description": "VIETJET A320",
+      "serialNumber": "04415",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A691",
+      "description": "VIETJET A320 AIRCRAFT",
+      "serialNumber": "004504",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A693",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008289",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A694",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008436",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A697",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008389",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A698",
+      "description": "VIETJET A321 AIRCRAFT",
+      "serialNumber": "008393",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A699",
+      "description": "VIETJET A320",
+      "serialNumber": "04193",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A7-ALA",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "006",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALB",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "00007",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALC",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "009",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALD",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "010",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALE",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "008",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALG",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "000013",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALH",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "012",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALI",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "021",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALJ",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "025",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALK",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "033",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALM",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "000042",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALN",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "000047",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALO",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "063",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALP",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "069",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALQ",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "76",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALR",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "000078",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALS",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "000087",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALT",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "000090",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALU",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "100",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALV",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "106",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALX",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "126",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-ALY",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "00132",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-AOD",
+      "description": "QATAR A350 AIRCRAFT",
+      "serialNumber": "444",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BAE",
+      "description": "QATAR 777",
+      "serialNumber": "36104",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BAK",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "36097",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BAL",
+      "description": "QATAR B777 AIRCRAFT",
+      "serialNumber": "38244",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BAN",
+      "description": "QATAR B777",
+      "serialNumber": "38246",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BAQ",
+      "description": "QATAR AIRWAYS 777",
+      "serialNumber": "38247",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BAS",
+      "description": "QATAR B777 AIRCRAFT",
+      "serialNumber": "41062",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BAU",
+      "description": "QATAR 777",
+      "serialNumber": "41739",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCA",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38319",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCB",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38320",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCC",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38321",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCD",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38322",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCE",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38323",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCF",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38324",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCG",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38325",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCH",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38326",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCI",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38327",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCJ",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38328",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCK",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38329",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCL",
+      "description": "QATAR AIRWAY B787",
+      "serialNumber": "38330",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCM",
+      "description": "QATAR AIRWAY",
+      "serialNumber": "38331",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCN",
+      "description": "QATAR",
+      "serialNumber": "38332",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCO",
+      "description": "QATAR B787 AIRCRAFT (B787-8)",
+      "serialNumber": "38333",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCP",
+      "description": "QATAR AIRWAY",
+      "serialNumber": "38334",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCQ",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38335",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCR",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38336",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCS",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38337",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCT",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38338",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCU",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38339",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCV",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38340",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCW",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38341",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCX",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38342",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCY",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38343",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BCZ",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38344",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BDA",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38345",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BDB",
+      "description": "QATAR B787-8 AIRCRAFT",
+      "serialNumber": "38346",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BDC",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38347",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BDD",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "38348",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BEA",
+      "description": "QATAR 777",
+      "serialNumber": "41779",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BEJ",
+      "description": "QATAR B777",
+      "serialNumber": "60336",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BEP",
+      "description": "QATAR B777",
+      "serialNumber": "64066",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BFM",
+      "description": "QATAR AIRWAYS 777",
+      "serialNumber": "1520",
+      "status": "Active",
+      "aircraftTypeCode": "B777",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHA",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64217",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHB",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64215",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHC",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64210",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHD",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64216",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHE",
+      "description": "QATAR B787 -9 AIRCRAFT",
+      "serialNumber": "64218",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHF",
+      "description": "QATAR B787",
+      "serialNumber": "64209",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHG",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64211",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHH",
+      "description": "QATAR B787",
+      "serialNumber": "64219",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHI",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64220",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHJ",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64212",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHK",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64221",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHL",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64213",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHM",
+      "description": "QATAR B787",
+      "serialNumber": "64222",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHN",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64214",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHO",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64223",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHP",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64224",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHQ",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64225",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHR",
+      "description": "QATAR B787",
+      "serialNumber": "64226",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHS",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64229",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHT",
+      "description": "QATAR B787-9 AIRCRAFT",
+      "serialNumber": "64228",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHU",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64230",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHV",
+      "description": "QATAR B787-9 AIRCRAFT",
+      "serialNumber": "64231",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHW",
+      "description": "QATAR AIRWAYS B787",
+      "serialNumber": "64232",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BHX",
+      "description": "QATAR B787 AIRCRAFT",
+      "serialNumber": "64233",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A7-BTD",
+      "description": "QATAR B777 FREIGHTER (777-F)",
+      "serialNumber": "70442",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "QR",
+      "authorityCode": null
+    },
+    {
+      "registration": "A799",
+      "description": "GULFSTREAM G700 HAIAU",
+      "serialNumber": "87083",
+      "status": "Active",
+      "aircraftTypeCode": "G700",
+      "operatorCode": "HAI",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A810",
+      "description": "VIETJET A330",
+      "serialNumber": "952",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A811",
+      "description": "VIETJET A330",
+      "serialNumber": "974",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A812",
+      "description": "VIETJET A330",
+      "serialNumber": "1165",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A814",
+      "description": "VIETJET A330",
+      "serialNumber": "1674",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A815",
+      "description": "VIETJET A330",
+      "serialNumber": "1670",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "A816",
+      "description": "VIETJET A330",
+      "serialNumber": "1659",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A817",
+      "description": "VIETJET A330",
+      "serialNumber": "1646",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "VJ",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A861",
+      "description": "BOEING B787 A861",
+      "serialNumber": "035151",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A862",
+      "description": "BOEING B787 A862",
+      "serialNumber": "035152",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A863",
+      "description": "BOEING B787 A863",
+      "serialNumber": "035153",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A864",
+      "description": "BOEING B787 A864",
+      "serialNumber": "035154",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A865",
+      "description": "BOEING B787 A865",
+      "serialNumber": "038761",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A866",
+      "description": "BOEING B787 A866",
+      "serialNumber": "038762",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A867",
+      "description": "BOEING B787 A867",
+      "serialNumber": "039287",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A868",
+      "description": "BOEING B787 A868",
+      "serialNumber": "039288",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A869",
+      "description": "BOEING B787 A869",
+      "serialNumber": "038768",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A870",
+      "description": "BOEING B787 A870",
+      "serialNumber": "039289",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": null
+    },
+    {
+      "registration": "A871",
+      "description": "BOEING B787 A871",
+      "serialNumber": "039290",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A872",
+      "description": "BOEING B787 A872",
+      "serialNumber": "060294",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A873",
+      "description": "BOEING B787 A873",
+      "serialNumber": "060288",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A874",
+      "description": "BOEING B787 A874",
+      "serialNumber": "060290",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A877",
+      "description": "BOEING B787 A877",
+      "serialNumber": "060295",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A878",
+      "description": "BOEING B787 A878",
+      "serialNumber": "060296",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A879",
+      "description": "BOEING B787 A879",
+      "serialNumber": "060287",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A886",
+      "description": "AIRBUS A350 A886",
+      "serialNumber": "000014",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A887",
+      "description": "AIRBUS A350 A887",
+      "serialNumber": "000015",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A888",
+      "description": "AIRBUS A350 A888",
+      "serialNumber": "000016",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A889",
+      "description": "AIRBUS A350 A889",
+      "serialNumber": "000017",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A890",
+      "description": "AIRBUS A350 A890",
+      "serialNumber": "000056",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A891",
+      "description": "AIRBUS A350 A891",
+      "serialNumber": "000067",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A892",
+      "description": "AIRBUS A350 A892",
+      "serialNumber": "000086",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A893",
+      "description": "AIRBUS A350 A893",
+      "serialNumber": "000129",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A894",
+      "description": "AIRBUS A350 A894",
+      "serialNumber": "000150",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A895",
+      "description": "AIRBUS A350 A895",
+      "serialNumber": "000173",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A896",
+      "description": "AIRBUS A350 A896",
+      "serialNumber": "000192",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A897",
+      "description": "AIRBUS A350 A897",
+      "serialNumber": "000197",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A898",
+      "description": "AIRBUS A350 A898",
+      "serialNumber": "000279",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A899",
+      "description": "AIRBUS A350 A899",
+      "serialNumber": "000297",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "VN",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A906",
+      "description": "SUN PHU QUOC AIRWAYS",
+      "serialNumber": "12903",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "9G",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A908",
+      "description": "SUN PHU QUOC AIRWAYS",
+      "serialNumber": "9357",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "9G",
+      "authorityCode": null
+    },
+    {
+      "registration": "A909",
+      "description": "SUN PHU QUOC AIRWAYS",
+      "serialNumber": "10134",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "9G",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A966",
+      "description": "SUN AIR",
+      "serialNumber": "6559",
+      "status": "Active",
+      "aircraftTypeCode": "G650ER",
+      "operatorCode": "SA",
+      "authorityCode": null
+    },
+    {
+      "registration": "A968",
+      "description": "BLUESKY AIRWAYS GULSTM",
+      "serialNumber": "6587",
+      "status": "Active",
+      "aircraftTypeCode": "G650ER",
+      "operatorCode": "BSA",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A979",
+      "description": "FALCON F8X",
+      "serialNumber": "418",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "BSA",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "A999",
+      "description": "BLUESKY FALCON F8X",
+      "serialNumber": "000471",
+      "status": "Active",
+      "aircraftTypeCode": "8X",
+      "operatorCode": "BSA",
+      "authorityCode": null
+    },
+    {
+      "registration": "B-1822",
+      "description": "SICHUAN A320 AIRCRAFT",
+      "serialNumber": "5937",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "3U",
+      "authorityCode": null
+    },
+    {
+      "registration": "B-652G",
+      "description": "COMAC C909",
+      "serialNumber": "185",
+      "status": "Active",
+      "aircraftTypeCode": "C909",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "B-656E",
+      "description": "COMAC C909",
+      "serialNumber": "196",
+      "status": "Active",
+      "aircraftTypeCode": "C909",
+      "operatorCode": "VJ",
+      "authorityCode": null
+    },
+    {
+      "registration": "B-6742",
+      "description": "AIR CHINA AIRBUS A321 AIRCRAFT",
+      "serialNumber": "04719",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "CA",
+      "authorityCode": null
+    },
+    {
+      "registration": "B-LDX",
+      "description": "CATHAY PACIFIC AIR HONG KONG A330",
+      "serialNumber": "1378",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "CX",
+      "authorityCode": null
+    },
+    {
+      "registration": "B218",
+      "description": "ATR72 B218",
+      "serialNumber": "000877",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "VFC",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "B219",
+      "description": "ATR72 B219",
+      "serialNumber": "000886",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "VFC",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "B220",
+      "description": "ATR72 B220",
+      "serialNumber": "000890",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "VFC",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "B221",
+      "description": "ATR72 B221",
+      "serialNumber": "000892",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "VFC",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "B223",
+      "description": "ATR72 B223",
+      "serialNumber": "000896",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "VFC",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "B225",
+      "description": "ATR72 B225",
+      "serialNumber": "000897",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "VFC",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "B593",
+      "description": "CESSNA 208 CARAVAN",
+      "serialNumber": "20800593",
+      "status": "Active",
+      "aircraftTypeCode": "CARAVA",
+      "operatorCode": "HTX",
+      "authorityCode": null
+    },
+    {
+      "registration": "B6919",
+      "description": "AIR CHINA A321",
+      "serialNumber": "05346",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "CA",
+      "authorityCode": null
+    },
+    {
+      "registration": "C3267",
+      "description": "CEBU A320",
+      "serialNumber": "4927",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C3279",
+      "description": "CEBU A320",
+      "serialNumber": "6051",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C4105",
+      "description": "CEBU A320",
+      "serialNumber": "6777",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C4108",
+      "description": "CEBU PACIFIC A320",
+      "serialNumber": "7066",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C4156",
+      "description": "CEBU A320",
+      "serialNumber": "3896",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C4160",
+      "description": "CEBU PACIFIC A320",
+      "serialNumber": "3857",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C4267",
+      "description": "CEBU A320",
+      "serialNumber": "9592",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C4268",
+      "description": "CEBU PACIFIC A320",
+      "serialNumber": "4820",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C4331",
+      "description": "CEBU A320",
+      "serialNumber": "10160",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7201",
+      "description": "AIRSWIFT ATR72",
+      "serialNumber": "1440",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "T6",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7280",
+      "description": "CEBU ATR 72",
+      "serialNumber": "1362",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7281",
+      "description": "CEBU ATR72 AIRCRAFT",
+      "serialNumber": "001369",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7282",
+      "description": "CEBU ATR72 AIRCRAFT",
+      "serialNumber": "001394",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7283",
+      "description": "CEBU ATR72 AIRCRAFT",
+      "serialNumber": "001397",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7284",
+      "description": "CEBU ATR72 AIRCRAFT",
+      "serialNumber": "1429",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7285",
+      "description": "CEBU ATR72 AIRCRAFT",
+      "serialNumber": "1443",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7286",
+      "description": "CEBU ATR72",
+      "serialNumber": "1453",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7287",
+      "description": "CEBU ATR72",
+      "serialNumber": "1468",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7288",
+      "description": "CEBU ATR72",
+      "serialNumber": "1479",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7289",
+      "description": "CEBU ATR72-600 AIRCRAFT",
+      "serialNumber": "1499",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7290",
+      "description": "CEBU ATR72 AIRCRAFT",
+      "serialNumber": "001530",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7291",
+      "description": "CEBU ATR72 AIRCRAFT",
+      "serialNumber": "001536",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7292",
+      "description": "CEBU ATR72 AIRCRAFT",
+      "serialNumber": "001558",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7294",
+      "description": "CEBU ATR72",
+      "serialNumber": "1628",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C7295",
+      "description": "CEBU PACIFIC ATR72",
+      "serialNumber": "1695",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "5J",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C8763",
+      "description": "PHILIPPINE AIRLINES A330",
+      "serialNumber": "1546",
+      "status": "Active",
+      "aircraftTypeCode": "A330",
+      "operatorCode": "PAL",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C9799",
+      "description": "ROYAL AIR PHILIPPINES A320",
+      "serialNumber": "2529",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "RYL",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "C9926",
+      "description": "PHILIPPINE AIRLINES A321",
+      "serialNumber": "7180",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "PAL",
+      "authorityCode": "CAAP"
+    },
+    {
+      "registration": "COMP",
+      "description": "DUMMY-AIRCRAFT;DO NOT DELETE!",
+      "serialNumber": null,
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": null,
+      "authorityCode": null
+    },
+    {
+      "registration": "D-AIXA",
+      "description": "LUFTHANSA A350",
+      "serialNumber": "74",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "D-AIXB",
+      "description": "LUFTHANSA A350",
+      "serialNumber": "80",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "D-AIXC",
+      "description": "LUFTHANSA A350",
+      "serialNumber": "87",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "D-AIXD",
+      "description": "LUFTHANSA A350",
+      "serialNumber": "127",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "D-AIXE",
+      "description": "LUFTHANSA A350",
+      "serialNumber": "136",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "ES-SAF",
+      "description": "SMARTLYNX A320 AIRCRAFT",
+      "serialNumber": "5348",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "6Y",
+      "authorityCode": null
+    },
+    {
+      "registration": "HL7209",
+      "description": "KOREAN AIR 787-9",
+      "serialNumber": "34818",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "KE",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "HL8055",
+      "description": "AIR BUSAN A320",
+      "serialNumber": "2732",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "BX",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "HL8081",
+      "description": "KOREAN AIR 787-9",
+      "serialNumber": "34810",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "KE",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "HL8082",
+      "description": "KOREAN AIR 787-9",
+      "serialNumber": "34811",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "KE",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "HL8083",
+      "description": "KOREAN AIR 787-9",
+      "serialNumber": "34812",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "KE",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "HL8255",
+      "description": "AIR SEOUL A321",
+      "serialNumber": "5035",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "RS",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "HL8256",
+      "description": "ASIANA AIRLINES A321",
+      "serialNumber": "5169",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "OZ",
+      "authorityCode": null
+    },
+    {
+      "registration": "HL8385",
+      "description": "AERO K AIRBUS A320 AIRCRAFT",
+      "serialNumber": "4480",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "RF",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "HL8386",
+      "description": "AERO K AIRBUS A320 AIRCRAFT",
+      "serialNumber": "4559",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "RF",
+      "authorityCode": "MOLIT"
+    },
+    {
+      "registration": "HS-BBP",
+      "description": "THAI AIRASIA A320",
+      "serialNumber": "6405",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "FD",
+      "authorityCode": "CAAT"
+    },
+    {
+      "registration": "HS-CBA",
+      "description": "THAI AIRASIA A320",
+      "serialNumber": "7624",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "FD",
+      "authorityCode": null
+    },
+    {
+      "registration": "HS-CBI",
+      "description": "THAI AIRASIA A320",
+      "serialNumber": "8391",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "FD",
+      "authorityCode": "CAAT"
+    },
+    {
+      "registration": "HS-PAV",
+      "description": "PATTAYA AIRWAYS ATR72",
+      "serialNumber": "742",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "PTW",
+      "authorityCode": null
+    },
+    {
+      "registration": "HS-PAW",
+      "description": "PATTAYA AIRWAYS ATR72",
+      "serialNumber": "745",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "PTW",
+      "authorityCode": "CAAT"
+    },
+    {
+      "registration": "JA883A",
+      "description": "BOEING 787 ANA",
+      "serialNumber": "43873",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "NH",
+      "authorityCode": null
+    },
+    {
+      "registration": "JA901A",
+      "description": "BOEING 787 ANA",
+      "serialNumber": "62685",
+      "status": "Active",
+      "aircraftTypeCode": "B787",
+      "operatorCode": "NH",
+      "authorityCode": null
+    },
+    {
+      "registration": "JU1410",
+      "description": "MONGOLIAN A320 AIRCRAFT",
+      "serialNumber": "4692",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "MGW",
+      "authorityCode": "MCAA"
+    },
+    {
+      "registration": "LY-NVI",
+      "description": "AVION EXPRESS",
+      "serialNumber": "4683",
+      "status": "Active",
+      "aircraftTypeCode": null,
+      "operatorCode": "X9",
+      "authorityCode": null
+    },
+    {
+      "registration": "N77999",
+      "description": "SUN AIR G650ER",
+      "serialNumber": "6460",
+      "status": "Active",
+      "aircraftTypeCode": "G650ER",
+      "operatorCode": "SA",
+      "authorityCode": null
+    },
+    {
+      "registration": "N866GD",
+      "description": "SUN AIR G650ER",
+      "serialNumber": "87066",
+      "status": "Active",
+      "aircraftTypeCode": "G700",
+      "operatorCode": "SA",
+      "authorityCode": "CAAV"
+    },
+    {
+      "registration": "NAB",
+      "description": "NORDICA A320",
+      "serialNumber": null,
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "XFLY",
+      "authorityCode": null
+    },
+    {
+      "registration": "OE-LHD",
+      "description": "LUFTHANSA A350 AIRCRAFT",
+      "serialNumber": "0035",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "OE-LHE",
+      "description": "LUFTHANSA A350 AIRCRAFT",
+      "serialNumber": "000045",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "OE-LHF",
+      "description": "LUFTHANSA A350 AIRCRAFT",
+      "serialNumber": "000079",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "OE-LHG",
+      "description": "LUFTHANSA A350 AIRCRAFT",
+      "serialNumber": "00363",
+      "status": "Active",
+      "aircraftTypeCode": "A350",
+      "operatorCode": "LH",
+      "authorityCode": "EASA"
+    },
+    {
+      "registration": "P2-ATB",
+      "description": "PNG AIR ATR72",
+      "serialNumber": "1317",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "TOK",
+      "authorityCode": null
+    },
+    {
+      "registration": "P2-ATE",
+      "description": "PNG AIR ATR72",
+      "serialNumber": "1430",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "TOK",
+      "authorityCode": null
+    },
+    {
+      "registration": "P2-ATR",
+      "description": "PNG AIR ATR72",
+      "serialNumber": "1287",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "TOK",
+      "authorityCode": null
+    },
+    {
+      "registration": "PK-BBK",
+      "description": "BAMBOO 737",
+      "serialNumber": "35717",
+      "status": "Active",
+      "aircraftTypeCode": "B737",
+      "operatorCode": "QH",
+      "authorityCode": null
+    },
+    {
+      "registration": "VP-CAN",
+      "description": "GENESIS A320",
+      "serialNumber": null,
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "GASL",
+      "authorityCode": "CAACI"
+    },
+    {
+      "registration": "XU-610",
+      "description": "ATR72-600 XU-610",
+      "serialNumber": "001716",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "K6",
+      "authorityCode": "SSCA"
+    },
+    {
+      "registration": "XU-611",
+      "description": "ATR72-600 XU-611",
+      "serialNumber": "001749",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "K6",
+      "authorityCode": "SSCA"
+    },
+    {
+      "registration": "XU-612",
+      "description": "ATR72-600 XU-612",
+      "serialNumber": "001754",
+      "status": "Active",
+      "aircraftTypeCode": "ATR72",
+      "operatorCode": "K6",
+      "authorityCode": "SSCA"
+    },
+    {
+      "registration": "XU350",
+      "description": "AIRBUS A321C XU350",
+      "serialNumber": "005343",
+      "status": "Active",
+      "aircraftTypeCode": "A321",
+      "operatorCode": "K6",
+      "authorityCode": "SSCA"
+    },
+    {
+      "registration": "XU353",
+      "description": "AIRBUS A320 XU353",
+      "serialNumber": "007434",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "K6",
+      "authorityCode": "SSCA"
+    },
+    {
+      "registration": "XU356",
+      "description": "AIRBUS A320 XU356",
+      "serialNumber": "007435",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "K6",
+      "authorityCode": "SSCA"
+    },
+    {
+      "registration": "YR-FIA",
+      "description": "FLY ONE A320",
+      "serialNumber": "03524",
+      "status": "Active",
+      "aircraftTypeCode": "A320",
+      "operatorCode": "5F",
+      "authorityCode": null
+    }
+  ]
+}

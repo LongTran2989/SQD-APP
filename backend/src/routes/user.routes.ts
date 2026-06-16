@@ -8,6 +8,7 @@ import {
   adminResetPassword,
   updateUserRole,
   updateMyPreferences,
+  updateMyProfile,
 } from '../controllers/user.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { requirePrivilege, requireAnyPrivilege } from '../middleware/rbac.middleware';
@@ -15,6 +16,7 @@ import { requirePrivilege, requireAnyPrivilege } from '../middleware/rbac.middle
 const router = Router();
 
 // Self-service routes (any authenticated user, own record only)
+router.patch('/me/profile', authenticateJWT, updateMyProfile);
 router.patch('/me/preferences', authenticateJWT, updateMyPreferences);
 router.patch('/me/password', authenticateJWT, changePassword);
 
