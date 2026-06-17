@@ -3,3 +3,7 @@ node_modules
 .env
 
 /generated/prisma
+
+# Local-disk file storage (STORAGE_DRIVER=local). Uploaded objects live here in
+# dev; production uses an absolute STORAGE_LOCAL_ROOT on a persistent volume.
+/storage

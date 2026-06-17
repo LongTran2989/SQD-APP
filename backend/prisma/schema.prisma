@@ -105,6 +105,9 @@ model User {
   // Notification event config rows this user last updated (admin panel).
   notifConfigUpdates NotificationEventConfig[] @relation("NotifConfigUpdatedBy")
 
+  // Files this user uploaded (Attachment owner back-relation).
+  uploadedAttachments Attachment[] @relation("AttachmentUploadedBy")
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -845,13 +848,28 @@ model PrivilegeConfig {
 }
 
 model Attachment {
-  id           Int      @id @default(autoincrement())
-  fileName     String
-  fileType     String
-  fileSize     Int
-  storageKey   String   @unique
-  entityType   String
-  entityId     String
+  id         Int    @id @default(autoincrement())
+  fileName   String // original client filename (sanitised before storage)
+  fileType   String // MIME type, validated against FILE_UPLOAD_CONFIG
+  fileSize   Int // bytes
+  bucket     String // logical storage root: sqd-tasks | sqd-findings | sqd-templates
+  storageKey String @unique // path within the storage backend (driver-agnostic)
+
+  // Polymorphic owner. entityType ∈ TASK | FINDING | TEMPLATE | WP; entityId is
+  // the owning record id (String to mirror AuditLog.entityId). fieldId scopes a
+  // file to one form field for TASK form uploads (null for entity-level evidence).
+  entityType String
+  entityId   String
+  fieldId    String?
+
   uploadedById Int
-  createdAt    DateTime @default(now())
+  uploadedBy   User @relation("AttachmentUploadedBy", fields: [uploadedById], references: [id])
+
+  // Soft delete — evidence files are an aviation compliance record and are never
+  // physically dropped from the index (the stored object may be best-effort removed).
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([entityType, entityId, deletedAt])
+  @@index([uploadedById])
 }

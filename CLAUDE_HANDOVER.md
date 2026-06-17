@@ -59,6 +59,30 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - `PUT` persists row + writes `NOTIFICATION_CONFIG_UPDATED` AuditLog.
   - Invalid event key → 400. Non-boolean body → 400. Staff → 403.
 
+- **File Upload Infrastructure (Attachments)** (✅ **COMPLETE**, 2026-06-16 — branch `claude/file-upload-infrastructure-28r4m5`)
+  > **444 backend tests passing (+13 new in `attachment.test.ts`). Backend `tsc --noEmit` clean (pre-existing `notification.test.ts` strict-optional warnings only). Frontend `tsc`/lint/`next build` clean. Additive, reversible schema change. Living developer manual: `FILE_UPLOAD_DEV_GUIDE.md`.**
+
+  Implements the long-deferred `File Upload` field type and a general attachment system for Tasks, Findings, Work Packages, and Templates. **Storage decision diverged from the original §3.5 MinIO plan** — see §3.5 (rewritten) for the local-disk-behind-an-adapter rationale.
+
+  **Storage layer (pluggable):**
+  - `services/storage/StorageAdapter.ts` (interface: `ensureReady` / `putFile` / `getStream` / `remove` + `ObjectNotFoundError`), `LocalDiskAdapter.ts` (filesystem, path-traversal guarded, `rename` with `EXDEV` copy fallback), `index.ts` (`getStorage()` cached factory + `initStorage()`). Driver selected by `STORAGE_DRIVER` env (`local` default; `minio` is a documented stub). `config/storage.ts` validates `STORAGE_DRIVER` / `STORAGE_LOCAL_ROOT` (fail-fast).
+  - **Downloads are proxied through the backend** (`GET /:id/download` streams from private storage) — MinIO's presigned-URL / S3 features are never needed, so no MinIO daemon runs.
+
+  **Backend:**
+  - **`Attachment` model upgraded** (additive): `bucket`, `fieldId`, `uploadedBy` relation, soft-delete `deletedAt`, `@@index([entityType, entityId, deletedAt])`. Polymorphic over `TASK | FINDING | TEMPLATE | WP`.
+  - **`services/attachmentService.ts`** — validates against the active policy, enforces per-file + per-entity-total caps, streams the multipart temp file into storage (`putFile`), then atomically creates the row + **dual-writes** `AuditLog` (`ATTACHMENT_UPLOADED`/`ATTACHMENT_DELETED`) + a `SYSTEM_EVENT` `FeedPost` (TASK/WP/FINDING; TEMPLATE is audit-only). Soft-delete **retains the stored object** (evidence is a compliance record).
+  - **`controllers/attachment.controller.ts` + `routes/attachment.routes.ts`** — `GET /api/attachments/config`, `GET /` (list), `POST /` (multer **diskStorage**, single file, temp-file `unlink` in `finally`), `GET /:id/download` (proxied stream), `DELETE /:id`. `toPublic()` projector never leaks `storageKey`/`bucket`. Wired in `index.ts` (+ best-effort `initStorage()` at startup).
+  - **Admin-configurable limits (Rule 10):** `SystemSetting['FILE_UPLOAD_CONFIG']` (JSON), seeded from `DEFAULT_FILE_UPLOAD_CONFIG` in `constants/fileUpload.ts` (mirrors §3.5: Documents 20 MB / Images 10 MB / 50 MB per record). `loadFileUploadConfig()` reads it per request and **clamps** each `maxSizeBytes` to `ABSOLUTE_MAX_UPLOAD_BYTES` (100 MB infra ceiling).
+  - **`attachment:delete_any` privilege** added to `PRIVILEGE_CATALOG` / `DEFAULT_PRIVILEGES` (default Director/Admin/Manager). Delete = uploader OR `hasPrivilege(actor, 'attachment:delete_any')` — DB-driven, not a hardcoded role array.
+
+  **Frontend:**
+  - `api/attachmentApi.ts` (upload w/ progress, list, blob download, delete; `getUploadConfig` cached at module scope). `components/ui/FileUploadField.tsx` reusable widget (toast feedback; emits attachment ids to the host form **only after upload/delete**, never on initial read).
+  - **Task form:** `TemplateBuilder` gained the **File Upload** palette button + preview; `TaskFormPanel` threads `taskId` into the `file_upload` field renderer (ids stored in `TaskData`). **Finding detail** gained an **Evidence** section (`entityType="FINDING"`, disabled on Closed/Dismissed).
+
+  **Deploy:** `deploy.sh` writes `STORAGE_*` env, creates the persistent (git-ignored) storage dir, and sets nginx `client_max_body_size 100M`.
+
+  **Post-ship high-effort `/code-review` (2026-06-16, same branch):** 10 findings, all fixed — see `CODE_REVIEW_AUDIT_LOG.md` (session 2026-06-16). Key fixes: form-dirty-on-view bug, privilege-gated delete, disk-streaming uploads (VPS RAM), cached config fetch, honest download-auth docs. **Two deferred flags:** **DEF-5** (no `PUT` endpoint for `FILE_UPLOAD_CONFIG` yet — limits change via DB upsert), **DEF-6** (download/list are auth-only by the transparency model; add a scope check at `assertEntityExists` if visibility is ever tightened).
+
 - **Settings Hub & UI Restructuring** (✅ **COMPLETE**, 2026-06-15 — branch `claude/settings-user-management-3661zs`)
   > **Backend `tsc --noEmit` clean. No schema change. No new backend tests (no new status-machine logic). Frontend: all modified files type-clean.**
 
@@ -436,7 +460,9 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Phase 5** — Badges, polish, dedup, docs, regression. **#21 dedup guard:** a second PENDING flag for the same `(sourcePostId, targetScope)` → **409**, enforced by an in-tx `findFirst` at `isolationLevel: Serializable` (the concurrent loser's `P2034` is mapped to 409). Re-flagging is allowed once the prior flag leaves PENDING. **#22 bell gating:** the Header bell only polls for `ESCALATION_ACTION_ROLES` (Director/Admin/Manager); badge self-refreshes via a `window 'escalations:changed'` event from the api wrappers (no 60s wait). New dedicated **`/dashboard/escalations`** page (+ Sidebar nav). **#23 + reuse:** extracted `utils/feedHelpers.ts`, `api/templateApi.getPublishedTemplates()`, `components/feed/EscalationActions.tsx`, `constants/escalationRoles.ts`. `FlagButton` tracks per-target flagged state (checkmark + disable; 409 also marks done). `getFeed` enrichment folded 3 sequential round-trips → 1 `Promise.all`.
 
 ### Test Suite
+- **TEST_P1 integration (Notification Events Panel + File Upload Infrastructure, 2026-06-16): 453 backend tests** — both feature sets merged. 439 (notification panel) + 13 (file upload, `attachment.test.ts`) over a shared 431 baseline; run `npm test` to confirm the combined count after merge.
 - **Configurable Notification Events Panel (branch `claude/zealous-bohr-3g1ch9`, 2026-06-16): 439 backend tests passing.** +9 new tests in `notificationConfig.test.ts` (fail-open, disable, CC managers, actor-exclude, REST guard, audit, validation). Backend `tsc --noEmit` clean for all production files; pre-existing `notification.test.ts` strict-optional warnings are unchanged. Frontend `tsc`/ESLint clean for all new/modified files.
+- **444 backend tests on branch `claude/file-upload-infrastructure-28r4m5` (File Upload Infrastructure, 2026-06-16): all 444 passing (19 suites).** +13 new in `attachment.test.ts` (auth, upload + dual-write, type/size/total-quota limits, list, download bytes, soft-delete RBAC, config endpoint). Storage runs against a temp dir (`.env.test` sets `STORAGE_LOCAL_ROOT=/tmp/sqd-test-storage`). Backend `tsc --noEmit` clean (pre-existing `notification.test.ts` strict-optional warnings only). Frontend `tsc`/lint/`next build` clean. Baseline before this work was 431.
 - **Settings Hub & UI Restructuring (branch `claude/settings-user-management-3661zs`, 2026-06-15):** No new backend tests (no new status-machine logic). Backend `tsc --noEmit` clean. Prior baseline is 423 tests on `claude/exciting-rubin-hqkxma` — run `npm test` locally to confirm no regressions before merging.
 - **423 backend tests on branch `claude/exciting-rubin-hqkxma` (Task Slice Review, 2026-06-14): all 423 passing.** +2 new regression tests (T04c cross-division assignee on create, T54a issuer-transfer role restriction). New `contractSync.test.ts` suite validates frontend/backend literal parity. Frontend `tsc --noEmit` clean for all modified files.
 - **Branch `claude/exciting-darwin-gyohuf` (Phase 7 Deferred Items, 2026-06-12): backend `tsc --noEmit` clean; tests could not be executed in the remote build container (no PostgreSQL). Run `npm test` locally against `sqd_qa_test_db` to verify baseline 381 tests still pass before merging.**
@@ -560,22 +586,21 @@ The models `User`, `Task`, `Finding`, and `WorkPackage` now have a `deletedAt Da
 | `template.controller.ts` | `user.findUnique` (transferOwnership) | ✅ `deletedAt: null` |
 | `auth.middleware.ts` | `user.findUnique` (session check) | ✅ `deletedAt: null` |
 
-### 3.5 File Attachments & Storage (MinIO)
+### 3.5 File Attachments & Storage (✅ IMPLEMENTED — local-disk, NOT MinIO)
 
-**Decision:** Use MinIO (self-hosted, S3-compatible) on the VPS for all file storage.
+> **Decision changed (2026-06-16).** The original plan locked MinIO. The shipped implementation uses a **local-disk driver behind a pluggable `StorageAdapter`** instead. The full rationale + developer reference is in `FILE_UPLOAD_DEV_GUIDE.md`; this section is the summary of record.
 
-**Rationale:**
-- Files stay on the same VPS as the app — important for aviation regulatory compliance
-- S3-compatible API means future migration to AWS S3 / Cloudflare R2 is a config change, not a rewrite
-- NAS rejected: only accessible inside WAN, VPS cannot reach it without VPN tunnel
-- OneDrive rejected: Microsoft Graph API is complex, not designed for programmatic file serving
+**Why local-disk, not MinIO:**
+- Downloads are **proxied through the backend** (`GET /api/attachments/:id/download` streams the bytes), so MinIO's headline features — the S3 API and presigned URLs — are never used. Running a separate MinIO daemon (~150–300 MB RAM) buys nothing on the small VPS.
+- Storage stays fully **private** (never exposed publicly, no presigned URL that can't be revoked mid-window) — a stronger compliance posture.
+- The **adapter interface preserves the original intent**: switching to MinIO / S3 / R2 later is a one-file change (implement `MinioAdapter`, set `STORAGE_DRIVER=minio`), not a rewrite. The §3.5 bucket *names* are kept as logical roots.
 
-**MinIO bucket structure:**
+**Bucket (logical root) structure — `ENTITY_BUCKET` in `constants/fileUpload.ts`:**
 - `sqd-templates` — attachments on Templates
 - `sqd-findings` — evidence attachments on Findings
-- `sqd-tasks` — attachments on Task execution
+- `sqd-tasks` — attachments on Task execution **and** Work Packages
 
-**File constraints (Admin-configurable via Privilege Management panel):**
+**File constraints (Admin-configurable — Rule 10).** Stored in `SystemSetting['FILE_UPLOAD_CONFIG']` (JSON), seeded from `DEFAULT_FILE_UPLOAD_CONFIG`:
 
 | Category | Allowed types | Max size |
 |---|---|---|
@@ -583,12 +608,11 @@ The models `User`, `Task`, `Finding`, and `WorkPackage` now have a `deletedAt Da
 | Images | JPG, PNG, WEBP | 10MB |
 | Total per entity | — | 50MB |
 
-**Access pattern:** Files never served publicly. All downloads via presigned URLs (time-limited, generated at request time).
+Each `maxSizeBytes` is clamped to `ABSOLUTE_MAX_UPLOAD_BYTES` (100 MB) — a fixed infra memory/disk-safety ceiling enforced by multer + nginx, **not** the business limit. **DEF-5:** there is no `PUT` endpoint for this config yet — until a settings-panel endpoint is added, "Admin-configurable" means a direct DB upsert.
 
-**Implementation phases:**
-- Phase 5.0 — Install MinIO on VPS, create buckets, add `Attachment` model to schema, add `multer` + `minio` SDK to backend
-- Phase 5.4 — Add `File Upload` field type to Template builder
-- Phase 6 — File attachments on Findings
+**Access pattern:** Files never served publicly. All downloads stream through the authenticated backend route (no presigned URLs). **DEF-6:** `list`/`download` are **auth-only** (no per-entity scope), consistent with the app's transparency model (`buildFindingScope → {}`, tasks/WPs viewable system-wide); add a scope check at `attachmentService.assertEntityExists` if visibility is ever tightened. **Delete** is authorized: uploader OR `attachment:delete_any` privilege.
+
+**Implementation status (all ✅):** schema `Attachment` upgrade; `multer` (diskStorage) + local-disk adapter; `File Upload` field type in Template Builder + Task form; Finding evidence section. `minio` SDK is **not** a dependency (added only if/when the MinIO adapter is wired).
 
 ### 3.6 Audit Trail vs TaskActivity — Important Distinction
 
@@ -672,10 +696,10 @@ These are two separate systems that serve different purposes. **Both** are writt
 | `Checkbox Group` | Pick one or more from user-defined options | e.g. Defects observed |
 | `Checkbox Single` | One true/false toggle | e.g. Completed? |
 | `Date` | Date picker | e.g. Inspection date |
-| `File Upload` | Upload documents/images | **Deferred to Phase 5.4** — MinIO infrastructure required first |
+| `File Upload` | Upload documents/images | ✅ **Implemented 2026-06-16.** Renders `FileUploadField` (entityType `TASK`, scoped by `fieldId`). Attachment ids stored in `TaskData`. Local-disk storage — see §3.5 + `FILE_UPLOAD_DEV_GUIDE.md` |
 | `Rich Text` | Formatted text with Bold, Italic, Bullet/Numbered lists | Editor powered by Tiptap/StarterKit. Stored as HTML string in `TaskData.data`. Read-only mode uses `editable: false` — no XSS surface. Added 2026-06-08 |
 
-> **Field type history:** The original single "Checkbox" field type has been split into `Checkbox Single` (boolean toggle) and `Checkbox Group` (multi-option picker). `Radio` added for single-choice from visible options. `File Upload` deferred until MinIO is configured in Phase 5.0. `Rich Text` added 2026-06-08 using Tiptap.
+> **Field type history:** The original single "Checkbox" field type has been split into `Checkbox Single` (boolean toggle) and `Checkbox Group` (multi-option picker). `Radio` added for single-choice from visible options. `Rich Text` added 2026-06-08 using Tiptap. `File Upload` implemented 2026-06-16 (local-disk storage, not MinIO — see §3.5).
 
 > **One-off Template behaviour:** When `isOneOff = true`, the Template is automatically hard-deleted from the database immediately after its first Task is assigned (not just created — assigned). The generated Task is unaffected because it stores its own immutable `schemaSnapshot` (JSON) at the moment of Task creation. This snapshot is the source of truth for rendering the Task form, regardless of whether the source Template still exists.
 

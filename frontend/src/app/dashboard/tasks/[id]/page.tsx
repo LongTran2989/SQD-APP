@@ -310,6 +310,7 @@ export default function TaskDetailPage() {
           {/* Dynamic form */}
           {task.schemaSnapshot && task.schemaSnapshot.length > 0 && (
             <TaskFormPanel
+              taskId={task.id}
               schemaSnapshot={task.schemaSnapshot}
               taskStatus={task.status}
               formData={formData}

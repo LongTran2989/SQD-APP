@@ -29,7 +29,7 @@ Violating any of these rules silently breaks data integrity, compliance, or RBAC
 7. **Reassignment.** Permitted at any non-final stage, mandatory reason, all TaskData preserved. BLOCKED on Closed, Terminated, Rejected.
 8. **Test DB isolation.** Tests ALWAYS run against `sqd_qa_test_db`. Never `sqd_qa_db`. Confirm `.env.test` is loaded before running tests.
 9. **Prisma generate.** Run `npx prisma generate` in `/backend` after every `schema.prisma` change.
-10. **File Upload deferred.** Do not implement File Upload field type until MinIO is configured (Phase 5.4+). Never hardcode file size/type limits — Admin-configurable only.
+10. **File Upload — IMPLEMENTED (local-disk, not MinIO).** Shipped 2026-06-16 (see `CLAUDE_HANDOVER.md` §3.5 + `FILE_UPLOAD_DEV_GUIDE.md`). Storage is a pluggable `StorageAdapter` (local-disk default; MinIO is a documented stub). Downloads stream through the backend — never serve files publicly. Never hardcode file size/type limits — they live in `SystemSetting['FILE_UPLOAD_CONFIG']`, Admin-configurable only (the 100 MB `ABSOLUTE_MAX_UPLOAD_BYTES` is an infra safety ceiling, not the policy). Soft-delete attachments — never physically remove evidence objects.
 11. **Terminal — cmd only.** Always use cmd syntax. Never PowerShell syntax (`$env:VAR`, backtick line continuation, etc.).
 12. **Update `CLAUDE_HANDOVER.md` after every completed feature.** Once the user confirms a feature is complete and all tests pass, update `CLAUDE_HANDOVER.md` — phase status, completed items, test count, new gotchas. Do this before ending the session. Never update it before the user confirms completion.
 13. **Update `CODE_REVIEW_AUDIT_LOG.md` after every accepted code or security review.** Log every finding with its severity and final status (Fixed / Deferred / Accepted-as-is). Update `CLAUDE_HANDOVER.md` §2 and §8 in the same session. Do NOT wait for the user to ask — this is mandatory after any `/code-review` or `/security-review` the user accepts.
@@ -158,6 +158,8 @@ All original 2026-05-29 audit findings are **implemented** (branch `claude/amazi
 - **DEF-2:** `SearchableSelect` has no keyboard navigation — fails WCAG keyboard-only (internal tool, address before external audit).
 - **DEF-3:** `transferIssuerRights` has no division-scope check on target (only role checked). Low risk at current privilege matrix.
 - **DEF-4:** `task:assign_div` holders can assign on tasks targeted at another division — needs product confirmation before locking.
+- **DEF-5:** (File Upload, 2026-06-16) No `PUT` endpoint for `FILE_UPLOAD_CONFIG` yet — limits change via direct DB upsert until a settings-panel endpoint is added.
+- **DEF-6:** (File Upload, 2026-06-16) Attachment `list`/`download` are auth-only (no per-entity scope), consistent with the transparency model. Add a scope check at `attachmentService.assertEntityExists` if visibility is ever tightened.
 
 All other findings from reviews on this branch are fixed. New findings from future reviews go in `CODE_REVIEW_AUDIT_LOG.md`.
 

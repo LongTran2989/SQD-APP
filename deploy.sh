@@ -97,7 +97,15 @@ NODE_ENV=production
 ENFORCE_SINGLE_SESSION=true
 FRONTEND_ORIGIN=https://$DOMAIN
 PORT=5000
+# File storage (uploads). Local-disk driver — objects are streamed through the
+# backend, never served publicly. STORAGE_LOCAL_ROOT must be a persistent path
+# (it is git-ignored so re-deploys never touch it). To migrate to MinIO/S3 later,
+# implement the MinIO adapter and set STORAGE_DRIVER=minio.
+STORAGE_DRIVER=local
+STORAGE_LOCAL_ROOT=/app/backend/storage
 EOF
+# Persistent storage root for uploaded files (survives re-deploys; git-ignored).
+mkdir -p /app/backend/storage
 npm install
 npx prisma db push
 npx prisma db seed
@@ -133,6 +141,11 @@ cat > /etc/nginx/sites-available/sqd-app << NGINX
 server {
     listen 80;
     server_name $DOMAIN;
+
+    # Allow file uploads through the proxy. Matches the backend's absolute
+    # memory-safety ceiling (ABSOLUTE_MAX_UPLOAD_BYTES); the per-file policy
+    # limit is enforced in the app and is Admin-configurable.
+    client_max_body_size 100M;
 
     # SSE endpoint needs streaming (no buffering)
     location /api/events/ {

@@ -5,6 +5,7 @@ import { FormField, TaskStatus } from '../../types';
 import { getDatasource } from '../../api/taskApi';
 import { Lock } from 'lucide-react';
 import RichTextEditor from '../ui/RichTextEditor';
+import FileUploadField from '../ui/FileUploadField';
 
 // ─── Statuses where the form is read-only ─────────────────────────────────────
 
@@ -84,11 +85,13 @@ function FieldRenderer({
   value,
   onChange,
   disabled,
+  taskId,
 }: {
   field: FormField;
   value: unknown;
   onChange: (v: unknown) => void;
   disabled: boolean;
+  taskId: number;
 }) {
   const baseInputClass = `w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
     disabled ? 'bg-slate-50 border-slate-200 text-slate-500 cursor-not-allowed' : 'bg-white border-slate-300'
@@ -261,9 +264,13 @@ function FieldRenderer({
 
     case 'file_upload':
       return (
-        <div className="w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-sm text-slate-400 text-center">
-          📎 File upload is not yet supported in this version.
-        </div>
+        <FileUploadField
+          entityType="TASK"
+          entityId={taskId}
+          fieldId={field.fieldId}
+          disabled={disabled}
+          onChange={(ids) => onChange(ids)}
+        />
       );
 
     default:
@@ -278,6 +285,7 @@ function FieldRenderer({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface TaskFormPanelProps {
+  taskId: number;
   schemaSnapshot: FormField[];
   taskStatus: TaskStatus;
   formData: Record<string, unknown>;
@@ -285,6 +293,7 @@ interface TaskFormPanelProps {
 }
 
 export default function TaskFormPanel({
+  taskId,
   schemaSnapshot,
   taskStatus,
   formData,
@@ -334,6 +343,7 @@ export default function TaskFormPanel({
               value={formData[field.fieldId]}
               onChange={(v) => onDataChange(field.fieldId, v)}
               disabled={isReadOnly}
+              taskId={taskId}
             />
           </div>
         ))}
