@@ -21,9 +21,26 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
       metrics = { myPendingTasks, unassignedTasks, allOpenFindings };
       
     } else if (role === 'Manager') {
-      const divisionPendingTasks = await prisma.task.count({
-        where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved'] }, deletedAt: null }
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date(startOfToday.getTime() + 86400000);
+
+      const unassigned = await prisma.task.count({
+        where: { targetDivisionId: divisionId, status: 'Unassigned', deletedAt: null }
       });
+      const dueToday = await prisma.task.count({
+        where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
+      });
+      const overdue = await prisma.task.count({
+        where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
+      });
+      const inReview = await prisma.task.count({
+        where: { targetDivisionId: divisionId, status: 'In Review', deletedAt: null }
+      });
+      const pendingRating = await prisma.task.count({
+        where: { targetDivisionId: divisionId, status: { in: ['Closed', 'Approved'] }, rating: null, deletedAt: null }
+      });
+      const divisionPendingTasks = { unassigned, dueToday, overdue, inReview, pendingRating };
       
       let escalationsCount = 0;
       if (hasPrivilege(req.user!, 'escalation:review')) {
@@ -45,25 +62,46 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
         }).length;
       }
 
-      const findingsPendingVerification = await prisma.finding.count({
-        where: { targetDivisionId: divisionId, status: 'Pending Verification', deletedAt: null }
-      });
-      metrics = { divisionPendingTasks, escalations: escalationsCount, findingsPendingVerification };
+      const openFindings = await prisma.finding.count({ where: { targetDivisionId: divisionId, status: 'Open', deletedAt: null } });
+      const pendingVerification = await prisma.finding.count({ where: { targetDivisionId: divisionId, status: 'Pending Verification', deletedAt: null } });
+      const inProgressFindings = await prisma.finding.count({ where: { targetDivisionId: divisionId, status: 'In Progress', deletedAt: null } });
+      const findingsOverview = { open: openFindings, pendingVerification, inProgress: inProgressFindings };
+
+      metrics = { divisionPendingTasks, escalations: escalationsCount, findingsOverview };
       
     } else if (role === 'Director' || role === 'Admin') {
-      const systemPendingTasks = await prisma.task.count({
-        where: { status: { notIn: ['Closed', 'Approved'] }, deletedAt: null }
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date(startOfToday.getTime() + 86400000);
+
+      const unassigned = await prisma.task.count({
+        where: { status: 'Unassigned', deletedAt: null }
       });
+      const dueToday = await prisma.task.count({
+        where: { status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
+      });
+      const overdue = await prisma.task.count({
+        where: { status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
+      });
+      const inReview = await prisma.task.count({
+        where: { status: 'In Review', deletedAt: null }
+      });
+      const pendingRating = await prisma.task.count({
+        where: { status: { in: ['Closed', 'Approved'] }, rating: null, deletedAt: null }
+      });
+      const systemPendingTasks = { unassigned, dueToday, overdue, inReview, pendingRating };
       
       let escalationsCount = 0;
       if (hasPrivilege(req.user!, 'escalation:review')) {
         escalationsCount = await prisma.escalationFlag.count({ where: { status: 'PENDING' } });
       }
 
-      const findingsPendingVerification = await prisma.finding.count({
-        where: { status: 'Pending Verification', deletedAt: null }
-      });
-      metrics = { systemPendingTasks, escalations: escalationsCount, findingsPendingVerification };
+      const openFindings = await prisma.finding.count({ where: { status: 'Open', deletedAt: null } });
+      const pendingVerification = await prisma.finding.count({ where: { status: 'Pending Verification', deletedAt: null } });
+      const inProgressFindings = await prisma.finding.count({ where: { status: 'In Progress', deletedAt: null } });
+      const findingsOverview = { open: openFindings, pendingVerification, inProgress: inProgressFindings };
+
+      metrics = { systemPendingTasks, escalations: escalationsCount, findingsOverview };
     }
 
     res.json(metrics);
@@ -142,16 +180,28 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
         ]
       };
     } else if (role === 'Manager') {
-      // Division scope
+      // Division scope + tasks and findings
+      const divisionTasks = await prisma.task.findMany({ where: { targetDivisionId: divisionId, deletedAt: null }, select: { id: true } });
+      const divisionFindings = await prisma.finding.findMany({ where: { targetDivisionId: divisionId, deletedAt: null }, select: { id: true } });
+      
       feedWhere = {
         OR: [
           { scope: 'DIVISION', scopeId: divisionId },
-          { scope: 'ORG' } // might want to see ORG events too
+          { scope: 'ORG' },
+          { scope: 'TASK', scopeId: { in: divisionTasks.map(t => t.id) } },
+          { scope: 'FINDING', scopeId: { in: divisionFindings.map(f => f.id) } }
         ]
       };
     } else {
-      // Director/Admin: Org scope
-      feedWhere = { scope: 'ORG' }; // Or no filter to see everything
+      // Director/Admin: Org scope + all tasks and findings
+      feedWhere = {
+        OR: [
+          { scope: 'ORG' },
+          { scope: 'DIVISION' },
+          { scope: 'TASK' },
+          { scope: 'FINDING' }
+        ]
+      };
     }
 
     const posts = await prisma.feedPost.findMany({

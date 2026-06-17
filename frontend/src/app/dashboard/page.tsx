@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuthStore } from '../../store/authStore';
 import { MetricCard } from '../../components/dashboard/MetricCard';
+import { DetailedMetricWidget } from '../../components/dashboard/DetailedMetricWidget';
 import { QuickActionBar } from '../../components/dashboard/QuickActionBar';
 import { ActivityFeedWidget } from '../../components/dashboard/ActivityFeedWidget';
 import { EscalationWidget } from '../../components/dashboard/EscalationWidget';
@@ -18,7 +19,6 @@ import {
   FeedPost
 } from '../../api/dashboardApi';
 import toast from 'react-hot-toast';
-import CreateTaskModal from '../../components/tasks/CreateTaskModal';
 
 export default function DashboardHome() {
   const user = useAuthStore((state) => state.user);
@@ -31,8 +31,6 @@ export default function DashboardHome() {
   const [isLoadingSummary, setIsLoadingSummary] = useState(true);
   const [isLoadingWps, setIsLoadingWps] = useState(true);
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
-
-  const [showCreateTask, setShowCreateTask] = useState(false);
 
   const fetchData = useCallback(async () => {
     setIsRefreshing(true);
@@ -60,23 +58,27 @@ export default function DashboardHome() {
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12">
       {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-8 rounded-2xl shadow-md flex items-center justify-between relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mt-16 -mr-16 w-64 h-64 bg-white/5 rounded-full blur-3xl"></div>
-        <div className="relative z-10">
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Welcome back, {user?.name}!</h1>
-          <p className="text-slate-300 font-medium">
-            {isStaff ? 'Here are your assigned tasks and recent updates.' : "Here is the overview of your division's operations today."}
-          </p>
-        </div>
-        <div className="w-16 h-16 bg-white/10 backdrop-blur rounded-2xl flex items-center justify-center relative z-10 border border-white/20">
-          <img src="/logo.png" alt="SQD Logo" className="w-10 h-10 object-contain drop-shadow-md" />
+      <div className="bg-gradient-to-r from-white via-slate-50/50 to-white border border-slate-200/60 p-5 rounded-2xl shadow-sm flex items-center justify-between relative overflow-hidden">
+        <div className="absolute top-0 right-0 -mt-6 -mr-6 w-24 h-24 bg-indigo-500/5 rounded-full blur-xl"></div>
+        <div className="flex items-center space-x-5 relative z-10">
+          <div className="w-14 h-14 bg-white rounded-xl flex items-center justify-center p-2 shadow-sm border border-slate-100">
+            <img src="/logo.png" alt="VAECO Logo" className="w-full h-full object-contain" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight">
+              Welcome back, <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">{user?.name}</span>!
+            </h1>
+            <p className="text-slate-500 font-medium text-xs flex items-center gap-2 mt-0.5">
+              <span className="bg-indigo-50 px-2 py-0.5 rounded-full text-indigo-600 font-bold border border-indigo-100">{user?.role}</span>
+              <span>{isStaff ? 'Here are your assigned tasks and recent updates.' : "Here is the overview of your division's operations today."}</span>
+            </p>
+          </div>
         </div>
       </div>
 
       <QuickActionBar 
         onRefresh={fetchData} 
         isRefreshing={isRefreshing} 
-        onCreateTask={() => setShowCreateTask(true)}
       />
 
       {/* Top Metrics Row */}
@@ -113,25 +115,35 @@ export default function DashboardHome() {
           </>
         ) : (
           <>
-            <MetricCard 
+            <DetailedMetricWidget 
               title={user?.role === 'Director' ? "System Pending Tasks" : "Division Pending Tasks"} 
-              value={user?.role === 'Director' ? (summary?.systemPendingTasks ?? 0) : (summary?.divisionPendingTasks ?? 0)} 
-              subtitle="Tasks awaiting action"
               icon={<Clock className="w-6 h-6" />}
               iconBgColor="bg-amber-50"
               iconTextColor="text-amber-600"
               isLoading={isLoadingSummary}
+              breakdown={[
+                { label: 'Unassigned', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.unassigned : summary?.divisionPendingTasks?.unassigned) ?? 0, colorClass: 'bg-slate-400' },
+                { label: 'Due Today', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.dueToday : summary?.divisionPendingTasks?.dueToday) ?? 0, colorClass: 'bg-amber-500' },
+                { label: 'Overdue', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.overdue : summary?.divisionPendingTasks?.overdue) ?? 0, colorClass: 'bg-red-500' },
+                { label: 'In Review', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.inReview : summary?.divisionPendingTasks?.inReview) ?? 0, colorClass: 'bg-blue-500' },
+                { label: 'Pending Rating', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.pendingRating : summary?.divisionPendingTasks?.pendingRating) ?? 0, colorClass: 'bg-indigo-500' },
+              ]}
+              linkTo="/dashboard/tasks"
             />
-            <EscalationWidget count={summary?.escalations ?? 0} isLoading={isLoadingSummary} />
-            <MetricCard 
-              title="Pending Verification" 
-              value={summary?.findingsPendingVerification ?? 0} 
-              subtitle="Findings requiring closure"
+            <DetailedMetricWidget 
+              title="Findings Overview" 
               icon={<ShieldCheck className="w-6 h-6" />}
               iconBgColor="bg-emerald-50"
               iconTextColor="text-emerald-600"
               isLoading={isLoadingSummary}
+              breakdown={[
+                { label: 'Open', value: summary?.findingsOverview?.open ?? 0, colorClass: 'bg-red-500' },
+                { label: 'Pending Verification', value: summary?.findingsOverview?.pendingVerification ?? 0, colorClass: 'bg-amber-500' },
+                { label: 'In Progress', value: summary?.findingsOverview?.inProgress ?? 0, colorClass: 'bg-blue-500' },
+              ]}
+              linkTo="/dashboard/findings"
             />
+            <EscalationWidget count={summary?.escalations ?? 0} isLoading={isLoadingSummary} />
           </>
         )}
       </div>
@@ -148,14 +160,6 @@ export default function DashboardHome() {
           <ActivityFeedWidget posts={feed} isLoading={isLoadingFeed} />
         </div>
       </div>
-
-      {/* Modals */}
-      {showCreateTask && (
-        <CreateTaskModal 
-          onClose={() => setShowCreateTask(false)}
-          onSaved={(id) => { setShowCreateTask(false); fetchData(); }}
-        />
-      )}
     </div>
   );
 }

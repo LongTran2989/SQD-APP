@@ -1,13 +1,27 @@
 import { apiClient } from './client';
 
+export interface TaskBreakdown {
+  unassigned: number;
+  dueToday: number;
+  overdue: number;
+  inReview: number;
+  pendingRating: number;
+}
+
+export interface FindingsOverview {
+  open: number;
+  pendingVerification: number;
+  inProgress: number;
+}
+
 export interface DashboardSummary {
   myPendingTasks?: number;
   unassignedTasks?: number;
   allOpenFindings?: number;
-  divisionPendingTasks?: number;
+  divisionPendingTasks?: TaskBreakdown;
+  systemPendingTasks?: TaskBreakdown;
+  findingsOverview?: FindingsOverview;
   escalations?: number;
-  findingsPendingVerification?: number;
-  systemPendingTasks?: number;
 }
 
 export interface DashboardWorkPackage {
