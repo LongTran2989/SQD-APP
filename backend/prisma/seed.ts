@@ -267,9 +267,13 @@ async function main() {
 
   let created = 0;
   for (const u of userData) {
+    // Re-running the seed (e.g. every deploy.sh redeploy) must NOT touch an
+    // existing user's credentials — only the first-ever insert sets the seed
+    // password. Without this, anyone who already changed their password gets
+    // silently reset to the default on the next redeploy.
     await prisma.user.upsert({
       where:  { employeeId: u.employeeId },
-      update: { passwordHash: hashCache[u.password]! },
+      update: {},
       create: {
         employeeId:          u.employeeId,
         name:                u.name,
