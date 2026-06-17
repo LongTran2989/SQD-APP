@@ -25,9 +25,11 @@ import realtimeRoutes from './routes/realtime.routes';
 import referenceDataRoutes from './routes/referenceData.routes';
 import attachmentRoutes from './routes/attachment.routes';
 import dashboardRoutes from './routes/dashboard.routes';
+import cron from 'node-cron';
 import { startRealtimeListener } from './realtime/pgEvents';
 import { purgeOldNotifications } from './services/notificationService';
 import { initStorage } from './services/storage';
+import { runAutoGenCron, APP_TIMEZONE } from './services/autoGenService';
 
 dotenv.config();
 
@@ -112,6 +114,10 @@ if (process.env.NODE_ENV !== 'test') {
   // shutdown (clean exit on SIGTERM/SIGINT during a deploy).
   void purgeOldNotifications(prisma);
   setInterval(() => void purgeOldNotifications(prisma), 24 * 60 * 60 * 1000).unref();
+  // Nightly auto-generate sweep (00:05 in APP_TIMEZONE). The per-WP FOR UPDATE
+  // lock + autoGenFiredAt make each fire idempotent, so a missed/duplicate run
+  // is safe. APP_TIMEZONE anchors both this trigger and the service's date math.
+  cron.schedule('5 0 * * *', () => { void runAutoGenCron(prisma); }, { timezone: APP_TIMEZONE });
 }
 
 export default app;

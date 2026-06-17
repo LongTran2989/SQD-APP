@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { generateDailyCheckTasks } from '../services/wpCheckService';
+import { fireAutoGenForWp, validateAutoGenConfig } from '../services/autoGenService';
 import { createFeedPost } from '../services/feedService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege } from '../utils/privilegeAccess';
@@ -187,16 +187,18 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
 
     const computedStatus = await computeWpStatus(wp);
 
-    // On-demand CHECK task generation
-    let checkTaskResult = undefined;
-    if (wp.type === 'CHECK' && wp.checkTemplateId && computedStatus === 'In Progress') {
-      checkTaskResult = await generateDailyCheckTasks(wp.id);
+    // On-demand catch-up: REPEAT mode only. A missed cron day is caught when
+    // someone opens the WP. SINGLE_SHOT is NEVER triggered on-demand — it must
+    // fire via cron so a Manager opening the WP early can't spawn it prematurely.
+    let autoGenResult = undefined;
+    if (wp.autoGenerate && wp.autoGenMode === 'REPEAT' && computedStatus === 'In Progress') {
+      autoGenResult = await fireAutoGenForWp(wp.id);
     }
 
     res.json({
       ...wp,
       computedStatus,
-      checkTaskResult
+      autoGenResult
     });
   } catch (error) {
     console.error('Error fetching work package:', error);
@@ -208,7 +210,11 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
 export const createWorkPackage = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const { name, type, divisionId, timeframeFrom, timeframeTo, checkTemplateId, acRegistration, customer, authority, targetDepartmentId } = req.body;
+    const {
+      name, type, divisionId, timeframeFrom, timeframeTo,
+      acRegistration, customer, authority, targetDepartmentId,
+      autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId, autoGenSetId, autoGenInlineSet,
+    } = req.body;
 
     if (!name || !type || !divisionId || !timeframeFrom || !timeframeTo) {
       res.status(400).json({ message: 'name, type, divisionId, timeframeFrom, and timeframeTo are required' });
@@ -234,23 +240,13 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // CHECK type requires checkTemplateId
-    if (type === 'CHECK' && !checkTemplateId) {
-      res.status(400).json({ message: 'CHECK type Work Packages require a checkTemplateId' });
+    // Validate + normalize the auto-generate config (any WP type may opt in).
+    const autoGen = await validateAutoGenConfig(prisma, {
+      autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId, autoGenSetId, autoGenInlineSet,
+    });
+    if ('error' in autoGen) {
+      res.status(400).json({ message: autoGen.error });
       return;
-    }
-
-    // Validate checkTemplateId if provided
-    if (checkTemplateId) {
-      const template = await prisma.template.findUnique({ where: { id: checkTemplateId } });
-      if (!template) {
-        res.status(400).json({ message: 'checkTemplateId references a non-existent template' });
-        return;
-      }
-      if (template.status !== 'Published') {
-        res.status(400).json({ message: 'checkTemplateId must reference a Published template' });
-        return;
-      }
     }
 
     // Auto-generate wpId
@@ -285,7 +281,7 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
           timeframeFrom: fromDate,
           timeframeTo: toDate,
           creatorId: userId,
-          checkTemplateId: checkTemplateId || null,
+          ...autoGen.data,
           ...typeFields,
           status: 'Open',
         },
@@ -326,7 +322,10 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
     const userRole = req.user!.role;
-    const { name, timeframeFrom, timeframeTo, checkTemplateId, acRegistration, customer, authority, targetDepartmentId } = req.body;
+    const {
+      name, timeframeFrom, timeframeTo, acRegistration, customer, authority, targetDepartmentId,
+      autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId, autoGenSetId, autoGenInlineSet,
+    } = req.body;
 
     const wp = await prisma.workPackage.findUnique({ where: { id, deletedAt: null } });
     if (!wp) {
@@ -355,8 +354,10 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
     // Assignees can only touch timeframe fields.
     if (!isManager) {
       const touchesNonTimeframe =
-        name !== undefined || checkTemplateId !== undefined || acRegistration !== undefined ||
-        customer !== undefined || authority !== undefined || targetDepartmentId !== undefined;
+        name !== undefined || acRegistration !== undefined ||
+        customer !== undefined || authority !== undefined || targetDepartmentId !== undefined ||
+        autoGenerate !== undefined || autoGenMode !== undefined || autoGenInterval !== undefined ||
+        autoGenTemplateId !== undefined || autoGenSetId !== undefined || autoGenInlineSet !== undefined;
       if (touchesNonTimeframe) {
         res.status(403).json({ message: 'Assigned users may only edit the timeframe of a Work Package' });
         return;
@@ -374,13 +375,26 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
     if (name !== undefined) dataToUpdate.name = name;
     if (timeframeFrom !== undefined) dataToUpdate.timeframeFrom = new Date(timeframeFrom);
     if (timeframeTo !== undefined) dataToUpdate.timeframeTo = new Date(timeframeTo);
-    if (checkTemplateId !== undefined) dataToUpdate.checkTemplateId = checkTemplateId;
 
     // Type-specific fields (managers only; resolved/validated against the WP type).
     if (isManager && (acRegistration !== undefined || customer !== undefined || authority !== undefined || targetDepartmentId !== undefined)) {
       const typeFields = await resolveWpTypeFields(wp.type, { acRegistration, customer, authority, targetDepartmentId }, res);
       if (typeFields === null) return;
       Object.assign(dataToUpdate, typeFields);
+    }
+
+    // Auto-generate config (managers only). Replace-semantics: to change it, the
+    // client sends the full block (autoGenerate present). autoGenFiredAt is left
+    // untouched so an already-fired SINGLE_SHOT never silently re-spawns.
+    if (isManager && autoGenerate !== undefined) {
+      const autoGen = await validateAutoGenConfig(prisma, {
+        autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId, autoGenSetId, autoGenInlineSet,
+      });
+      if ('error' in autoGen) {
+        res.status(400).json({ message: autoGen.error });
+        return;
+      }
+      Object.assign(dataToUpdate, autoGen.data);
     }
 
     // Validate the resulting timeframe ordering.

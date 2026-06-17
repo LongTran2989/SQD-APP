@@ -35,6 +35,8 @@ model Division {
   targetedTasks Task[]        @relation("TaskTargetDivision")
   targetedFinds Finding[]     @relation("FindingTargetDivision")
   workPackages  WorkPackage[]
+  templateSets  TemplateSet[]
+  wpBlueprints  WpBlueprint[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 }
@@ -107,6 +109,10 @@ model User {
 
   // Files this user uploaded (Attachment owner back-relation).
   uploadedAttachments Attachment[] @relation("AttachmentUploadedBy")
+
+  // Auto-generate ownership (Template Sets / WP Blueprints this user owns).
+  ownedTemplateSets TemplateSet[] @relation("TemplateSetOwner")
+  ownedBlueprints   WpBlueprint[] @relation("WpBlueprintOwner")
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -213,6 +219,11 @@ model Template {
 
   tasks            Task[]
   revisionArchives TemplateRevisionArchive[]
+
+  // Auto-generate back-relations (source references; no behaviour here)
+  autoGenWorkPackages WorkPackage[]     @relation("WpAutoGenTemplate")
+  templateSetItems    TemplateSetItem[]
+  blueprintAutoGenWPs WpBlueprint[]     @relation("BlueprintAutoGenTemplate")
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -692,7 +703,23 @@ model WorkPackage {
   creatorId Int
   creator   User @relation("WorkPackageCreator", fields: [creatorId], references: [id])
 
-  checkTemplateId Int? // ID of Template to auto-generate daily CHECK tasks
+  // ── Auto-generate config (generalized; replaces the old CHECK-only path) ──
+  // Any WP type may opt in. Exactly one source (template / set / inline) is set
+  // when autoGenerate=true — enforced at the application layer (validateAutoGenConfig).
+  autoGenerate      Boolean      @default(false)
+  autoGenMode       String? // 'SINGLE_SHOT' | 'REPEAT'
+  autoGenInterval   Int? // days between repeats (REPEAT mode only)
+  autoGenTemplateId Int? // single-template source (REPEAT, or single-template SINGLE_SHOT)
+  autoGenTemplate   Template?    @relation("WpAutoGenTemplate", fields: [autoGenTemplateId], references: [id])
+  autoGenSetId      Int? // saved TemplateSet source (SINGLE_SHOT)
+  autoGenSet        TemplateSet? @relation(fields: [autoGenSetId], references: [id])
+  autoGenInlineSet  Json? // inline InlineTemplateSetItem[] (SINGLE_SHOT)
+  autoGenFiredAt    DateTime? // last auto-gen fire — single source of truth for idempotency
+
+  // ── Blueprint origin (null for ad-hoc WPs) ──
+  blueprintId Int?
+  blueprint   WpBlueprint? @relation(fields: [blueprintId], references: [id])
+  isRoutine   Boolean      @default(false)
 
   // Type-specific fields (CHECK): aircraft/customer/authority context
   acRegistration String?
@@ -715,6 +742,7 @@ model WorkPackage {
   updatedAt DateTime  @updatedAt
 
   @@index([targetDepartmentId])
+  @@index([autoGenerate, status, deletedAt])
 }
 
 model WorkPackageAssignment {
@@ -734,6 +762,94 @@ model WpType {
   description String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
+}
+
+// -----------------------------------------------------------------------
+// Auto-Generate: Template Sets + WP Blueprints (generalized scheduling)
+// -----------------------------------------------------------------------
+
+// A reusable, ordered bundle of templates a SINGLE_SHOT WP can spawn at once.
+// Soft-disabled via isActive (never hard-deleted while WPs/blueprints reference it).
+model TemplateSet {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  divisionId  Int
+  division    Division @relation(fields: [divisionId], references: [id])
+  ownerId     Int
+  owner       User     @relation("TemplateSetOwner", fields: [ownerId], references: [id])
+  isActive    Boolean  @default(true)
+
+  items        TemplateSetItem[]
+  workPackages WorkPackage[] // back-relation via WorkPackage.autoGenSetId
+  blueprints   WpBlueprint[]     @relation("BlueprintAutoGenSet") // via WpBlueprint.defaultAutoGenSetId
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TemplateSetItem {
+  id         Int         @id @default(autoincrement())
+  setId      Int
+  set        TemplateSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+  templateId Int
+  template   Template    @relation(fields: [templateId], references: [id])
+  orderIndex Int
+
+  // Per-item overrides (all optional)
+  deadlineOffsetDays Int? // days before timeframeTo (subtracted from WP end date)
+  estimatedHours     Float?
+  skillLevel         Int?
+  requiresApproval   Boolean?
+  defaultNote        String? // pre-populated issuanceNote
+
+  createdAt DateTime @default(now())
+
+  @@unique([setId, orderIndex])
+  @@index([setId])
+}
+
+// A reusable WP recipe: pre-fills WP creation values + auto-gen config + an
+// (optional) recurrence schedule. "Launch" instantiates a WorkPackage from it.
+model WpBlueprint {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  type        String // WpType code (label only, no behaviour attached)
+  divisionId  Int
+  division    Division @relation(fields: [divisionId], references: [id])
+
+  // Default WP creation values (all overridable at launch time)
+  defaultDuration Int // calendar days (timeframeTo = timeframeFrom + defaultDuration)
+
+  // Auto-generate config — pre-fills the WP's autoGen fields at launch
+  defaultAutoGenerate      Boolean      @default(false)
+  defaultAutoGenMode       String?
+  defaultAutoGenInterval   Int?
+  defaultAutoGenTemplateId Int?
+  defaultAutoGenTemplate   Template?    @relation("BlueprintAutoGenTemplate", fields: [defaultAutoGenTemplateId], references: [id])
+  defaultAutoGenSetId      Int?
+  defaultAutoGenSet        TemplateSet? @relation("BlueprintAutoGenSet", fields: [defaultAutoGenSetId], references: [id])
+  defaultAutoGenInlineSet  Json?
+
+  // Recurrence scheduling
+  recurrenceType     String? // 'CALENDAR' | 'LAST_DONE' | null (manual launch only)
+  recurrenceInterval Int? // days
+
+  // Type-specific context defaults (overridable at launch)
+  targetDepartmentId Int?
+  acRegistration     String?
+  customer           String?
+  authority          String?
+
+  ownerId  Int
+  owner    User    @relation("WpBlueprintOwner", fields: [ownerId], references: [id])
+  isActive Boolean @default(true)
+
+  instances WorkPackage[] // back-relation via WorkPackage.blueprintId
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model EventType {
