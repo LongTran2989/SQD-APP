@@ -77,7 +77,12 @@ export default function FindingDetailPage() {
     }
   };
 
-  if (loading) {
+  // Full-page spinner only on the INITIAL load (finding still null). Background
+  // refetches — e.g. the realtime/feed refresh that fires on window refocus when
+  // the native file-picker dialog closes — must NOT unmount the page, or they
+  // destroy the open <input> before its change event reaches React's onChange
+  // (which silently swallows evidence uploads). Keep the loaded page mounted.
+  if (loading && !finding) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
