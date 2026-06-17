@@ -24,6 +24,7 @@ import notificationRoutes from './routes/notification.routes';
 import realtimeRoutes from './routes/realtime.routes';
 import referenceDataRoutes from './routes/referenceData.routes';
 import attachmentRoutes from './routes/attachment.routes';
+import dashboardRoutes from './routes/dashboard.routes';
 import { startRealtimeListener } from './realtime/pgEvents';
 import { purgeOldNotifications } from './services/notificationService';
 import { initStorage } from './services/storage';
@@ -61,6 +62,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/events', realtimeRoutes);
 app.use('/api/admin/reference-data', referenceDataRoutes);
 app.use('/api/attachments', attachmentRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {
