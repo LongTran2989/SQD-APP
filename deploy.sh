@@ -181,6 +181,17 @@ NGINX
 
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/sqd-app /etc/nginx/sites-enabled/sqd-app
+
+# Also set the upload size limit at the http{} level. certbot --redirect (step 9)
+# rewrites the server blocks for HTTPS, and the per-server directive above is not
+# reliably carried onto the request path it generates — leaving nginx at its 1 MB
+# default and rejecting larger uploads with 413 before they reach Node. A single
+# http-level directive applies to every server block regardless of how certbot
+# restructures them. Idempotent: only inserted once.
+if ! grep -q 'client_max_body_size' /etc/nginx/nginx.conf; then
+  sed -i '/^http {/a\    client_max_body_size 100M;' /etc/nginx/nginx.conf
+fi
+
 nginx -t && systemctl reload nginx
 
 # ── 9. SSL certificate ────────────────────────────────────────────────────────
