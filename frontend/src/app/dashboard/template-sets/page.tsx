@@ -7,7 +7,7 @@ import { TemplateSet } from '../../../types';
 import { getTemplateSets, disableTemplateSet } from '../../../api/templateSetApi';
 import TemplateSetForm from '../../../components/template-sets/TemplateSetForm';
 import toast from 'react-hot-toast';
-import { Plus, Layers, Pencil, Ban, Building2 } from 'lucide-react';
+import { Plus, Layers, Pencil, Ban, Building2, Copy } from 'lucide-react';
 
 const MANAGER_ROLES = ['Manager', 'Director', 'Admin'];
 
@@ -20,7 +20,7 @@ export default function TemplateSetsPage() {
   const [sets, setSets] = useState<TemplateSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [showActive, setShowActive] = useState(true);
-  const [modal, setModal] = useState<{ open: boolean; editId?: number }>({ open: false });
+  const [modal, setModal] = useState<{ open: boolean; editId?: number; cloneId?: number }>({ open: false });
 
   // Managers can only act on their own division's sets.
   const canManageSet = (s: TemplateSet) => canManage && (isGlobal || s.divisionId === user?.divisionId);
@@ -108,20 +108,26 @@ export default function TemplateSetsPage() {
                 </div>
                 {s.description && <p className="text-sm text-slate-500 mt-1 truncate">{s.description}</p>}
               </div>
-              {canManageSet(s) && (
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => setModal({ open: true, editId: s.id })}
-                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" aria-label="Edit">
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  {s.isActive && (
-                    <button onClick={() => handleDisable(s)}
-                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" aria-label="Disable">
-                      <Ban className="w-4 h-4" />
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => setModal({ open: true, cloneId: s.id })}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" aria-label="Clone">
+                  <Copy className="w-4 h-4" />
+                </button>
+                {canManageSet(s) && (
+                  <>
+                    <button onClick={() => setModal({ open: true, editId: s.id })}
+                      className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" aria-label="Edit">
+                      <Pencil className="w-4 h-4" />
                     </button>
-                  )}
-                </div>
-              )}
+                    {s.isActive && (
+                      <button onClick={() => handleDisable(s)}
+                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" aria-label="Disable">
+                        <Ban className="w-4 h-4" />
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -130,6 +136,7 @@ export default function TemplateSetsPage() {
       {modal.open && (
         <TemplateSetForm
           editId={modal.editId}
+          cloneId={modal.cloneId}
           onClose={() => setModal({ open: false })}
           onSaved={() => { setModal({ open: false }); fetchSets(); }}
         />

@@ -217,3 +217,152 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+export const getOngoingWorks = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role, divisionId } = req.user!;
+    const statusFilter = req.query.status as string;
+
+    // Build common where conditions
+    let wpWhere: any = { deletedAt: null };
+    let taskWhere: any = { wpId: null, deletedAt: null };
+
+    // We removed status filter at the DB level to allow filtering everything in the backend memory,
+    // or we can keep it for DB if it's standard. But because 'statusFilter' now means multiple things 
+    // and EntityType filter will be added in frontend, it's better to fetch active ones and let frontend filter,
+    // OR we just ignore statusFilter query param for now and fetch all active, letting frontend do the filtering.
+    // Wait, the API still receives statusFilter but frontend can just filter locally.
+    // I will just fetch ALL active works and let the frontend do the complex filtering.
+
+    if (role === 'Staff') {
+      wpWhere.assignments = { some: { userId } };
+      taskWhere.assignedToUserId = userId;
+    } else if (role === 'Manager') {
+      wpWhere.divisionId = divisionId;
+      taskWhere.targetDivisionId = divisionId;
+    }
+
+    wpWhere.status = { notIn: ['Closed', 'Inactive'] };
+    taskWhere.status = { notIn: ['Closed', 'Inactive', 'Approved', 'Terminated'] };
+    
+    // Blueprints
+    let bpWhere: any = { isActive: true, recurrenceType: { not: null } };
+    if (role === 'Manager') {
+      bpWhere.divisionId = divisionId;
+    }
+
+    const [wps, tasks, bps] = await Promise.all([
+      prisma.workPackage.findMany({
+        where: wpWhere,
+        include: {
+          division: { select: { code: true } },
+          tasks: { select: { _count: { select: { sourceFindings: { where: { deletedAt: null } } } } } }
+        }
+      }),
+      prisma.task.findMany({
+        where: taskWhere,
+        include: {
+          targetDivision: { select: { code: true } },
+          assignedToUser: { select: { name: true } },
+          template: { select: { type: true, title: true } },
+          _count: { select: { sourceFindings: { where: { deletedAt: null } } } }
+        }
+      }),
+      prisma.wpBlueprint.findMany({
+        where: bpWhere,
+        include: {
+          division: { select: { code: true } },
+          _count: { select: { instances: true } }
+        }
+      })
+    ]);
+
+    const wpIds = wps.map(w => w.id);
+    const taskIds = tasks.map(t => t.id);
+
+    const [wpFeeds, taskFeeds] = await Promise.all([
+      wpIds.length ? prisma.feedPost.findMany({
+        where: { scope: 'WP', scopeId: { in: wpIds } },
+        orderBy: { createdAt: 'desc' },
+        include: { author: { select: { name: true } } }
+      }) : [],
+      taskIds.length ? prisma.feedPost.findMany({
+        where: { scope: 'TASK', scopeId: { in: taskIds } },
+        orderBy: { createdAt: 'desc' },
+        include: { author: { select: { name: true } } }
+      }) : []
+    ]);
+
+    const getFeeds = (scope: string, id: number) => {
+      const feeds = scope === 'WP' ? wpFeeds.filter(f => f.scopeId === id) : taskFeeds.filter(f => f.scopeId === id);
+      return feeds.slice(0, 5); // Return up to 5
+    };
+
+    const unified = [
+      ...wps.map(wp => ({
+        id: `wp-${wp.id}`,
+        entityId: wp.id,
+        link: `/dashboard/work-packages/${wp.id}`,
+        type: 'WP',
+        title: wp.name,
+        itemType: wp.type,
+        status: wp.status,
+        assignee: '-',
+        deadline: wp.timeframeTo,
+        divisionAbbrev: wp.division?.code ?? '-',
+        instructions: null,
+        findingsCount: wp.tasks.reduce((sum, t) => sum + t._count.sourceFindings, 0),
+        recentEvents: getFeeds('WP', wp.id),
+        meta: {}
+      })),
+      ...tasks.map(t => ({
+        id: `task-${t.id}`,
+        entityId: t.id,
+        link: `/dashboard/tasks/${t.id}`,
+        type: 'TASK',
+        title: t.title || t.template?.title || 'Task',
+        itemType: t.template?.type ?? 'Task',
+        status: t.status,
+        assignee: t.assignedToUser?.name ?? 'Unassigned',
+        deadline: t.deadline,
+        divisionAbbrev: t.targetDivision?.code ?? '-',
+        instructions: t.issuanceNote || null,
+        findingsCount: t._count.sourceFindings,
+        recentEvents: getFeeds('TASK', t.id),
+        meta: {}
+      })),
+      ...bps.map(b => ({
+        id: `blueprint-${b.id}`,
+        entityId: b.id,
+        link: `/dashboard/wp-blueprints`,
+        type: 'BLUEPRINT',
+        title: b.name,
+        itemType: b.type,
+        status: b.nextRunAt ? 'Scheduled' : 'Awaiting Completion',
+        assignee: '-',
+        deadline: b.nextRunAt,
+        divisionAbbrev: b.division?.code ?? '-',
+        instructions: b.description || null,
+        findingsCount: 0,
+        recentEvents: [],
+        meta: {
+          recurrenceType: b.recurrenceType,
+          recurrenceInterval: b.recurrenceInterval,
+          instancesLaunched: b._count.instances
+        }
+      }))
+    ];
+
+    unified.sort((a, b) => {
+      if (!a.deadline && !b.deadline) return 0;
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+      return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+    });
+
+    res.json(unified);
+  } catch (err) {
+    console.error('Error fetching ongoing works:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};

@@ -575,6 +575,15 @@ export const deleteTemplate = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    const activeSetItem = await prisma.templateSetItem.findFirst({
+      where: { templateId: id, set: { isActive: true } },
+      include: { set: { select: { name: true, division: { select: { name: true } } } } }
+    });
+    if (activeSetItem) {
+      res.status(400).json({ message: `Cannot delete template because it is currently used by the active Template Set '${activeSetItem.set.name}' in ${activeSetItem.set.division.name}.` });
+      return;
+    }
+
     const tasksCount = await prisma.task.count({ where: { templateId: id, deletedAt: null } });
     if (tasksCount > 0) {
       await prisma.template.update({
@@ -608,6 +617,15 @@ export const archiveTemplate = async (req: Request, res: Response): Promise<void
 
     if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
       res.status(403).json({ message: 'Only the template owner can archive this template.' });
+      return;
+    }
+
+    const activeSetItem = await prisma.templateSetItem.findFirst({
+      where: { templateId: id, set: { isActive: true } },
+      include: { set: { select: { name: true, division: { select: { name: true } } } } }
+    });
+    if (activeSetItem) {
+      res.status(400).json({ message: `Cannot archive template because it is currently used by the active Template Set '${activeSetItem.set.name}' in ${activeSetItem.set.division.name}.` });
       return;
     }
 

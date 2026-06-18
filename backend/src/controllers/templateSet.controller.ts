@@ -78,18 +78,17 @@ async function validateItems(
     });
   }
 
-  // Every template must exist, be Published, and live in the set's division.
+  // Every template must exist and be Published.
   const ids = [...new Set(normalized.map((n) => n.templateId))];
   const templates = await prisma.template.findMany({
     where: { id: { in: ids } },
-    select: { id: true, status: true, divisionId: true },
+    select: { id: true, status: true },
   });
   const byId = new Map(templates.map((t) => [t.id, t]));
   for (const id of ids) {
     const t = byId.get(id);
     if (!t) return { error: `Template id=${id} does not exist` };
     if (t.status !== 'Published') return { error: `Template id=${id} must be Published` };
-    if (t.divisionId !== divisionId) return { error: `Template id=${id} belongs to another division` };
   }
 
   return { items: normalized };

@@ -18,6 +18,8 @@ import {
 interface TemplateSetFormProps {
   /** When set, the modal edits this set; otherwise it creates a new one. */
   editId?: number;
+  /** When set, the modal loads this set's data but saves as a new set in the user's division. */
+  cloneId?: number;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -29,6 +31,7 @@ interface ItemRow {
   estimatedHours: number | '';
   skillLevel: number | '';
   requiresApproval: boolean;
+  allowsFindings?: boolean;
   defaultNote: string;
 }
 
@@ -38,7 +41,7 @@ const emptyRow = (): ItemRow => ({
 
 const ADMIN_DIRECTOR = ['Admin', 'Director'];
 
-export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSetFormProps) {
+export default function TemplateSetForm({ editId, cloneId, onClose, onSaved }: TemplateSetFormProps) {
   const { user } = useAuthStore();
   const isGlobal = user ? ADMIN_DIRECTOR.includes(user.role) : false;
 
@@ -66,11 +69,11 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
         setDivisions(divs);
         setAllTemplates((tplRes.data as { data: Template[] }).data ?? tplRes.data as Template[]);
 
-        if (editId) {
-          const set = await getTemplateSet(editId);
-          setName(set.name);
+        if (editId || cloneId) {
+          const set = await getTemplateSet((editId || cloneId)!);
+          setName(cloneId ? `${set.name} (Copy)` : set.name);
           setDescription(set.description ?? '');
-          setDivisionId(set.divisionId);
+          setDivisionId(cloneId ? (user?.divisionId ?? '') : set.divisionId);
           setRows(
             (set.items ?? []).map((it) => ({
               templateId: it.templateId,
@@ -78,6 +81,7 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
               estimatedHours: it.estimatedHours ?? '',
               skillLevel: it.skillLevel ?? '',
               requiresApproval: it.requiresApproval ?? false,
+              allowsFindings: (tplRes.data as { data: Template[] }).data?.find(t => t.id === it.templateId)?.allowsFindings ?? (tplRes.data as Template[])?.find(t => t.id === it.templateId)?.allowsFindings ?? true,
               defaultNote: it.defaultNote ?? '',
             }))
           );
@@ -142,8 +146,8 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white rounded-t-2xl">
-          <h2 className="text-base font-bold text-slate-800">{editId ? 'Edit Template Set' : 'New Template Set'}</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white rounded-t-2xl z-10">
+          <h2 className="text-base font-bold text-slate-800">{editId ? 'Edit Template Set' : cloneId ? 'Clone Template Set' : 'New Template Set'}</h2>
           <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
@@ -274,11 +278,16 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
                         onChange={(e) => updateRow(i, { skillLevel: e.target.value ? Number(e.target.value) : '' })}
                         className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded-lg bg-white text-sm" />
                     </label>
-                    <label className="text-xs text-slate-500 flex items-center gap-2 sm:col-span-1 col-span-2 pt-5">
+                    <label className="text-xs text-slate-500 flex items-center gap-2 pt-5">
                       <input type="checkbox" checked={row.requiresApproval}
                         onChange={(e) => updateRow(i, { requiresApproval: e.target.checked })} />
                       Requires approval
                     </label>
+                    <div className="text-xs text-slate-500 flex items-center gap-2 pt-5">
+                      <span className="flex items-center gap-1">
+                        Allow Findings: <span className="font-semibold text-slate-700">{row.allowsFindings === false ? 'No' : 'Yes'}</span>
+                      </span>
+                    </div>
                     <label className="text-xs text-slate-500 col-span-2 sm:col-span-3">
                       Default note
                       <input type="text" value={row.defaultNote}
@@ -288,6 +297,13 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
                   </div>
                 </div>
               ))}
+
+              <div className="pt-2">
+                <button type="button" onClick={addRow}
+                  className="w-full py-3 border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/50 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold text-blue-600 transition-all">
+                  <Plus className="w-4 h-4" /> Add template
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
@@ -313,7 +329,13 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
           .filter((id): id is number => id !== null)}
         onSelect={(t) => {
           if (pickerOpenForRow !== null) {
-            updateRow(pickerOpenForRow, { templateId: t.id });
+            updateRow(pickerOpenForRow, { 
+              templateId: t.id,
+              estimatedHours: t.estimatedHours ?? '',
+              skillLevel: t.skillLevel ?? '',
+              requiresApproval: t.requiresApproval ?? false,
+              allowsFindings: t.allowsFindings ?? true
+            });
             setPickerOpenForRow(null);
           }
         }}
