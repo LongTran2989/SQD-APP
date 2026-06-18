@@ -711,7 +711,9 @@ export type NotificationType =
   | 'TASK_SUBMITTED'
   | 'ESCALATION_QUEUED'
   | 'FINDING_CREATED'
-  | 'FEED_ACTIVITY';
+  | 'FEED_ACTIVITY'
+  | 'BLUEPRINT_LAUNCHED'
+  | 'TASKS_GENERATED';
 
 export type NotificationLinkScope = 'TASK' | 'WP' | 'FINDING' | 'ESCALATION';
 

@@ -18,6 +18,7 @@ const daysFromNow = (n: number) => new Date(Date.now() + n * DAY);
 describe('Recurrence Service (P7)', () => {
   let divisionId: number;
   let ownerId: number;
+  let directorUserId: number;
   let directorToken: string;
 
   beforeAll(async () => {
@@ -34,6 +35,7 @@ describe('Recurrence Service (P7)', () => {
     const director = await prisma.user.create({
       data: { name: 'Rec Director', email: 'director_rec@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId, roleId: directorRole.id },
     });
+    directorUserId = director.id;
     const secret = process.env.JWT_SECRET || 'fallback_secret';
     directorToken = jwt.sign({ userId: director.id, role: 'Director', divisionId }, secret);
 
@@ -41,6 +43,7 @@ describe('Recurrence Service (P7)', () => {
   });
 
   beforeEach(async () => {
+    await prisma.notificationEventConfig.deleteMany({});
     await prisma.notification.deleteMany({});
     await prisma.feedPost.deleteMany({});
     await prisma.auditLog.deleteMany({});
@@ -54,6 +57,7 @@ describe('Recurrence Service (P7)', () => {
   });
 
   afterAll(async () => {
+    await prisma.notificationEventConfig.deleteMany({});
     await prisma.notification.deleteMany({});
     await prisma.feedPost.deleteMany({});
     await prisma.auditLog.deleteMany({});
@@ -190,6 +194,74 @@ describe('Recurrence Service (P7)', () => {
       const firedCount = [r1, r2].filter((r) => r.fired).length;
       expect(firedCount).toBe(1);
       expect(await prisma.workPackage.count({ where: { blueprintId: bp.id } })).toBe(1);
+    });
+  });
+
+  // ── launch notifications (P8) ────────────────────────────────────────────────
+  describe('launch notifications', () => {
+    const createDraftTemplate = () =>
+      prisma.template.create({
+        data: {
+          templateId: `REC-T-${Date.now() % 1000000}-${Math.floor(Math.random() * 100000)}`,
+          title: 'Rec Draft Template',
+          formSchema: [{ id: '1', type: 'text', label: 'x' }],
+          status: 'Draft',
+          publishedAt: null,
+          ownerId,
+          divisionId,
+        },
+      });
+
+    it('notifies the owner + division managers on a successful auto-launch', async () => {
+      const scheduled = calendarDateUtc(daysAgo(1));
+      const bp = await createBlueprint({ recurrenceType: 'CALENDAR', recurrenceInterval: 30, recurrenceStartDate: scheduled, nextRunAt: scheduled });
+
+      const r = await fireRecurrenceForBlueprint(bp.id, prisma);
+      expect(r.fired).toBe(true);
+
+      const ownerNotice = await prisma.notification.findFirst({ where: { userId: ownerId, type: 'BLUEPRINT_LAUNCHED' } });
+      expect(ownerNotice).not.toBeNull();
+      expect(ownerNotice!.linkScope).toBe('WP');
+      expect(ownerNotice!.linkId).toBe(r.workPackageId);
+      expect((ownerNotice!.metadata as { outcome?: string }).outcome).toBe('launched');
+
+      // The Director holds wp:create cross-division → also notified.
+      expect(await prisma.notification.count({ where: { userId: directorUserId, type: 'BLUEPRINT_LAUNCHED' } })).toBe(1);
+    });
+
+    it('notifies on a launch failure once, then dedups the nightly retry', async () => {
+      const draft = await createDraftTemplate(); // not Published → validateAutoGenConfig fails at fire time
+      const scheduled = calendarDateUtc(daysAgo(1));
+      const bp = await createBlueprint({
+        recurrenceType: 'CALENDAR', recurrenceInterval: 30, recurrenceStartDate: scheduled, nextRunAt: scheduled,
+        defaultAutoGenerate: true, defaultAutoGenMode: 'REPEAT', defaultAutoGenInterval: 7, defaultAutoGenTemplateId: draft.id,
+      });
+
+      const r1 = await fireRecurrenceForBlueprint(bp.id, prisma);
+      expect(r1.fired).toBe(false);
+      // No WP minted; the failure is surfaced as a notification (and an AuditLog).
+      expect(await prisma.workPackage.count({ where: { blueprintId: bp.id } })).toBe(0);
+
+      const ownerNotices = await prisma.notification.findMany({ where: { userId: ownerId, type: 'BLUEPRINT_LAUNCHED' } });
+      expect(ownerNotices).toHaveLength(1);
+      expect((ownerNotices[0]!.metadata as { outcome?: string }).outcome).toBe('failed');
+      expect(ownerNotices[0]!.linkId).toBeNull();
+
+      // nextRunAt is not advanced on failure → the cron retries; the unread failure
+      // notice must NOT be duplicated.
+      const r2 = await fireRecurrenceForBlueprint(bp.id, prisma);
+      expect(r2.fired).toBe(false);
+      expect(await prisma.notification.count({ where: { userId: ownerId, type: 'BLUEPRINT_LAUNCHED' } })).toBe(1);
+    });
+
+    it('sends no launch notification when BLUEPRINT_LAUNCHED is disabled', async () => {
+      await prisma.notificationEventConfig.create({ data: { eventKey: 'BLUEPRINT_LAUNCHED', enabled: false, ccManagers: false } });
+      const scheduled = calendarDateUtc(daysAgo(1));
+      const bp = await createBlueprint({ recurrenceType: 'CALENDAR', recurrenceInterval: 30, recurrenceStartDate: scheduled, nextRunAt: scheduled });
+
+      const r = await fireRecurrenceForBlueprint(bp.id, prisma);
+      expect(r.fired).toBe(true);
+      expect(await prisma.notification.count({ where: { type: 'BLUEPRINT_LAUNCHED' } })).toBe(0);
     });
   });
 });

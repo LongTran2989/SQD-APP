@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { createWorkPackageService } from '../controllers/wp.controller';
 import { validateAutoGenConfig, calendarDateUtc, addDaysUtc } from './autoGenService';
+import { createNotifications, resolvePrivilegedUserIds, NotificationInput } from './notificationService';
 
 // P7 — Recurrence automation. A WpBlueprint with recurrenceType set auto-launches
 // a routine WorkPackage every recurrenceInterval days. Two modes:
@@ -34,7 +35,13 @@ export async function fireRecurrenceForBlueprint(
   blueprintId: number,
   client: PrismaClient = prisma
 ): Promise<RecurrenceFireResult> {
-  return client.$transaction(async (tx) => {
+  // Notify-context captured inside the transaction and emitted only after commit,
+  // so a notification failure can never roll back the launch (best-effort THIRD
+  // write — mirrors autoGenService's post-commit notify).
+  let launched: LaunchSuccessContext | null = null;
+  let failed: LaunchFailureContext | null = null;
+
+  const result = await client.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "WpBlueprint" WHERE id = ${blueprintId} FOR UPDATE`;
 
     const bp = await tx.wpBlueprint.findUnique({ where: { id: blueprintId } });
@@ -72,6 +79,13 @@ export async function fireRecurrenceForBlueprint(
           details: { blueprintId: bp.id, blueprintName: bp.name, error: autoGen.error },
         },
       });
+      failed = {
+        blueprintId: bp.id,
+        blueprintName: bp.name,
+        divisionId: bp.divisionId,
+        ownerId: bp.ownerId,
+        error: autoGen.error,
+      };
       return { fired: false, reason: autoGen.error };
     }
 
@@ -112,8 +126,105 @@ export async function fireRecurrenceForBlueprint(
     }
     await tx.wpBlueprint.update({ where: { id: bp.id }, data: { nextRunAt } });
 
+    launched = {
+      wpId: wp.id,
+      wpCode: wp.wpId,
+      blueprintId: bp.id,
+      blueprintName: bp.name,
+      divisionId: bp.divisionId,
+      ownerId: bp.ownerId,
+    };
     return { fired: true, workPackageId: wp.id };
   }, { timeout: 30000 });
+
+  // Post-commit notifications (best-effort; never affect the returned fire result).
+  if (launched) {
+    await notifyLaunchSuccess(launched).catch((err) =>
+      console.error(`[recurrence] launch notification failed for blueprintId=${blueprintId}`, err)
+    );
+  } else if (failed) {
+    await notifyLaunchFailure(failed).catch((err) =>
+      console.error(`[recurrence] failure notification failed for blueprintId=${blueprintId}`, err)
+    );
+  }
+
+  return result;
+}
+
+// ─── Launch notifications (Part A) ───────────────────────────────────────────
+// Recipients = blueprint owner + the division's WP managers. resolvePrivilegedUserIds
+// also pulls in Director/Admin cross-division — the oversight set for routine work.
+
+interface LaunchSuccessContext {
+  wpId: number;
+  wpCode: string;
+  blueprintId: number;
+  blueprintName: string;
+  divisionId: number;
+  ownerId: number;
+}
+
+interface LaunchFailureContext {
+  blueprintId: number;
+  blueprintName: string;
+  divisionId: number;
+  ownerId: number;
+  error: string;
+}
+
+async function resolveLaunchRecipients(ownerId: number, divisionId: number): Promise<number[]> {
+  const managers = await resolvePrivilegedUserIds(prisma, 'wp:create', divisionId);
+  return Array.from(new Set([ownerId, ...managers]));
+}
+
+async function notifyLaunchSuccess(ctx: LaunchSuccessContext): Promise<void> {
+  const recipients = await resolveLaunchRecipients(ctx.ownerId, ctx.divisionId);
+  await createNotifications(
+    prisma,
+    recipients.map((userId) => ({
+      userId,
+      type: 'BLUEPRINT_LAUNCHED' as const,
+      title: 'Routine work package launched',
+      body: `"${ctx.blueprintName}" (${ctx.wpCode}) was auto-created from a recurring blueprint.`,
+      linkScope: 'WP' as const,
+      linkId: ctx.wpId,
+      metadata: { outcome: 'launched', blueprintId: ctx.blueprintId },
+    }))
+  );
+}
+
+async function notifyLaunchFailure(ctx: LaunchFailureContext): Promise<void> {
+  const recipients = await resolveLaunchRecipients(ctx.ownerId, ctx.divisionId);
+
+  // Anti-spam: a failed launch retries every night (nextRunAt is not advanced on
+  // failure), so skip any recipient who still has an UNREAD failure notice for this
+  // blueprint — they are reminded once, not once per night until they fix it.
+  const inputs: NotificationInput[] = [];
+  for (const userId of recipients) {
+    const existing = await prisma.notification.findFirst({
+      where: {
+        userId,
+        type: 'BLUEPRINT_LAUNCHED',
+        readAt: null,
+        AND: [
+          { metadata: { path: ['outcome'], equals: 'failed' } },
+          { metadata: { path: ['blueprintId'], equals: ctx.blueprintId } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (existing) continue;
+    inputs.push({
+      userId,
+      type: 'BLUEPRINT_LAUNCHED',
+      title: 'Blueprint auto-launch failed',
+      body: `"${ctx.blueprintName}" could not auto-launch: ${ctx.error}. The schedule will retry.`,
+      linkScope: null,
+      linkId: null,
+      metadata: { outcome: 'failed', blueprintId: ctx.blueprintId, error: ctx.error },
+    });
+  }
+  if (inputs.length > 0) await createNotifications(prisma, inputs);
 }
 
 /**

@@ -3,6 +3,7 @@ import { Prisma, PrismaClient, WorkPackage } from '@prisma/client';
 import { fireAutoGenForWp, validateAutoGenConfig, AutoGenColumns } from '../services/autoGenService';
 import { rearmLastDoneRecurrence } from '../services/recurrenceService';
 import { createFeedPost } from '../services/feedService';
+import { createNotifications } from '../services/notificationService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege } from '../utils/privilegeAccess';
 
@@ -659,6 +660,25 @@ export const assignUserToWp = async (req: Request, res: Response): Promise<void>
     });
 
     await logWpSystemEvent(wpId, `${targetUser.name} was assigned to this Work Package.`, { assignedUserId: userId });
+
+    // Late-joiner catch-up: if this WP has already auto-generated tasks (e.g. a
+    // SINGLE_SHOT spawn that fired before this user joined, with no future spawn to
+    // notify them), tell the new assignee so they don't miss pre-existing work.
+    // Best-effort — never affects the assignment response.
+    if (wp.autoGenerate && wp.autoGenFiredAt != null) {
+      try {
+        await createNotifications(prisma, [{
+          userId,
+          type: 'TASKS_GENERATED',
+          title: 'Auto-generated tasks in your work package',
+          body: `You were assigned to ${wp.wpId}, which has auto-generated tasks.`,
+          linkScope: 'WP',
+          linkId: wpId,
+        }]);
+      } catch (err) {
+        console.error(`[assignUserToWp] catch-up notification failed for wpId=${wpId}`, err);
+      }
+    }
 
     res.status(201).json({ message: 'User assigned successfully', assignment });
   } catch (error) {

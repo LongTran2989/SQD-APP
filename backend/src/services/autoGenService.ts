@@ -427,6 +427,8 @@ export async function fireAutoGenForWp(wpId: number, client: PrismaClient = pris
   }, { timeout: 30000 });
 
   // Post-commit: notify WP watchers (best-effort, base client — mirrors task creation).
+  // resolveWpWatchers reads the LIVE assignment list, so any member assigned to this
+  // WP before the spawn (including those added after WP creation) is covered.
   if (outcome.fired && outcome.spawned > 0) {
     try {
       const watchers = await resolveWpWatchers(prisma, wpId);
@@ -435,7 +437,7 @@ export async function fireAutoGenForWp(wpId: number, client: PrismaClient = pris
           prisma,
           watchers.map((userId) => ({
             userId,
-            type: 'FEED_ACTIVITY' as const,
+            type: 'TASKS_GENERATED' as const,
             title: 'New tasks generated',
             body: `${outcome.spawned} task(s) were auto-generated.`,
             linkScope: 'WP' as const,

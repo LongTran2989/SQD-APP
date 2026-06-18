@@ -873,4 +873,47 @@ describe('Work Package Backend', () => {
       expect(res.status).toBe(403);
     });
   });
+
+  // ─── Auto-generated task catch-up on assignment (P8) ──────────────────
+  describe('Auto-gen catch-up on WP assignment', () => {
+    it('notifies a newly-assigned user when the WP already auto-generated tasks', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-CATCH01', name: 'Catch-up WP', type: 'AUDIT', divisionId,
+          timeframeFrom: new Date('2026-06-01'), timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId, status: 'In Progress',
+          autoGenerate: true, autoGenMode: 'SINGLE_SHOT', autoGenFiredAt: new Date(),
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/work-packages/${wp.id}/assign`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ userId: staffUserId });
+      expect(res.status).toBe(201);
+
+      const notes = await prisma.notification.findMany({ where: { userId: staffUserId, type: 'TASKS_GENERATED', linkId: wp.id } });
+      expect(notes).toHaveLength(1);
+      expect(notes[0]!.linkScope).toBe('WP');
+    });
+
+    it('does not notify when the WP has no auto-generated tasks', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-CATCH02', name: 'Plain WP', type: 'AUDIT', divisionId,
+          timeframeFrom: new Date('2026-06-01'), timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId, status: 'In Progress', autoGenerate: false,
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/work-packages/${wp.id}/assign`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ userId: staffUserId });
+      expect(res.status).toBe(201);
+
+      const notes = await prisma.notification.findMany({ where: { userId: staffUserId, type: 'TASKS_GENERATED', linkId: wp.id } });
+      expect(notes).toHaveLength(0);
+    });
+  });
 });

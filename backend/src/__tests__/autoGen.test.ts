@@ -17,6 +17,7 @@ const daysFromNow = (n: number) => new Date(Date.now() + n * DAY);
 describe('Auto-Generate Service', () => {
   let divisionId: number;
   let creatorId: number;
+  let viewerId: number;
   let viewerToken: string;
   let wpSeq = 700000;
 
@@ -35,6 +36,7 @@ describe('Auto-Generate Service', () => {
     const viewer = await prisma.user.create({
       data: { name: 'AutoGen Viewer', email: 'viewer_agn@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId, roleId: directorRole.id },
     });
+    viewerId = viewer.id;
     const secret = process.env.JWT_SECRET || 'fallback_secret';
     viewerToken = jwt.sign({ userId: viewer.id, role: 'Director', divisionId }, secret);
 
@@ -375,6 +377,24 @@ describe('Auto-Generate Service', () => {
       expect(singleRes.status).toBe(200);
       expect(singleRes.body.autoGenResult).toBeUndefined();
       expect(await prisma.task.count({ where: { wpId: singleWp.id } })).toBe(0);
+    });
+  });
+
+  // ── spawn notifications (P8) ───────────────────────────────────────────────────
+  describe('spawn notifications', () => {
+    it('notifies WP-assigned members with TASKS_GENERATED when tasks auto-generate', async () => {
+      const t = await publishTemplate();
+      const wp = await createWp({ autoGenerate: true, autoGenMode: 'SINGLE_SHOT', autoGenTemplateId: t.id });
+      // Assign a member AFTER WP creation — resolveWpWatchers reads the live list, so
+      // a user attached later is still covered on the next spawn.
+      await prisma.workPackageAssignment.create({ data: { wpId: wp.id, userId: viewerId } });
+
+      const r = await fireAutoGenForWp(wp.id, prisma);
+      expect(r.fired).toBe(true);
+
+      const notes = await prisma.notification.findMany({ where: { userId: viewerId, type: 'TASKS_GENERATED', linkId: wp.id } });
+      expect(notes).toHaveLength(1);
+      expect(notes[0]!.linkScope).toBe('WP');
     });
   });
 });
