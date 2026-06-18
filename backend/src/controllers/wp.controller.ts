@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { Prisma, PrismaClient, WorkPackage } from '@prisma/client';
-import { fireAutoGenForWp, validateAutoGenConfig, AutoGenColumns } from '../services/autoGenService';
+import { fireAutoGenForWp, validateAutoGenConfig, AutoGenColumns, calendarDateUtc } from '../services/autoGenService';
 import { rearmLastDoneRecurrence } from '../services/recurrenceService';
 import { createFeedPost } from '../services/feedService';
 import { createNotifications } from '../services/notificationService';
@@ -359,6 +359,14 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
       typeFields, autoGenData: autoGen.data,
     });
 
+    if (wp.autoGenerate) {
+      const today = calendarDateUtc(new Date());
+      const from = calendarDateUtc(wp.timeframeFrom);
+      if (today >= from) {
+        await fireAutoGenForWp(wp.id);
+      }
+    }
+
     res.status(201).json(wp);
   } catch (error: any) {
     if (error.message === 'Division not found') {
@@ -479,6 +487,14 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
       }
     });
     await logWpSystemEvent(id, `Work Package "${updated.name}" updated.`, { fields: Object.keys(dataToUpdate) });
+
+    if (updated.autoGenerate && updated.autoGenFiredAt === null && updated.status !== 'Closed' && updated.status !== 'Inactive') {
+      const today = calendarDateUtc(new Date());
+      const from = calendarDateUtc(updated.timeframeFrom);
+      if (today >= from) {
+        await fireAutoGenForWp(updated.id);
+      }
+    }
 
     res.json(updated);
   } catch (error) {

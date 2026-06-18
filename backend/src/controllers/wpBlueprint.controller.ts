@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { validateAutoGenConfig, AutoGenColumns, calendarDateUtc } from '../services/autoGenService';
+import { validateAutoGenConfig, AutoGenColumns, calendarDateUtc, fireAutoGenForWp } from '../services/autoGenService';
 import { createWorkPackageService } from './wp.controller';
 
 // WpBlueprint is config (not a Rule-2 soft-delete entity); "delete" = isActive=false,
@@ -455,6 +455,15 @@ export const launchBlueprint = async (req: Request, res: Response): Promise<void
         auditDetails: { wpName, blueprintId: bp.id, blueprintName: bp.name },
         systemEventContent: `Work Package "${wpName}" launched from blueprint "${bp.name}".`,
       });
+
+      if (wp.autoGenerate) {
+        const today = calendarDateUtc(new Date());
+        const from = calendarDateUtc(wp.timeframeFrom);
+        if (today >= from) {
+          await fireAutoGenForWp(wp.id);
+        }
+      }
+
       res.status(201).json(wp);
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'Division not found') {
