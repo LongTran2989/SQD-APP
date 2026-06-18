@@ -17,11 +17,15 @@ export interface WpFormValues {
   divisionId: number | '';
   timeframeFrom: string;
   timeframeTo: string;
-  checkTemplateId: number | '';
   acRegistration: string;
   customer: string;
   authority: string;
   targetDepartmentId: number | '';
+  // Auto-generate config (P4: single-template source only).
+  autoGenerate: boolean;
+  autoGenMode: 'SINGLE_SHOT' | 'REPEAT';
+  autoGenInterval: number | '';
+  autoGenTemplateId: number | '';
 }
 
 interface WorkPackageFormProps {
@@ -48,11 +52,16 @@ export default function WorkPackageForm({
   const [divisionId, setDivisionId] = useState<number | ''>(initial?.divisionId ?? user?.divisionId ?? '');
   const [timeframeFrom, setTimeframeFrom] = useState(initial?.timeframeFrom ?? '');
   const [timeframeTo, setTimeframeTo] = useState(initial?.timeframeTo ?? '');
-  const [checkTemplateId, setCheckTemplateId] = useState<number | ''>(initial?.checkTemplateId ?? '');
   const [acRegistration, setAcRegistration] = useState(initial?.acRegistration ?? '');
   const [customer, setCustomer] = useState(initial?.customer ?? '');
   const [authority, setAuthority] = useState(initial?.authority ?? '');
   const [targetDepartmentId, setTargetDepartmentId] = useState<number | ''>(initial?.targetDepartmentId ?? '');
+
+  // Auto-generate config.
+  const [autoGenerate, setAutoGenerate] = useState<boolean>(initial?.autoGenerate ?? false);
+  const [autoGenMode, setAutoGenMode] = useState<'SINGLE_SHOT' | 'REPEAT'>(initial?.autoGenMode ?? 'SINGLE_SHOT');
+  const [autoGenInterval, setAutoGenInterval] = useState<number | ''>(initial?.autoGenInterval ?? '');
+  const [autoGenTemplateId, setAutoGenTemplateId] = useState<number | ''>(initial?.autoGenTemplateId ?? '');
 
   const [wpTypes, setWpTypes] = useState<WpType[]>([]);
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
@@ -91,16 +100,22 @@ export default function WorkPackageForm({
     if (!timeframeFrom) { toast.error('Start date is required'); return; }
     if (!timeframeTo) { toast.error('End date is required'); return; }
     if (timeframeFrom >= timeframeTo) { toast.error('Start date must be before end date'); return; }
-    if (type === 'CHECK' && !checkTemplateId) { toast.error('CHECK type requires a Check Template'); return; }
+    if (autoGenerate) {
+      if (!autoGenTemplateId) { toast.error('Auto-generate requires a template'); return; }
+      if (autoGenMode === 'REPEAT' && (!autoGenInterval || Number(autoGenInterval) < 1)) {
+        toast.error('Repeat mode requires an interval of at least 1 day'); return;
+      }
+    }
 
     onSubmit({
-      name: name.trim(), type, divisionId, timeframeFrom, timeframeTo, checkTemplateId,
+      name: name.trim(), type, divisionId, timeframeFrom, timeframeTo,
       acRegistration: acRegistration.trim(), customer: customer.trim(), authority: authority.trim(), targetDepartmentId,
+      autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId,
     });
   };
 
-  const isCheckType = type === 'CHECK';
   const isAuditType = type === 'AUDIT';
+  const showContextFields = type === 'CHECK';
 
   if (loadingData) {
     return (
@@ -141,7 +156,7 @@ export default function WorkPackageForm({
           <select
             id="wp-type"
             value={type}
-            onChange={(e) => { setType(e.target.value); setCheckTemplateId(''); }}
+            onChange={(e) => setType(e.target.value)}
             required
             className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
           >
@@ -178,31 +193,8 @@ export default function WorkPackageForm({
           </select>
         </div>
 
-        {/* CHECK template — only when type=CHECK */}
-        {isCheckType && (
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-check-template">
-              Check Template * <span className="font-normal text-slate-500">(daily tasks will be generated from this template)</span>
-            </label>
-            <select
-              id="wp-check-template"
-              value={checkTemplateId}
-              onChange={(e) => setCheckTemplateId(e.target.value ? Number(e.target.value) : '')}
-              required
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-            >
-              <option value="">Select a published template...</option>
-              {publishedTemplates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.templateId} — {t.title}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
         {/* CHECK-only context fields */}
-        {isCheckType && (
+        {showContextFields && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-acreg">A/C Registration</label>
@@ -276,6 +268,92 @@ export default function WorkPackageForm({
             />
           </div>
         </div>
+      </div>
+
+      {/* Automatic task generation */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-bold text-slate-800">Automatic Task Generation</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Spawn tasks from a template automatically — once, or on a repeating cadence while the WP is active.
+            </p>
+          </div>
+          <label className="inline-flex items-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={autoGenerate}
+              onChange={(e) => setAutoGenerate(e.target.checked)}
+            />
+            <div className="relative w-11 h-6 bg-slate-200 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all" />
+          </label>
+        </div>
+
+        {autoGenerate && (
+          <div className="space-y-4 pt-2 border-t border-slate-100">
+            {/* Mode */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-autogen-mode">Mode *</label>
+              <select
+                id="wp-autogen-mode"
+                value={autoGenMode}
+                onChange={(e) => setAutoGenMode(e.target.value as 'SINGLE_SHOT' | 'REPEAT')}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+              >
+                <option value="SINGLE_SHOT">Single shot — generate once when the WP starts</option>
+                <option value="REPEAT">Repeat — generate every N days while active</option>
+              </select>
+            </div>
+
+            {/* Template source */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-autogen-template">
+                Template * <span className="font-normal text-slate-500">(must be Published)</span>
+              </label>
+              <select
+                id="wp-autogen-template"
+                value={autoGenTemplateId}
+                onChange={(e) => setAutoGenTemplateId(e.target.value ? Number(e.target.value) : '')}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+              >
+                <option value="">Select a published template...</option>
+                {publishedTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.templateId} — {t.title}</option>
+                ))}
+              </select>
+              {publishedTemplates.length === 0 && (
+                <p className="mt-1.5 text-xs text-amber-600 flex items-center gap-1">
+                  <Info className="w-3.5 h-3.5" /> No published templates available.
+                </p>
+              )}
+            </div>
+
+            {/* Interval — REPEAT only */}
+            {autoGenMode === 'REPEAT' && (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-autogen-interval">
+                  Interval (days) *
+                </label>
+                <input
+                  id="wp-autogen-interval"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={autoGenInterval}
+                  onChange={(e) => setAutoGenInterval(e.target.value ? Number(e.target.value) : '')}
+                  placeholder="e.g. 1 for daily"
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                />
+              </div>
+            )}
+
+            <p className="text-xs text-slate-500 flex items-start gap-1.5">
+              <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              Saved template sets and inline multi-template lists arrive in a later update — for now, choose a single template.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Actions */}

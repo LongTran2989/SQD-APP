@@ -316,11 +316,29 @@ export default function WorkPackageDetailPage() {
                 <span className="text-slate-500">Created</span>
                 <span className="font-medium text-slate-700">{formatDate(wp.createdAt)}</span>
               </div>
-              {wp.checkTemplateId && (
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Check Template</span>
-                  <span className="font-medium text-slate-700">ID {wp.checkTemplateId}</span>
-                </div>
+              {wp.autoGenerate && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Auto-generate</span>
+                    <span className="font-medium text-slate-700">
+                      {wp.autoGenMode === 'REPEAT'
+                        ? `Repeat · every ${wp.autoGenInterval ?? 1} day(s)`
+                        : 'Single shot'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Source template</span>
+                    <span className="font-medium text-slate-700">
+                      {wp.autoGenTemplateId ? `ID ${wp.autoGenTemplateId}` : '—'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Last generated</span>
+                    <span className="font-medium text-slate-700">
+                      {wp.autoGenFiredAt ? formatDate(wp.autoGenFiredAt) : 'Never'}
+                    </span>
+                  </div>
+                </>
               )}
             </div>
 

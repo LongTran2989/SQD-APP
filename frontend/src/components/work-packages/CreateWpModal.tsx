@@ -27,7 +27,14 @@ export default function CreateWpModal({ onClose, onSaved }: CreateWpModalProps) 
         divisionId: Number(values.divisionId),
         timeframeFrom: values.timeframeFrom,
         timeframeTo: values.timeframeTo,
-        checkTemplateId: values.checkTemplateId ? Number(values.checkTemplateId) : undefined,
+        acRegistration: values.acRegistration || null,
+        customer: values.customer || null,
+        authority: values.authority || null,
+        targetDepartmentId: values.targetDepartmentId ? Number(values.targetDepartmentId) : null,
+        autoGenerate: values.autoGenerate,
+        autoGenMode: values.autoGenerate ? values.autoGenMode : null,
+        autoGenInterval: values.autoGenerate && values.autoGenMode === 'REPEAT' && values.autoGenInterval ? Number(values.autoGenInterval) : null,
+        autoGenTemplateId: values.autoGenerate && values.autoGenTemplateId ? Number(values.autoGenTemplateId) : null,
       });
       toast.success(`Work Package ${wp.wpId} created`);
       onSaved(wp.id);

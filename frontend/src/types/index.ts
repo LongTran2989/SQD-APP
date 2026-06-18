@@ -190,7 +190,13 @@ export interface WorkPackage {
   timeframeFrom: string;
   timeframeTo: string;
   creatorId: number;
-  checkTemplateId: number | null;
+  autoGenerate: boolean;
+  autoGenMode: 'SINGLE_SHOT' | 'REPEAT' | null;
+  autoGenInterval: number | null;
+  autoGenTemplateId: number | null;
+  autoGenSetId: number | null;
+  autoGenInlineSet: unknown | null;
+  autoGenFiredAt: string | null;
   acRegistration: string | null;
   customer: string | null;
   authority: string | null;
@@ -243,6 +249,13 @@ export interface WorkPackageDetail extends WorkPackage {
   creator: { id: number; name: string } | null;
   assignments: { id: number; wpId: number; userId: number; user: { id: number; name: string; email: string } }[];
   tasks: WpTaskRow[];
+  autoGenResult?: {
+    fired: boolean;
+    spawned: number;
+    spawnedTaskIds: number[];
+    reason?: string;
+    warnings?: string[];
+  };
 }
 
 // Backed by the unified FeedPost model. The Task feed is scope 'TASK',
