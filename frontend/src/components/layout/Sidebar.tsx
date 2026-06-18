@@ -17,7 +17,8 @@ import {
   Flag,
   Settings,
   BarChart2,
-  Layers
+  Layers,
+  Rocket
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -56,6 +57,7 @@ export default function Sidebar() {
     { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart2, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Template Builder', href: '/dashboard/templates', icon: FileCheck2, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Template Sets', href: '/dashboard/template-sets', icon: Layers, roles: ['Admin', 'Director', 'Manager'] },
+    { name: 'WP Blueprints', href: '/dashboard/wp-blueprints', icon: Rocket, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
   ];
 

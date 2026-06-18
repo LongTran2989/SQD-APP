@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { fireAutoGenForWp, validateAutoGenConfig } from '../services/autoGenService';
+import { Prisma, PrismaClient, WorkPackage } from '@prisma/client';
+import { fireAutoGenForWp, validateAutoGenConfig, AutoGenColumns } from '../services/autoGenService';
 import { createFeedPost } from '../services/feedService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege } from '../utils/privilegeAccess';
@@ -210,6 +210,104 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
   }
 };
 
+// ─── WP creation core (shared by the HTTP handler + blueprint launch) ────────
+
+type PrismaLike = PrismaClient | Prisma.TransactionClient;
+
+export interface CreateWorkPackageInput {
+  name: string;
+  type: string;
+  divisionId: number;
+  timeframeFrom: Date;
+  timeframeTo: Date;
+  typeFields: { acRegistration: string | null; customer: string | null; authority: string | null; targetDepartmentId: number | null };
+  autoGenData: AutoGenColumns;
+  blueprintId?: number | null;
+  isRoutine?: boolean;
+  auditActionType?: string;
+  auditDetails?: Record<string, unknown>;
+  systemEventContent?: string;
+}
+
+/**
+ * Generates the next per-division wpId under a Division FOR UPDATE lock, creates
+ * the WorkPackage, and dual-writes (AuditLog + WP SYSTEM_EVENT). Shared by the
+ * create handler and the blueprint launch endpoint (mirrors how createTaskService
+ * is reused by autoGenService). Throws 'Division not found' for the caller to map.
+ */
+export async function createWorkPackageService(
+  client: PrismaLike,
+  actor: { userId: number },
+  input: CreateWorkPackageInput
+): Promise<WorkPackage> {
+  const { name, type, divisionId, timeframeFrom, timeframeTo, typeFields, autoGenData } = input;
+
+  // Reuse the caller's transaction if given one; otherwise open our own so the
+  // sequence lock + create stay atomic (preserves the handler's original behavior).
+  const run = async (tx: Prisma.TransactionClient): Promise<WorkPackage> => {
+    const divRaw = await tx.$queryRaw<{ id: number, code: string }[]>`SELECT id, code FROM "Division" WHERE id = ${divisionId} FOR UPDATE`;
+    if (divRaw.length === 0) throw new Error('Division not found');
+    const division = divRaw[0]!;
+
+    const lastWp = await tx.workPackage.findFirst({
+      where: { wpId: { startsWith: `${division.code}-WP-` } },
+      orderBy: { id: 'desc' },
+      select: { wpId: true }
+    });
+
+    let nextSeq = 1;
+    if (lastWp?.wpId) {
+      const parts = lastWp.wpId.split('-');
+      const seqPart = parts[parts.length - 1];
+      if (seqPart) {
+        nextSeq = parseInt(seqPart) + 1;
+      }
+    }
+
+    const generatedWpId = `${division.code}-WP-${String(nextSeq).padStart(6, '0')}`;
+
+    return tx.workPackage.create({
+      data: {
+        wpId: generatedWpId,
+        name,
+        type,
+        divisionId,
+        timeframeFrom,
+        timeframeTo,
+        creatorId: actor.userId,
+        ...autoGenData,
+        ...typeFields,
+        blueprintId: input.blueprintId ?? null,
+        isRoutine: input.isRoutine ?? false,
+        status: 'Open',
+      },
+      include: {
+        division: { select: { id: true, name: true, code: true } },
+        creator: { select: { id: true, name: true } },
+      }
+    });
+  };
+
+  const isTx = !(client as PrismaClient).$transaction;
+  const wp = isTx
+    ? await run(client as Prisma.TransactionClient)
+    : await (client as PrismaClient).$transaction((tx) => run(tx));
+
+  // Dual-write (parameterized): AuditLog + WP-scope SYSTEM_EVENT, after commit.
+  await prisma.auditLog.create({
+    data: {
+      actionType: input.auditActionType ?? 'WORK_PACKAGE_CREATED',
+      entityType: 'WorkPackage',
+      entityId: String(wp.id),
+      performedByUserId: actor.userId,
+      details: (input.auditDetails ?? { wpId: wp.wpId, type, divisionId }) as Prisma.InputJsonValue,
+    }
+  });
+  await logWpSystemEvent(wp.id, input.systemEventContent ?? `Work Package "${wp.name}" created.`, { wpId: wp.wpId, type });
+
+  return wp;
+}
+
 // ─── POST /api/work-packages ─────────────────────────────────────────
 export const createWorkPackage = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -253,61 +351,11 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // Auto-generate wpId
-    const wp = await prisma.$transaction(async (tx) => {
-      const divRaw = await tx.$queryRaw<{ id: number, code: string }[]>`SELECT id, code FROM "Division" WHERE id = ${divisionId} FOR UPDATE`;
-      if (divRaw.length === 0) throw new Error('Division not found');
-      const division = divRaw[0]!;
-
-      const lastWp = await tx.workPackage.findFirst({
-        where: { wpId: { startsWith: `${division.code}-WP-` } },
-        orderBy: { id: 'desc' },
-        select: { wpId: true }
-      });
-
-      let nextSeq = 1;
-      if (lastWp?.wpId) {
-        const parts = lastWp.wpId.split('-');
-        const seqPart = parts[parts.length - 1];
-        if (seqPart) {
-          nextSeq = parseInt(seqPart) + 1;
-        }
-      }
-
-      const generatedWpId = `${division.code}-WP-${String(nextSeq).padStart(6, '0')}`;
-
-      return tx.workPackage.create({
-        data: {
-          wpId: generatedWpId,
-          name,
-          type,
-          divisionId,
-          timeframeFrom: fromDate,
-          timeframeTo: toDate,
-          creatorId: userId,
-          ...autoGen.data,
-          ...typeFields,
-          status: 'Open',
-        },
-        include: {
-          division: { select: { id: true, name: true, code: true } },
-          creator: { select: { id: true, name: true } },
-        }
-      });
+    const wp = await createWorkPackageService(prisma, { userId }, {
+      name, type, divisionId,
+      timeframeFrom: fromDate, timeframeTo: toDate,
+      typeFields, autoGenData: autoGen.data,
     });
-
-    // Log to AuditLog
-    await prisma.auditLog.create({
-      data: {
-        actionType: 'WORK_PACKAGE_CREATED',
-        entityType: 'WorkPackage',
-        entityId: String(wp.id),
-        performedByUserId: userId,
-        details: { wpId: wp.wpId, type, divisionId }
-      }
-    });
-
-    await logWpSystemEvent(wp.id, `Work Package "${wp.name}" created.`, { wpId: wp.wpId, type });
 
     res.status(201).json(wp);
   } catch (error: any) {

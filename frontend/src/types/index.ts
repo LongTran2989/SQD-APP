@@ -243,6 +243,34 @@ export interface TemplateSet {
   _count?: { items: number };
 }
 
+// ── WP Blueprints (P6) — reusable WP templates with a manual launch ──
+export interface WpBlueprint {
+  id: number;
+  name: string;
+  description: string | null;
+  type: string;
+  divisionId: number;
+  defaultDuration: number;
+  defaultAutoGenerate: boolean;
+  defaultAutoGenMode: 'SINGLE_SHOT' | 'REPEAT' | null;
+  defaultAutoGenInterval: number | null;
+  defaultAutoGenTemplateId: number | null;
+  defaultAutoGenSetId: number | null;
+  acRegistration: string | null;
+  customer: string | null;
+  authority: string | null;
+  targetDepartmentId: number | null;
+  ownerId: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  division?: { id: number; name: string; code: string } | null;
+  owner?: { id: number; name: string } | null;
+  defaultAutoGenTemplate?: { id: number; templateId: string; title: string } | null;
+  defaultAutoGenSet?: { id: number; name: string } | null;
+  _count?: { instances: number };
+}
+
 export interface EventType {
   id: number;
   code: string;
