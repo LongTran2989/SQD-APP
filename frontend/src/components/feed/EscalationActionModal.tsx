@@ -2,15 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { X } from 'lucide-react';
+import { X, LayoutTemplate } from 'lucide-react';
 import { Template } from '../../types';
 import { actionEscalation } from '../../api/escalationApi';
 import { getDivisions, getUsers, getDatasource } from '../../api/taskApi';
-import { getPublishedTemplates } from '../../api/templateApi';
 import { listEventTypes } from '../../api/taxonomyApi';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
 import { EventType } from '../../types';
+import TemplatePickerModal from '../templates/TemplatePickerModal';
 
 type Option = { value: string; label: string };
 
@@ -40,14 +40,14 @@ interface Props {
 export default function EscalationActionModal({ flagId, action, sourceTaskId, sourceWpId, onClose, onDone }: Props) {
   const [submitting, setSubmitting] = useState(false);
 
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [divisions, setDivisions] = useState<Option[]>([]);
   const [users, setUsers] = useState<Option[]>([]);
   const [departments, setDepartments] = useState<Option[]>([]);
   const [eventTypes, setEventTypes] = useState<string[]>(FINDING_EVENT_TYPES as unknown as string[]);
 
   // CREATE_TASK
-  const [templateId, setTemplateId] = useState<number | ''>('');
   const [targetDivisionId, setTargetDivisionId] = useState<number | ''>('');
   const [assignedToUserId, setAssignedToUserId] = useState<number | ''>('');
 
@@ -67,7 +67,6 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
   useEffect(() => {
     let cancelled = false;
     if (action === 'CREATE_TASK') {
-      getPublishedTemplates().then((t) => { if (!cancelled) setTemplates(t); }).catch(() => {});
       getDivisions().then((d) => { if (!cancelled) setDivisions(d); }).catch(() => {});
       getUsers().then((u) => { if (!cancelled) setUsers(u); }).catch(() => {});
     } else if (action === 'RAISE_FINDING') {
@@ -97,12 +96,12 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
     let payload: Record<string, unknown>;
 
     if (action === 'CREATE_TASK') {
-      if (!templateId || !targetDivisionId) {
+      if (!selectedTemplate || !targetDivisionId) {
         toast.error('Template and target division are required');
         return;
       }
       payload = {
-        templateId: Number(templateId),
+        templateId: selectedTemplate.id,
         targetDivisionId: Number(targetDivisionId),
         wpId: sourceWpId ?? undefined,
         assignedToUserId: assignedToUserId ? Number(assignedToUserId) : undefined,
@@ -150,12 +149,30 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Template</label>
-              <select className={inputCls} value={templateId} onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : '')}>
-                <option value="">Select a published template…</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>{t.templateId} — {t.title}</option>
-                ))}
-              </select>
+              {selectedTemplate ? (
+                <div className="flex items-center gap-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-mono font-semibold text-blue-700">{selectedTemplate.templateId}</span>
+                    <p className="text-xs text-slate-700 truncate">{selectedTemplate.title}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTemplate(null)}
+                    className="p-0.5 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="w-full flex items-center gap-2 px-3 py-2 border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-lg text-xs text-slate-500 hover:text-blue-600 transition-all"
+                >
+                  <LayoutTemplate className="w-3.5 h-3.5" />
+                  Browse templates…
+                </button>
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Target division</label>
@@ -256,6 +273,13 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
           </button>
         </div>
       </div>
+
+      {/* Template Picker Modal (for CREATE_TASK action) */}
+      <TemplatePickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(t) => { setSelectedTemplate(t); setPickerOpen(false); }}
+      />
     </div>
   );
 }

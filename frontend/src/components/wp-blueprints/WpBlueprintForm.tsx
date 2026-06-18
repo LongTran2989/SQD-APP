@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, Info } from 'lucide-react';
+import { X, Info, LayoutTemplate } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
 import { WpType, Template, TemplateSet } from '../../types';
@@ -9,6 +9,7 @@ import { getWpTypes } from '../../api/wpApi';
 import { getTemplateSets } from '../../api/templateSetApi';
 import { getDivisions } from '../../api/taskApi';
 import { apiClient } from '../../api/client';
+import TemplatePickerModal from '../templates/TemplatePickerModal';
 import {
   createWpBlueprint,
   updateWpBlueprint,
@@ -43,6 +44,8 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
   const [autoGenMode, setAutoGenMode] = useState<'SINGLE_SHOT' | 'REPEAT'>('SINGLE_SHOT');
   const [autoGenInterval, setAutoGenInterval] = useState<number | ''>('');
   const [autoGenTemplateId, setAutoGenTemplateId] = useState<number | ''>('');
+  const [selectedAutoGenTemplate, setSelectedAutoGenTemplate] = useState<Template | null>(null);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [autoGenSetId, setAutoGenSetId] = useState<number | ''>('');
   const [autoGenSource, setAutoGenSource] = useState<'TEMPLATE' | 'SET'>('TEMPLATE');
 
@@ -55,7 +58,6 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
   const [wpTypes, setWpTypes] = useState<WpType[]>([]);
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
   const [templateSets, setTemplateSets] = useState<TemplateSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -63,13 +65,12 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
   useEffect(() => {
     const load = async () => {
       try {
-        const [typesData, divsData, deptRes, tplRes] = await Promise.all([
-          getWpTypes(), getDivisions(), apiClient.get('/datasources/departments'), apiClient.get('/templates'),
+        const [typesData, divsData, deptRes] = await Promise.all([
+          getWpTypes(), getDivisions(), apiClient.get('/datasources/departments'),
         ]);
         setWpTypes(typesData);
         setDivisions(divsData);
         setDepartments(deptRes.data as { value: string; label: string }[]);
-        setTemplates((tplRes.data as Template[]).filter((t) => t.status === 'Published'));
 
         if (editId) {
           const bp = await getWpBlueprint(editId);
@@ -86,6 +87,10 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
           setAutoGenMode(bp.defaultAutoGenMode ?? 'SINGLE_SHOT');
           setAutoGenInterval(bp.defaultAutoGenInterval ?? '');
           setAutoGenTemplateId(bp.defaultAutoGenTemplateId ?? '');
+          // Populate the selected template display object if editing
+          if (bp.defaultAutoGenTemplate) {
+            setSelectedAutoGenTemplate(bp.defaultAutoGenTemplate as unknown as Template);
+          }
           setAutoGenSetId(bp.defaultAutoGenSetId ?? '');
           setAutoGenSource(bp.defaultAutoGenSetId ? 'SET' : 'TEMPLATE');
           if (bp.recurrenceType) {
@@ -120,7 +125,6 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
     return () => { cancelled = true; };
   }, [divisionId]);
 
-  const divisionTemplates = templates.filter((t) => t.divisionId === divisionId);
   const isCheckType = type === 'CHECK';
   const isAuditType = type === 'AUDIT';
   const useSet = autoGenMode === 'SINGLE_SHOT' && autoGenSource === 'SET';
@@ -289,10 +293,31 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
                   {!useSet && (
                     <div>
                       <label className={labelCls} htmlFor="bp-ag-template">Template * <span className="font-normal text-slate-500">(Published)</span></label>
-                      <select id="bp-ag-template" value={autoGenTemplateId} onChange={(e) => setAutoGenTemplateId(e.target.value ? Number(e.target.value) : '')} className={field}>
-                        <option value="">Select a published template...</option>
-                        {divisionTemplates.map((t) => <option key={t.id} value={t.id}>{t.templateId} — {t.title}</option>)}
-                      </select>
+                      {selectedAutoGenTemplate ? (
+                        <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-mono font-semibold text-blue-700">{selectedAutoGenTemplate.templateId}</span>
+                            <p className="text-sm text-slate-700 truncate">{selectedAutoGenTemplate.title}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedAutoGenTemplate(null); setAutoGenTemplateId(''); }}
+                            className="p-1 text-slate-400 hover:text-slate-600"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          id="bp-ag-template"
+                          type="button"
+                          onClick={() => setTemplatePickerOpen(true)}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-xl text-sm text-slate-500 hover:text-blue-600 transition-all"
+                        >
+                          <LayoutTemplate className="w-4 h-4" />
+                          Browse and select a template…
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -364,6 +389,17 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
           </form>
         )}
       </div>
+
+      {/* Template Picker for auto-gen template selection */}
+      <TemplatePickerModal
+        open={templatePickerOpen}
+        onClose={() => setTemplatePickerOpen(false)}
+        onSelect={(t) => {
+          setSelectedAutoGenTemplate(t);
+          setAutoGenTemplateId(t.id);
+          setTemplatePickerOpen(false);
+        }}
+      />
     </div>
   );
 }

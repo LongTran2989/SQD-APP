@@ -6,11 +6,11 @@ import { useAuthStore } from '../../store/authStore';
 import { Template, WorkPackageEnriched } from '../../types';
 import { createTask, getDivisions, getUsers } from '../../api/taskApi';
 import { getWorkPackages } from '../../api/wpApi';
-import { getPublishedTemplates } from '../../api/templateApi';
 import SearchableSelect from '../ui/SearchableSelect';
+import TemplatePickerModal from '../templates/TemplatePickerModal';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
-import { FileCheck2, Clock, Info, FolderOpen } from 'lucide-react';
+import { FileCheck2, Clock, Info, FolderOpen, LayoutTemplate, X } from 'lucide-react';
 
 interface SelectOption {
   value: string;
@@ -31,7 +31,8 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const router = useRouter();
   const { user } = useAuthStore();
 
-  const [templateId, setTemplateId] = useState<number | ''>('');
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [targetDivisionId, setTargetDivisionId] = useState<number | ''>(user?.divisionId ?? '');
   const [assignedToUserId, setAssignedToUserId] = useState<number | ''>('');
   const [deadline, setDeadline] = useState('');
@@ -41,13 +42,12 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [skillLevel, setSkillLevel] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
 
-  const [templates, setTemplates] = useState<Template[]>([]);
   const [divisions, setDivisions] = useState<SelectOption[]>([]);
   const [allUsers, setAllUsers] = useState<UserOption[]>([]);
   const [workPackages, setWorkPackages] = useState<WorkPackageEnriched[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
-  const selectedTemplate = templates.find((t) => t.id === templateId);
+  const templateId = selectedTemplate?.id;
 
   // Seed per-task overrides from the chosen template; the user can still override.
   useEffect(() => {
@@ -60,19 +60,11 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const [tpl, divRes, usersRes, wpsRes] = await Promise.all([
-          getPublishedTemplates(),
+        const [divRes, usersRes, wpsRes] = await Promise.all([
           getDivisions(),
           getUsers(),
           getWorkPackages(),
         ]);
-
-        let published = tpl;
-        if (user && user.role !== 'Director' && user.role !== 'Admin') {
-          published = published.filter((t) => t.divisionId === user.divisionId);
-        }
-
-        setTemplates(published);
         setDivisions(divRes);
         setAllUsers(usersRes);
         setWorkPackages(wpsRes.filter((w) => w.computedStatus !== 'Closed' && w.computedStatus !== 'Inactive'));
@@ -83,12 +75,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
       }
     };
     fetchAll();
-  }, [user]);
-
-  const templateOptions = templates.map((t) => ({
-    value: String(t.id),
-    label: `${t.templateId} — ${t.title}`,
-  }));
+  }, []);
 
   const assigneeOptions = targetDivisionId
     ? allUsers.filter((u) => u.divisionId === targetDivisionId)
@@ -171,42 +158,58 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
           Template *
         </h2>
         <div>
-          <SearchableSelect
-            id="template-select"
-            options={templateOptions}
-            value={templateId ? String(templateId) : ''}
-            onChange={(val) => setTemplateId(val ? Number(val) : '')}
-            placeholder="Select a published template…"
-          />
-          {templates.length === 0 && (
-            <p className="mt-2 text-sm text-amber-600 flex items-center gap-1.5">
-              <Info className="w-4 h-4 flex-shrink-0" />
-              No published templates available
-              {user && user.role !== 'Director' && user.role !== 'Admin' ? ' in your division.' : '.'}
-            </p>
+          {selectedTemplate ? (
+            <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <span className="text-xs font-mono font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded">
+                    {selectedTemplate.templateId}
+                  </span>
+                  {selectedTemplate.type && (
+                    <span className="text-xs font-semibold text-violet-700 bg-violet-50 px-2 py-0.5 rounded">
+                      {selectedTemplate.type}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm font-semibold text-slate-800">{selectedTemplate.title}</p>
+                {selectedTemplate.description && (
+                  <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{selectedTemplate.description}</p>
+                )}
+                <div className="flex flex-wrap gap-4 text-xs text-slate-500 pt-1.5">
+                  {selectedTemplate.estimatedHours != null && (
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" />
+                      Est. {selectedTemplate.estimatedHours}h
+                    </span>
+                  )}
+                  {selectedTemplate.requiresApproval && (
+                    <span className="font-medium text-amber-600">Requires Approval</span>
+                  )}
+                  {selectedTemplate.skillLevel > 0 && (
+                    <span className="font-medium text-indigo-600">Skill Level {selectedTemplate.skillLevel}</span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedTemplate(null)}
+                className="p-1 rounded hover:bg-blue-100 text-blue-400 hover:text-blue-600 flex-shrink-0"
+                title="Change template"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="w-full flex items-center gap-3 px-4 py-3 border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-xl text-sm text-slate-500 hover:text-blue-600 transition-all"
+            >
+              <LayoutTemplate className="w-4 h-4" />
+              Browse and select a template…
+            </button>
           )}
         </div>
-        {selectedTemplate && (
-          <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl text-sm space-y-1.5">
-            {selectedTemplate.description && (
-              <p className="text-slate-700">{selectedTemplate.description}</p>
-            )}
-            <div className="flex flex-wrap gap-4 text-xs text-slate-500 pt-1">
-              {selectedTemplate.estimatedHours != null && (
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  Est. {selectedTemplate.estimatedHours}h
-                </span>
-              )}
-              {selectedTemplate.requiresApproval && (
-                <span className="font-medium text-amber-600">Requires Approval</span>
-              )}
-              {selectedTemplate.skillLevel > 0 && (
-                <span className="font-medium text-indigo-600">Skill Level {selectedTemplate.skillLevel}</span>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Task details */}
@@ -393,6 +396,13 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
           )}
         </button>
       </div>
+
+      {/* Template Picker Modal */}
+      <TemplatePickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(t) => { setSelectedTemplate(t); setPickerOpen(false); }}
+      />
     </form>
   );
 }

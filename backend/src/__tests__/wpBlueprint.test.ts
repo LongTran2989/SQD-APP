@@ -77,6 +77,8 @@ describe('WP Blueprint Backend', () => {
     await prisma.templateSet.deleteMany({});
     await prisma.auditLog.deleteMany({});
     await prisma.feedPost.deleteMany({});
+    await prisma.task.deleteMany({});
+    await prisma.workPackage.deleteMany({});
     await prisma.template.deleteMany({});
   });
 
@@ -87,6 +89,8 @@ describe('WP Blueprint Backend', () => {
     await prisma.templateSet.deleteMany({});
     await prisma.auditLog.deleteMany({});
     await prisma.feedPost.deleteMany({});
+    await prisma.task.deleteMany({});
+    await prisma.workPackage.deleteMany({});
     await prisma.template.deleteMany({});
     await prisma.user.deleteMany({ where: { email: { in: ['manager_bp@sqd.com', 'director_bp@sqd.com', 'staff_bp@sqd.com'] } } });
     await prisma.$disconnect();

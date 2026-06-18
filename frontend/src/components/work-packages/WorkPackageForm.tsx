@@ -7,8 +7,9 @@ import { getWpTypes } from '../../api/wpApi';
 import { getTemplateSets } from '../../api/templateSetApi';
 import { getDivisions } from '../../api/taskApi';
 import { apiClient } from '../../api/client';
+import TemplatePickerModal from '../templates/TemplatePickerModal';
 import toast from 'react-hot-toast';
-import { Info } from 'lucide-react';
+import { Info, LayoutTemplate, X } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,24 +73,22 @@ export default function WorkPackageForm({
   const [wpTypes, setWpTypes] = useState<WpType[]>([]);
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
-  const [publishedTemplates, setPublishedTemplates] = useState<Template[]>([]);
+  const [selectedAutoGenTemplate, setSelectedAutoGenTemplate] = useState<Template | null>(null);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [templateSets, setTemplateSets] = useState<TemplateSet[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [typesData, divsData, deptRes, tplRes] = await Promise.all([
+        const [typesData, divsData, deptRes] = await Promise.all([
           getWpTypes(),
           getDivisions(),
           apiClient.get('/datasources/departments'),
-          apiClient.get('/templates'),
         ]);
         setWpTypes(typesData);
         setDivisions(divsData);
         setDepartments(deptRes.data as { value: string; label: string }[]);
-        const published = (tplRes.data as Template[]).filter((t) => t.status === 'Published');
-        setPublishedTemplates(published);
       } catch {
         toast.error('Failed to load form data');
       } finally {
@@ -158,6 +157,7 @@ export default function WorkPackageForm({
   }
 
   return (
+    <>
     <form onSubmit={handleSubmit} className="space-y-6">
 
       {/* Core details */}
@@ -366,21 +366,30 @@ export default function WorkPackageForm({
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-autogen-template">
                   Template * <span className="font-normal text-slate-500">(must be Published)</span>
                 </label>
-                <select
-                  id="wp-autogen-template"
-                  value={autoGenTemplateId}
-                  onChange={(e) => setAutoGenTemplateId(e.target.value ? Number(e.target.value) : '')}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-                >
-                  <option value="">Select a published template...</option>
-                  {publishedTemplates.map((t) => (
-                    <option key={t.id} value={t.id}>{t.templateId} — {t.title}</option>
-                  ))}
-                </select>
-                {publishedTemplates.length === 0 && (
-                  <p className="mt-1.5 text-xs text-amber-600 flex items-center gap-1">
-                    <Info className="w-3.5 h-3.5" /> No published templates available.
-                  </p>
+                {selectedAutoGenTemplate ? (
+                  <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-mono font-semibold text-blue-700">{selectedAutoGenTemplate.templateId}</span>
+                      <p className="text-sm text-slate-700 truncate">{selectedAutoGenTemplate.title}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedAutoGenTemplate(null); setAutoGenTemplateId(''); }}
+                      className="p-1 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    id="wp-autogen-template"
+                    type="button"
+                    onClick={() => setTemplatePickerOpen(true)}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-xl text-sm text-slate-500 hover:text-blue-600 transition-all"
+                  >
+                    <LayoutTemplate className="w-4 h-4" />
+                    Browse and select a template…
+                  </button>
                 )}
               </div>
             )}
@@ -457,5 +466,17 @@ export default function WorkPackageForm({
         </button>
       </div>
     </form>
+
+    {/* Template Picker for auto-gen template selection */}
+    <TemplatePickerModal
+      open={templatePickerOpen}
+      onClose={() => setTemplatePickerOpen(false)}
+      onSelect={(t) => {
+        setSelectedAutoGenTemplate(t);
+        setAutoGenTemplateId(t.id);
+        setTemplatePickerOpen(false);
+      }}
+    />
+  </>
   );
 }

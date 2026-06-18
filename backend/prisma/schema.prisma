@@ -201,6 +201,7 @@ model Template {
   estimatedHours   Float?
   skillLevel       Int     @default(0) // Required competency level (0-4) seeded onto tasks created from this template
   type             String?
+  externalRef      String?  @unique // Excel TemplateRef for idempotent seed upsert (e.g. ORG-1, AUD-7.4)
   formSchema       Json // JSON document for active/published field definitions
   draftSchema      Json? // JSON document for unpublished draft changes
 

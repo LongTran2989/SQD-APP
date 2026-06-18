@@ -19,7 +19,17 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 beforeAll(async () => {
-  // Any global setup
+  // 1. Wipe all data to ensure pristine state for each test suite
+  const tablenames = await prisma.$queryRaw<Array<{ tablename: string }>>`
+    SELECT cast(tablename as text) as tablename FROM pg_tables WHERE schemaname='public';
+  `;
+  for (const { tablename } of tablenames) {
+    if (tablename !== '_prisma_migrations') {
+      await prisma.$executeRawUnsafe(`TRUNCATE TABLE "${tablename}" CASCADE;`);
+    }
+  }
+
+  // 2. Any global setup
   await prisma.systemSetting.upsert({
     where: { key: 'ENFORCE_SINGLE_SESSION' },
     update: { value: 'false' },

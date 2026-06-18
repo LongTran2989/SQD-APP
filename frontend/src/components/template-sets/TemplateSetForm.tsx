@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Plus, ArrowUp, ArrowDown, Trash2, Info } from 'lucide-react';
+import { X, Plus, ArrowUp, ArrowDown, Trash2, Info, LayoutTemplate } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
 import { Template } from '../../types';
 import { getDivisions } from '../../api/taskApi';
 import { apiClient } from '../../api/client';
+import TemplatePickerModal from '../templates/TemplatePickerModal';
 import {
   createTemplateSet,
   updateTemplateSet,
@@ -47,22 +48,23 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
   const [rows, setRows] = useState<ItemRow[]>([emptyRow()]);
 
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [allTemplates, setAllTemplates] = useState<Template[]>([]);
+  const [pickerOpenForRow, setPickerOpenForRow] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Published templates in the chosen division populate every row's picker.
+  // All published templates (global — not filtered by division, per design decision).
   const divisionTemplates = useMemo(
-    () => templates.filter((t) => t.status === 'Published' && t.divisionId === divisionId),
-    [templates, divisionId]
+    () => allTemplates.filter((t) => t.status === 'Published'),
+    [allTemplates]
   );
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [divs, tplRes] = await Promise.all([getDivisions(), apiClient.get('/templates')]);
+        const [divs, tplRes] = await Promise.all([getDivisions(), apiClient.get('/templates?status=Published&limit=500')]);
         setDivisions(divs);
-        setTemplates(tplRes.data as Template[]);
+        setAllTemplates((tplRes.data as { data: Template[] }).data ?? tplRes.data as Template[]);
 
         if (editId) {
           const set = await getTemplateSet(editId);
@@ -198,9 +200,9 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
                 </button>
               </div>
 
-              {divisionTemplates.length === 0 && divisionId !== '' && (
+              {divisionTemplates.length === 0 && (
                 <p className="text-xs text-amber-600 flex items-center gap-1">
-                  <Info className="w-3.5 h-3.5" /> No published templates in this division.
+                  <Info className="w-3.5 h-3.5" /> No published templates available.
                 </p>
               )}
 
@@ -208,14 +210,35 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
                 <div key={i} className="border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50/50">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-400 w-5 text-center">{i + 1}</span>
-                    <select
-                      value={row.templateId}
-                      onChange={(e) => updateRow(i, { templateId: e.target.value ? Number(e.target.value) : '' })}
-                      className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-                    >
-                      <option value="">Select a published template...</option>
-                      {divisionTemplates.map((t) => <option key={t.id} value={t.id}>{t.templateId} — {t.title}</option>)}
-                    </select>
+                    {/* Selected template display */}
+                    {row.templateId ? (
+                      <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg min-w-0">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-mono font-semibold text-blue-700">
+                            {divisionTemplates.find((t) => t.id === row.templateId)?.templateId ?? `#${row.templateId}`}
+                          </span>
+                          <p className="text-xs text-slate-700 truncate">
+                            {divisionTemplates.find((t) => t.id === row.templateId)?.title ?? 'Template'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updateRow(i, { templateId: '' })}
+                          className="p-0.5 text-slate-400 hover:text-slate-600 flex-shrink-0"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPickerOpenForRow(i)}
+                        className="flex-1 flex items-center gap-2 px-3 py-2 border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-lg text-xs text-slate-500 hover:text-blue-600 transition-all"
+                      >
+                        <LayoutTemplate className="w-3.5 h-3.5" />
+                        Browse templates…
+                      </button>
+                    )}
                     <div className="flex items-center gap-1">
                       <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
                         className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-md disabled:opacity-30" aria-label="Move up">
@@ -280,6 +303,21 @@ export default function TemplateSetForm({ editId, onClose, onSaved }: TemplateSe
           </form>
         )}
       </div>
+
+      {/* Template Picker — per-row selection */}
+      <TemplatePickerModal
+        open={pickerOpenForRow !== null}
+        onClose={() => setPickerOpenForRow(null)}
+        excludeTemplateIds={rows
+          .map((r) => (typeof r.templateId === 'number' ? r.templateId : null))
+          .filter((id): id is number => id !== null)}
+        onSelect={(t) => {
+          if (pickerOpenForRow !== null) {
+            updateRow(pickerOpenForRow, { templateId: t.id });
+            setPickerOpenForRow(null);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -92,6 +92,7 @@ export interface FormField {
 export interface Template {
   id: number;
   templateId: string;
+  externalRef?: string | null;
   title: string;
   description: string | null;
   status: 'Draft' | 'Published' | 'Archived';

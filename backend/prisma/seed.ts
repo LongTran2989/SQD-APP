@@ -18,6 +18,7 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcrypt';
 import { readFileSync } from 'fs';
+import { execSync } from 'child_process';
 import path from 'path';
 import 'dotenv/config';
 import { seedPrivileges } from '../src/seeds/seed-privileges';
@@ -765,6 +766,20 @@ async function main() {
   console.log('   Login field    : employeeId  (e.g. VAE00071)');
   console.log('   Password       : Abc@12345  (all users — must change on first login)');
   console.log('─────────────────────────────────────────────────────────');
+
+  // ── EXCEL TEMPLATES ───────────────────────────────────────────────────────
+  // Runs seed-templates.ts as a child process so it has its own Prisma client
+  // (avoids pool conflicts) and its errors don't abort the main seed.
+  console.log('');
+  console.log('── Excel Template Seed ───────────────────────────────────');
+  try {
+    execSync(
+      `node node_modules/ts-node/dist/bin.js prisma/seed-templates.ts`,
+      { stdio: 'inherit', cwd: __dirname + '/..' }
+    );
+  } catch (e) {
+    console.warn('⚠️  Template seed encountered an error (non-fatal). Check output above.');
+  }
 }
 
 main()
