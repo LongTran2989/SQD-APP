@@ -40,6 +40,7 @@ export default function NewWorkPackagePage() {
         autoGenMode: values.autoGenerate ? values.autoGenMode : null,
         autoGenInterval: values.autoGenerate && values.autoGenMode === 'REPEAT' && values.autoGenInterval ? Number(values.autoGenInterval) : null,
         autoGenTemplateId: values.autoGenerate && values.autoGenTemplateId ? Number(values.autoGenTemplateId) : null,
+        autoGenSetId: values.autoGenerate && values.autoGenSetId ? Number(values.autoGenSetId) : null,
       });
       toast.success(`Work Package ${wp.wpId} created`);
       router.push(`/dashboard/work-packages/${wp.id}`);

@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../store/authStore';
-import { WpType, Template } from '../../types';
+import { WpType, Template, TemplateSet } from '../../types';
 import { getWpTypes } from '../../api/wpApi';
+import { getTemplateSets } from '../../api/templateSetApi';
 import { getDivisions } from '../../api/taskApi';
 import { apiClient } from '../../api/client';
 import toast from 'react-hot-toast';
@@ -21,11 +22,13 @@ export interface WpFormValues {
   customer: string;
   authority: string;
   targetDepartmentId: number | '';
-  // Auto-generate config (P4: single-template source only).
+  // Auto-generate config. Source is a single template OR (SINGLE_SHOT only) a
+  // saved set — exactly one of autoGenTemplateId / autoGenSetId is set.
   autoGenerate: boolean;
   autoGenMode: 'SINGLE_SHOT' | 'REPEAT';
   autoGenInterval: number | '';
   autoGenTemplateId: number | '';
+  autoGenSetId: number | '';
 }
 
 interface WorkPackageFormProps {
@@ -62,11 +65,15 @@ export default function WorkPackageForm({
   const [autoGenMode, setAutoGenMode] = useState<'SINGLE_SHOT' | 'REPEAT'>(initial?.autoGenMode ?? 'SINGLE_SHOT');
   const [autoGenInterval, setAutoGenInterval] = useState<number | ''>(initial?.autoGenInterval ?? '');
   const [autoGenTemplateId, setAutoGenTemplateId] = useState<number | ''>(initial?.autoGenTemplateId ?? '');
+  const [autoGenSetId, setAutoGenSetId] = useState<number | ''>(initial?.autoGenSetId ?? '');
+  // 'TEMPLATE' = single template, 'SET' = saved set (SINGLE_SHOT only).
+  const [autoGenSource, setAutoGenSource] = useState<'TEMPLATE' | 'SET'>(initial?.autoGenSetId ? 'SET' : 'TEMPLATE');
 
   const [wpTypes, setWpTypes] = useState<WpType[]>([]);
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
   const [publishedTemplates, setPublishedTemplates] = useState<Template[]>([]);
+  const [templateSets, setTemplateSets] = useState<TemplateSet[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
@@ -92,6 +99,23 @@ export default function WorkPackageForm({
     load();
   }, []);
 
+  // Saved sets are division-scoped; reload the active set list whenever the
+  // chosen division changes (and reset a stale selection).
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!divisionId) { if (!cancelled) setTemplateSets([]); return; }
+      try {
+        const sets = await getTemplateSets({ activeOnly: true, divisionId: Number(divisionId) });
+        if (!cancelled) setTemplateSets(sets);
+      } catch {
+        if (!cancelled) setTemplateSets([]);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [divisionId]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { toast.error('Name is required'); return; }
@@ -100,8 +124,14 @@ export default function WorkPackageForm({
     if (!timeframeFrom) { toast.error('Start date is required'); return; }
     if (!timeframeTo) { toast.error('End date is required'); return; }
     if (timeframeFrom >= timeframeTo) { toast.error('Start date must be before end date'); return; }
+    // Saved sets are SINGLE_SHOT only; REPEAT always uses a single template.
+    const useSet = autoGenMode === 'SINGLE_SHOT' && autoGenSource === 'SET';
     if (autoGenerate) {
-      if (!autoGenTemplateId) { toast.error('Auto-generate requires a template'); return; }
+      if (useSet) {
+        if (!autoGenSetId) { toast.error('Select a saved template set'); return; }
+      } else {
+        if (!autoGenTemplateId) { toast.error('Auto-generate requires a template'); return; }
+      }
       if (autoGenMode === 'REPEAT' && (!autoGenInterval || Number(autoGenInterval) < 1)) {
         toast.error('Repeat mode requires an interval of at least 1 day'); return;
       }
@@ -110,7 +140,9 @@ export default function WorkPackageForm({
     onSubmit({
       name: name.trim(), type, divisionId, timeframeFrom, timeframeTo,
       acRegistration: acRegistration.trim(), customer: customer.trim(), authority: authority.trim(), targetDepartmentId,
-      autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId,
+      autoGenerate, autoGenMode, autoGenInterval,
+      autoGenTemplateId: useSet ? '' : autoGenTemplateId,
+      autoGenSetId: useSet ? autoGenSetId : '',
     });
   };
 
@@ -298,7 +330,12 @@ export default function WorkPackageForm({
               <select
                 id="wp-autogen-mode"
                 value={autoGenMode}
-                onChange={(e) => setAutoGenMode(e.target.value as 'SINGLE_SHOT' | 'REPEAT')}
+                onChange={(e) => {
+                  const mode = e.target.value as 'SINGLE_SHOT' | 'REPEAT';
+                  setAutoGenMode(mode);
+                  // Saved sets are SINGLE_SHOT only; REPEAT forces single-template.
+                  if (mode === 'REPEAT') setAutoGenSource('TEMPLATE');
+                }}
                 className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
               >
                 <option value="SINGLE_SHOT">Single shot — generate once when the WP starts</option>
@@ -306,28 +343,72 @@ export default function WorkPackageForm({
               </select>
             </div>
 
-            {/* Template source */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-autogen-template">
-                Template * <span className="font-normal text-slate-500">(must be Published)</span>
-              </label>
-              <select
-                id="wp-autogen-template"
-                value={autoGenTemplateId}
-                onChange={(e) => setAutoGenTemplateId(e.target.value ? Number(e.target.value) : '')}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-              >
-                <option value="">Select a published template...</option>
-                {publishedTemplates.map((t) => (
-                  <option key={t.id} value={t.id}>{t.templateId} — {t.title}</option>
-                ))}
-              </select>
-              {publishedTemplates.length === 0 && (
-                <p className="mt-1.5 text-xs text-amber-600 flex items-center gap-1">
-                  <Info className="w-3.5 h-3.5" /> No published templates available.
-                </p>
-              )}
-            </div>
+            {/* Source toggle — saved sets only available for SINGLE_SHOT */}
+            {autoGenMode === 'SINGLE_SHOT' && (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">Source *</label>
+                <div className="inline-flex rounded-xl border border-slate-300 overflow-hidden text-sm">
+                  <button type="button" onClick={() => setAutoGenSource('TEMPLATE')}
+                    className={`px-4 py-2 font-medium transition-colors ${autoGenSource === 'TEMPLATE' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                    Single template
+                  </button>
+                  <button type="button" onClick={() => setAutoGenSource('SET')}
+                    className={`px-4 py-2 font-medium transition-colors border-l border-slate-300 ${autoGenSource === 'SET' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                    Saved set
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Single-template source */}
+            {!(autoGenMode === 'SINGLE_SHOT' && autoGenSource === 'SET') && (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-autogen-template">
+                  Template * <span className="font-normal text-slate-500">(must be Published)</span>
+                </label>
+                <select
+                  id="wp-autogen-template"
+                  value={autoGenTemplateId}
+                  onChange={(e) => setAutoGenTemplateId(e.target.value ? Number(e.target.value) : '')}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                >
+                  <option value="">Select a published template...</option>
+                  {publishedTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.templateId} — {t.title}</option>
+                  ))}
+                </select>
+                {publishedTemplates.length === 0 && (
+                  <p className="mt-1.5 text-xs text-amber-600 flex items-center gap-1">
+                    <Info className="w-3.5 h-3.5" /> No published templates available.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Saved-set source (SINGLE_SHOT only) */}
+            {autoGenMode === 'SINGLE_SHOT' && autoGenSource === 'SET' && (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="wp-autogen-set">
+                  Saved set * <span className="font-normal text-slate-500">(active sets in this division)</span>
+                </label>
+                <select
+                  id="wp-autogen-set"
+                  value={autoGenSetId}
+                  onChange={(e) => setAutoGenSetId(e.target.value ? Number(e.target.value) : '')}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                >
+                  <option value="">Select a template set...</option>
+                  {templateSets.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} ({s._count?.items ?? s.items?.length ?? 0} templates)</option>
+                  ))}
+                </select>
+                {templateSets.length === 0 && (
+                  <p className="mt-1.5 text-xs text-amber-600 flex items-center gap-1">
+                    <Info className="w-3.5 h-3.5" /> No active template sets in this division. Create one under Template Sets.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Interval — REPEAT only */}
             {autoGenMode === 'REPEAT' && (
@@ -347,11 +428,6 @@ export default function WorkPackageForm({
                 />
               </div>
             )}
-
-            <p className="text-xs text-slate-500 flex items-start gap-1.5">
-              <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              Saved template sets and inline multi-template lists arrive in a later update — for now, choose a single template.
-            </p>
           </div>
         )}
       </div>

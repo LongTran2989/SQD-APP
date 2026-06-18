@@ -214,6 +214,35 @@ export interface WpType {
   isActive?: boolean;
 }
 
+// ── Template Sets (P5) — ordered, reusable lists of templates for SINGLE_SHOT autogen ──
+export interface TemplateSetItem {
+  id: number;
+  setId: number;
+  templateId: number;
+  orderIndex: number;
+  deadlineOffsetDays: number | null;
+  estimatedHours: number | null;
+  skillLevel: number | null;
+  requiresApproval: boolean | null;
+  defaultNote: string | null;
+  template?: { id: number; templateId: string; title: string; status: string };
+}
+
+export interface TemplateSet {
+  id: number;
+  name: string;
+  description: string | null;
+  divisionId: number;
+  ownerId: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  division?: { id: number; name: string; code: string } | null;
+  owner?: { id: number; name: string } | null;
+  items?: TemplateSetItem[];
+  _count?: { items: number };
+}
+
 export interface EventType {
   id: number;
   code: string;

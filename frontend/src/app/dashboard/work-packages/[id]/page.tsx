@@ -327,9 +327,13 @@ export default function WorkPackageDetailPage() {
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Source template</span>
+                    <span className="text-slate-500">Source</span>
                     <span className="font-medium text-slate-700">
-                      {wp.autoGenTemplateId ? `ID ${wp.autoGenTemplateId}` : '—'}
+                      {wp.autoGenSetId
+                        ? `Saved set #${wp.autoGenSetId}`
+                        : wp.autoGenTemplateId
+                          ? `Template ID ${wp.autoGenTemplateId}`
+                          : '—'}
                     </span>
                   </div>
                   <div className="flex justify-between">

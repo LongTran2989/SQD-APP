@@ -63,6 +63,7 @@ export default function EditWorkPackagePage() {
         autoGenMode: values.autoGenerate ? values.autoGenMode : null,
         autoGenInterval: values.autoGenerate && values.autoGenMode === 'REPEAT' && values.autoGenInterval ? Number(values.autoGenInterval) : null,
         autoGenTemplateId: values.autoGenerate && values.autoGenTemplateId ? Number(values.autoGenTemplateId) : null,
+        autoGenSetId: values.autoGenerate && values.autoGenSetId ? Number(values.autoGenSetId) : null,
       });
       toast.success('Work Package updated');
       router.push(`/dashboard/work-packages/${wpId}`);
@@ -124,6 +125,7 @@ export default function EditWorkPackagePage() {
     autoGenMode: wp.autoGenMode ?? 'SINGLE_SHOT',
     autoGenInterval: wp.autoGenInterval ?? '',
     autoGenTemplateId: wp.autoGenTemplateId ?? '',
+    autoGenSetId: wp.autoGenSetId ?? '',
   };
 
   return (

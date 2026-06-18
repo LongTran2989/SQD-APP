@@ -16,7 +16,8 @@ import {
   Globe,
   Flag,
   Settings,
-  BarChart2
+  BarChart2,
+  Layers
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -54,6 +55,7 @@ export default function Sidebar() {
     { name: 'Escalations', href: '/dashboard/escalations', icon: Flag, roles: ESCALATION_ACTION_ROLES },
     { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart2, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Template Builder', href: '/dashboard/templates', icon: FileCheck2, roles: ['Admin', 'Director', 'Manager'] },
+    { name: 'Template Sets', href: '/dashboard/template-sets', icon: Layers, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
   ];
 
