@@ -46,6 +46,12 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
   const [autoGenSetId, setAutoGenSetId] = useState<number | ''>('');
   const [autoGenSource, setAutoGenSource] = useState<'TEMPLATE' | 'SET'>('TEMPLATE');
 
+  // Recurrence config (P7).
+  const [recurrenceEnabled, setRecurrenceEnabled] = useState(false);
+  const [recurrenceType, setRecurrenceType] = useState<'CALENDAR' | 'LAST_DONE'>('CALENDAR');
+  const [recurrenceInterval, setRecurrenceInterval] = useState<number | ''>('');
+  const [recurrenceStartDate, setRecurrenceStartDate] = useState('');
+
   const [wpTypes, setWpTypes] = useState<WpType[]>([]);
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
@@ -82,6 +88,12 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
           setAutoGenTemplateId(bp.defaultAutoGenTemplateId ?? '');
           setAutoGenSetId(bp.defaultAutoGenSetId ?? '');
           setAutoGenSource(bp.defaultAutoGenSetId ? 'SET' : 'TEMPLATE');
+          if (bp.recurrenceType) {
+            setRecurrenceEnabled(true);
+            setRecurrenceType(bp.recurrenceType);
+            setRecurrenceInterval(bp.recurrenceInterval ?? '');
+            setRecurrenceStartDate(bp.recurrenceStartDate ? bp.recurrenceStartDate.slice(0, 10) : '');
+          }
         }
       } catch {
         toast.error('Failed to load form data');
@@ -126,6 +138,10 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
         toast.error('Repeat mode requires an interval of at least 1 day'); return;
       }
     }
+    if (recurrenceEnabled) {
+      if (!recurrenceInterval || Number(recurrenceInterval) < 1) { toast.error('Recurrence requires an interval of at least 1 day'); return; }
+      if (!recurrenceStartDate) { toast.error('Recurrence requires a start date'); return; }
+    }
 
     const payload: WpBlueprintPayload = {
       name: name.trim(),
@@ -142,6 +158,9 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
       defaultAutoGenInterval: autoGenerate && autoGenMode === 'REPEAT' && autoGenInterval ? Number(autoGenInterval) : null,
       defaultAutoGenTemplateId: autoGenerate && !useSet && autoGenTemplateId ? Number(autoGenTemplateId) : null,
       defaultAutoGenSetId: autoGenerate && useSet && autoGenSetId ? Number(autoGenSetId) : null,
+      recurrenceType: recurrenceEnabled ? recurrenceType : null,
+      recurrenceInterval: recurrenceEnabled && recurrenceInterval ? Number(recurrenceInterval) : null,
+      recurrenceStartDate: recurrenceEnabled && recurrenceStartDate ? recurrenceStartDate : null,
     };
 
     setSubmitting(true);
@@ -294,6 +313,44 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
                       <input id="bp-ag-interval" type="number" min={1} step={1} value={autoGenInterval} onChange={(e) => setAutoGenInterval(e.target.value ? Number(e.target.value) : '')} className={field} placeholder="e.g. 1 for daily" />
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+
+            {/* Recurrence (P7) — auto-launch this blueprint on a schedule */}
+            <div className="border-t border-slate-100 pt-4 space-y-4">
+              <label className="inline-flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={recurrenceEnabled} onChange={(e) => setRecurrenceEnabled(e.target.checked)} />
+                <div className="relative w-11 h-6 bg-slate-200 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all" />
+                <span className="text-sm font-semibold text-slate-700">Auto-launch on a recurring schedule</span>
+              </label>
+
+              {recurrenceEnabled && (
+                <div className="space-y-4">
+                  <div>
+                    <label className={labelCls} htmlFor="bp-rec-type">Recurrence mode *</label>
+                    <select id="bp-rec-type" value={recurrenceType} onChange={(e) => setRecurrenceType(e.target.value as 'CALENDAR' | 'LAST_DONE')} className={field}>
+                      <option value="CALENDAR">Calendar — launch every N days on a fixed cadence</option>
+                      <option value="LAST_DONE">Last-done — launch N days after the previous one is closed</option>
+                    </select>
+                    <p className="mt-1.5 text-xs text-slate-500 flex items-center gap-1">
+                      <Info className="w-3.5 h-3.5 shrink-0" />
+                      {recurrenceType === 'CALENDAR'
+                        ? 'Fires on schedule regardless of whether the previous Work Package is finished.'
+                        : 'Next launch is scheduled only once the previous Work Package is closed.'}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelCls} htmlFor="bp-rec-interval">Interval (days) *</label>
+                      <input id="bp-rec-interval" type="number" min={1} step={1} value={recurrenceInterval}
+                        onChange={(e) => setRecurrenceInterval(e.target.value ? Number(e.target.value) : '')} className={field} placeholder="e.g. 30" />
+                    </div>
+                    <div>
+                      <label className={labelCls} htmlFor="bp-rec-start">Start date *</label>
+                      <input id="bp-rec-start" type="date" value={recurrenceStartDate} onChange={(e) => setRecurrenceStartDate(e.target.value)} className={field} />
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

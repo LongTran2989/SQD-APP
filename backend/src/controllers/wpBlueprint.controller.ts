@@ -1,14 +1,14 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { validateAutoGenConfig, AutoGenColumns } from '../services/autoGenService';
+import { validateAutoGenConfig, AutoGenColumns, calendarDateUtc } from '../services/autoGenService';
 import { createWorkPackageService } from './wp.controller';
 
 // WpBlueprint is config (not a Rule-2 soft-delete entity); "delete" = isActive=false,
 // mirroring TemplateSet/WpType. Mutations write a lightweight AuditLog only (no
 // TaskActivity — config changes are not task-scoped). Recurrence fields
-// (recurrenceType/recurrenceInterval) are intentionally NOT accepted in P6; they
-// are P7 (Master Calendar) territory and are always persisted null here.
+// (recurrenceType/recurrenceInterval/recurrenceStartDate) drive the P7 nightly
+// auto-launch cron; when set, nextRunAt is seeded to the start date.
 
 const MAX_NAME_LEN = 200;
 const MAX_TEXT_LEN = 2000;
@@ -39,6 +39,43 @@ function toDefaultAutoGenColumns(c: AutoGenColumns) {
     defaultAutoGenSetId: c.autoGenSetId,
     defaultAutoGenInlineSet: c.autoGenInlineSet,
   };
+}
+
+// Validates the recurrence block and returns the columns to persist. recurrenceType
+// absent/null clears the whole block (manual-launch-only). When set, all three of
+// recurrenceType/recurrenceInterval/recurrenceStartDate are required together, and
+// nextRunAt is seeded to the (UTC-normalized) start date so the cron picks it up.
+interface RecurrenceColumns {
+  recurrenceType: string | null;
+  recurrenceInterval: number | null;
+  recurrenceStartDate: Date | null;
+  nextRunAt: Date | null;
+}
+function resolveRecurrence(input: {
+  recurrenceType?: unknown; recurrenceInterval?: unknown; recurrenceStartDate?: unknown;
+}): { error: string } | { data: RecurrenceColumns } {
+  const rt = input.recurrenceType;
+  if (rt == null || rt === '') {
+    return { data: { recurrenceType: null, recurrenceInterval: null, recurrenceStartDate: null, nextRunAt: null } };
+  }
+  if (rt !== 'CALENDAR' && rt !== 'LAST_DONE') {
+    return { error: "recurrenceType must be 'CALENDAR' or 'LAST_DONE'" };
+  }
+  const interval = typeof input.recurrenceInterval === 'number'
+    ? input.recurrenceInterval
+    : Number(input.recurrenceInterval);
+  if (!Number.isInteger(interval) || interval < 1) {
+    return { error: 'recurrenceInterval must be a positive integer (days) when recurrenceType is set' };
+  }
+  if (input.recurrenceStartDate == null || input.recurrenceStartDate === '') {
+    return { error: 'recurrenceStartDate is required when recurrenceType is set' };
+  }
+  const start = new Date(input.recurrenceStartDate as string);
+  if (Number.isNaN(start.getTime())) {
+    return { error: 'recurrenceStartDate is not a valid date' };
+  }
+  const startUtc = calendarDateUtc(start);
+  return { data: { recurrenceType: rt, recurrenceInterval: interval, recurrenceStartDate: startUtc, nextRunAt: startUtc } };
 }
 
 // Resolves the type-specific context columns to persist, validating
@@ -120,6 +157,7 @@ export const createWpBlueprint = async (req: Request, res: Response): Promise<vo
       acRegistration, customer, authority, targetDepartmentId,
       defaultAutoGenerate, defaultAutoGenMode, defaultAutoGenInterval,
       defaultAutoGenTemplateId, defaultAutoGenSetId, defaultAutoGenInlineSet,
+      recurrenceType, recurrenceInterval, recurrenceStartDate,
     } = req.body;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -172,6 +210,12 @@ export const createWpBlueprint = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    const recurrence = resolveRecurrence({ recurrenceType, recurrenceInterval, recurrenceStartDate });
+    if ('error' in recurrence) {
+      res.status(400).json({ message: recurrence.error });
+      return;
+    }
+
     const created = await prisma.$transaction(async (tx) => {
       const bp = await tx.wpBlueprint.create({
         data: {
@@ -183,9 +227,7 @@ export const createWpBlueprint = async (req: Request, res: Response): Promise<vo
           ownerId: userId,
           ...toDefaultAutoGenColumns(autoGen.data),
           ...typeFields.data,
-          // Recurrence is P7 — always null in P6.
-          recurrenceType: null,
-          recurrenceInterval: null,
+          ...recurrence.data,
         },
         include: BLUEPRINT_INCLUDE,
       });
@@ -218,6 +260,7 @@ export const updateWpBlueprint = async (req: Request, res: Response): Promise<vo
       acRegistration, customer, authority, targetDepartmentId,
       defaultAutoGenerate, defaultAutoGenMode, defaultAutoGenInterval,
       defaultAutoGenTemplateId, defaultAutoGenSetId, defaultAutoGenInlineSet,
+      recurrenceType, recurrenceInterval, recurrenceStartDate,
     } = req.body;
 
     const existing = await prisma.wpBlueprint.findUnique({ where: { id }, select: { id: true, divisionId: true, type: true } });
@@ -277,6 +320,19 @@ export const updateWpBlueprint = async (req: Request, res: Response): Promise<vo
         return;
       }
       Object.assign(data, toDefaultAutoGenColumns(autoGen.data));
+    }
+
+    // Providing any recurrence field re-resolves the whole block and reseeds
+    // nextRunAt to the start date (editing the schedule restarts it). Omitting all
+    // three leaves an in-flight schedule (incl. a null LAST_DONE awaiting close) intact.
+    const recurrenceProvided = recurrenceType !== undefined || recurrenceInterval !== undefined || recurrenceStartDate !== undefined;
+    if (recurrenceProvided) {
+      const recurrence = resolveRecurrence({ recurrenceType, recurrenceInterval, recurrenceStartDate });
+      if ('error' in recurrence) {
+        res.status(400).json({ message: recurrence.error });
+        return;
+      }
+      Object.assign(data, recurrence.data);
     }
 
     const updated = await prisma.$transaction(async (tx) => {

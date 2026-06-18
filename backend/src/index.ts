@@ -32,6 +32,7 @@ import { startRealtimeListener } from './realtime/pgEvents';
 import { purgeOldNotifications } from './services/notificationService';
 import { initStorage } from './services/storage';
 import { runAutoGenCron, APP_TIMEZONE } from './services/autoGenService';
+import { runRecurrenceCron } from './services/recurrenceService';
 
 dotenv.config();
 
@@ -122,6 +123,10 @@ if (process.env.NODE_ENV !== 'test') {
   // lock + autoGenFiredAt make each fire idempotent, so a missed/duplicate run
   // is safe. APP_TIMEZONE anchors both this trigger and the service's date math.
   cron.schedule('5 0 * * *', () => { void runAutoGenCron(prisma); }, { timezone: APP_TIMEZONE });
+  // Nightly recurrence sweep (00:15 in APP_TIMEZONE), staggered after the auto-gen
+  // job. Each blueprint's FOR UPDATE lock + nextRunAt anchor make every auto-launch
+  // idempotent, so a missed/duplicate run is safe.
+  cron.schedule('15 0 * * *', () => { void runRecurrenceCron(prisma); }, { timezone: APP_TIMEZONE });
 }
 
 export default app;

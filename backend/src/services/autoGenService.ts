@@ -18,7 +18,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * date-only input) and against autoGenFiredAt using whole-day arithmetic, all
  * anchored to the same timezone the cron fires in.
  */
-function calendarDateUtc(instant: Date, tz: string = APP_TIMEZONE): Date {
+export function calendarDateUtc(instant: Date, tz: string = APP_TIMEZONE): Date {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
     year: 'numeric',
@@ -29,8 +29,13 @@ function calendarDateUtc(instant: Date, tz: string = APP_TIMEZONE): Date {
   return new Date(Date.UTC(get('year'), get('month') - 1, get('day')));
 }
 
-function daysBetween(from: Date, to: Date): number {
+export function daysBetween(from: Date, to: Date): number {
   return Math.floor((to.getTime() - from.getTime()) / DAY_MS);
+}
+
+/** Adds whole days to a UTC-midnight date, returning a new UTC-midnight Date. */
+export function addDaysUtc(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * DAY_MS);
 }
 
 // JSON payloads (autoGenInlineSet, req.body) may carry numerics as strings;

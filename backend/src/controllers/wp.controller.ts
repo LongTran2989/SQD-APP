@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma, PrismaClient, WorkPackage } from '@prisma/client';
 import { fireAutoGenForWp, validateAutoGenConfig, AutoGenColumns } from '../services/autoGenService';
+import { rearmLastDoneRecurrence } from '../services/recurrenceService';
 import { createFeedPost } from '../services/feedService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege } from '../utils/privilegeAccess';
@@ -537,30 +538,44 @@ export const updateWorkPackageStatus = async (req: Request, res: Response): Prom
       };
     }
 
-    // Reactivation clears inactivation log  
+    // Reactivation clears inactivation log
     if (status === 'Open' && wp.status === 'Inactive') {
       dataToUpdate.inactivationLog = null;
     }
 
-    const updated = await prisma.workPackage.update({
-      where: { id },
-      data: dataToUpdate,
-      include: {
-        division: { select: { id: true, name: true, code: true } },
-        creator: { select: { id: true, name: true } },
-      }
-    });
+    // Stamp closedAt on close — anchors LAST_DONE recurrence (P7).
+    if (status === 'Closed') {
+      dataToUpdate.closedAt = new Date();
+    }
 
-    // Log to AuditLog
-    await prisma.auditLog.create({
-      data: {
-        actionType: `WORK_PACKAGE_${status.toUpperCase().replace(' ', '_')}`,
-        entityType: 'WorkPackage',
-        entityId: String(wp.id),
-        performedByUserId: userId,
-        comment: reason || null,
-        details: { fromStatus: wp.status, toStatus: status }
+    const updated = await prisma.$transaction(async (tx) => {
+      const wpUpdated = await tx.workPackage.update({
+        where: { id },
+        data: dataToUpdate,
+        include: {
+          division: { select: { id: true, name: true, code: true } },
+          creator: { select: { id: true, name: true } },
+        }
+      });
+
+      // Log to AuditLog
+      await tx.auditLog.create({
+        data: {
+          actionType: `WORK_PACKAGE_${status.toUpperCase().replace(' ', '_')}`,
+          entityType: 'WorkPackage',
+          entityId: String(wp.id),
+          performedByUserId: userId,
+          comment: reason || null,
+          details: { fromStatus: wp.status, toStatus: status }
+        }
+      });
+
+      // On close, re-arm a LAST_DONE blueprint's schedule (no-op otherwise).
+      if (status === 'Closed' && wpUpdated.blueprintId != null) {
+        await rearmLastDoneRecurrence(tx, { blueprintId: wpUpdated.blueprintId, closedAt: wpUpdated.closedAt });
       }
+
+      return wpUpdated;
     });
 
     const statusLabel = status === 'Open' && wp.status === 'Inactive' ? 'reactivated' : status.toLowerCase();

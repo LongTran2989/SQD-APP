@@ -732,6 +732,7 @@ model WorkPackage {
 
   status          String @default("Open") // Open, In Progress, Overdue, Closed, Inactive
   inactivationLog Json?
+  closedAt        DateTime? // stamped when status manually transitions to 'Closed' (anchors LAST_DONE recurrence)
 
   assignments WorkPackageAssignment[]
   tasks       Task[]
@@ -832,9 +833,12 @@ model WpBlueprint {
   defaultAutoGenSet        TemplateSet? @relation("BlueprintAutoGenSet", fields: [defaultAutoGenSetId], references: [id])
   defaultAutoGenInlineSet  Json?
 
-  // Recurrence scheduling
-  recurrenceType     String? // 'CALENDAR' | 'LAST_DONE' | null (manual launch only)
-  recurrenceInterval Int? // days
+  // Recurrence scheduling (P7). When recurrenceType is set, the nightly cron
+  // auto-launches a routine WP every recurrenceInterval days.
+  recurrenceType      String? // 'CALENDAR' | 'LAST_DONE' | null (manual launch only)
+  recurrenceInterval  Int? // days between auto-launches
+  recurrenceStartDate DateTime? // explicit first-fire date (no implicit "today + interval")
+  nextRunAt           DateTime? // cron candidate-query anchor; recomputed after every fire/close
 
   // Type-specific context defaults (overridable at launch)
   targetDepartmentId Int?

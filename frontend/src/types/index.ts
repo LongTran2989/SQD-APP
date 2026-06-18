@@ -256,6 +256,10 @@ export interface WpBlueprint {
   defaultAutoGenInterval: number | null;
   defaultAutoGenTemplateId: number | null;
   defaultAutoGenSetId: number | null;
+  recurrenceType: 'CALENDAR' | 'LAST_DONE' | null;
+  recurrenceInterval: number | null;
+  recurrenceStartDate: string | null;
+  nextRunAt: string | null;
   acRegistration: string | null;
   customer: string | null;
   authority: string | null;

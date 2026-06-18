@@ -18,7 +18,8 @@ import {
   Settings,
   BarChart2,
   Layers,
-  Rocket
+  Rocket,
+  CalendarClock
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -58,6 +59,7 @@ export default function Sidebar() {
     { name: 'Template Builder', href: '/dashboard/templates', icon: FileCheck2, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Template Sets', href: '/dashboard/template-sets', icon: Layers, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'WP Blueprints', href: '/dashboard/wp-blueprints', icon: Rocket, roles: ['Admin', 'Director', 'Manager'] },
+    { name: 'Master Calendar', href: '/dashboard/master-calendar', icon: CalendarClock, roles: ['Admin', 'Director', 'Manager'] },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings, roles: ['Admin', 'Director', 'Manager', 'Group Leader', 'Staff'] },
   ];
 

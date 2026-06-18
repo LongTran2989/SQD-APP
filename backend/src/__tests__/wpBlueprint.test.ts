@@ -138,15 +138,41 @@ describe('WP Blueprint Backend', () => {
       expect(res.status).toBe(400);
     });
 
-    it('ignores recurrence fields sent in the body (persists null)', async () => {
+    it('creates with a CALENDAR recurrence and seeds nextRunAt to the start date', async () => {
       const res = await request(app)
         .post('/api/wp-blueprints')
         .set('Authorization', `Bearer ${managerToken}`)
-        .send(baseBody({ recurrenceType: 'CALENDAR', recurrenceInterval: 30 }));
+        .send(baseBody({ recurrenceType: 'CALENDAR', recurrenceInterval: 30, recurrenceStartDate: '2026-07-01' }));
       expect(res.status).toBe(201);
       const row = await prisma.wpBlueprint.findUnique({ where: { id: res.body.id } });
-      expect(row?.recurrenceType).toBeNull();
-      expect(row?.recurrenceInterval).toBeNull();
+      expect(row?.recurrenceType).toBe('CALENDAR');
+      expect(row?.recurrenceInterval).toBe(30);
+      expect(row?.recurrenceStartDate?.toISOString().slice(0, 10)).toBe('2026-07-01');
+      expect(row?.nextRunAt?.toISOString().slice(0, 10)).toBe('2026-07-01');
+    });
+
+    it('rejects recurrenceType without interval/startDate (400)', async () => {
+      const res = await request(app)
+        .post('/api/wp-blueprints')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send(baseBody({ recurrenceType: 'CALENDAR' }));
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects an invalid recurrenceType (400)', async () => {
+      const res = await request(app)
+        .post('/api/wp-blueprints')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send(baseBody({ recurrenceType: 'WEEKLY', recurrenceInterval: 7, recurrenceStartDate: '2026-07-01' }));
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects a non-positive recurrenceInterval (400)', async () => {
+      const res = await request(app)
+        .post('/api/wp-blueprints')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send(baseBody({ recurrenceType: 'LAST_DONE', recurrenceInterval: 0, recurrenceStartDate: '2026-07-01' }));
+      expect(res.status).toBe(400);
     });
 
     it('forbids Staff (403)', async () => {
@@ -186,6 +212,39 @@ describe('WP Blueprint Backend', () => {
       expect(res.status).toBe(200);
       expect(res.body.name).toBe('Renamed');
       expect(res.body.defaultAutoGenTemplateId).toBe(t.id);
+    });
+
+    it('reseeds nextRunAt when the schedule is edited, and clears it when recurrence is removed', async () => {
+      const created = await request(app).post('/api/wp-blueprints').set('Authorization', `Bearer ${managerToken}`)
+        .send(baseBody({ recurrenceType: 'CALENDAR', recurrenceInterval: 30, recurrenceStartDate: '2026-07-01' }));
+
+      // Edit the start date → nextRunAt follows.
+      const edited = await request(app).put(`/api/wp-blueprints/${created.body.id}`).set('Authorization', `Bearer ${managerToken}`)
+        .send({ recurrenceType: 'CALENDAR', recurrenceInterval: 30, recurrenceStartDate: '2026-08-15' });
+      expect(edited.status).toBe(200);
+      let row = await prisma.wpBlueprint.findUnique({ where: { id: created.body.id } });
+      expect(row?.nextRunAt?.toISOString().slice(0, 10)).toBe('2026-08-15');
+
+      // Clearing recurrenceType nulls the whole block.
+      const cleared = await request(app).put(`/api/wp-blueprints/${created.body.id}`).set('Authorization', `Bearer ${managerToken}`)
+        .send({ recurrenceType: null });
+      expect(cleared.status).toBe(200);
+      row = await prisma.wpBlueprint.findUnique({ where: { id: created.body.id } });
+      expect(row?.recurrenceType).toBeNull();
+      expect(row?.recurrenceInterval).toBeNull();
+      expect(row?.recurrenceStartDate).toBeNull();
+      expect(row?.nextRunAt).toBeNull();
+    });
+
+    it('leaves recurrence untouched when no recurrence field is sent', async () => {
+      const created = await request(app).post('/api/wp-blueprints').set('Authorization', `Bearer ${managerToken}`)
+        .send(baseBody({ recurrenceType: 'LAST_DONE', recurrenceInterval: 14, recurrenceStartDate: '2026-07-01' }));
+      await request(app).put(`/api/wp-blueprints/${created.body.id}`).set('Authorization', `Bearer ${managerToken}`)
+        .send({ name: 'Just a rename' });
+      const row = await prisma.wpBlueprint.findUnique({ where: { id: created.body.id } });
+      expect(row?.recurrenceType).toBe('LAST_DONE');
+      expect(row?.recurrenceInterval).toBe(14);
+      expect(row?.nextRunAt?.toISOString().slice(0, 10)).toBe('2026-07-01');
     });
 
     it('forbids cross-division manager update (403)', async () => {

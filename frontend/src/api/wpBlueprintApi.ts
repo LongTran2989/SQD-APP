@@ -16,6 +16,9 @@ export interface WpBlueprintPayload {
   defaultAutoGenInterval?: number | null;
   defaultAutoGenTemplateId?: number | null;
   defaultAutoGenSetId?: number | null;
+  recurrenceType?: 'CALENDAR' | 'LAST_DONE' | null;
+  recurrenceInterval?: number | null;
+  recurrenceStartDate?: string | null;
 }
 
 export type UpdateWpBlueprintPayload = Partial<WpBlueprintPayload> & { isActive?: boolean };
