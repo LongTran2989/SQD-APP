@@ -132,6 +132,18 @@ describe('Auto-Generate Service', () => {
       const r = await validateAutoGenConfig(prisma, { autoGenerate: true, autoGenMode: 'REPEAT', autoGenTemplateId: t.id, autoGenInterval: 7 });
       expect('data' in r).toBe(true);
     });
+
+    it('coerces a string-typed autoGenInterval (JSON body numerics)', async () => {
+      const t = await publishTemplate();
+      const r = await validateAutoGenConfig(prisma, { autoGenerate: true, autoGenMode: 'REPEAT', autoGenTemplateId: t.id, autoGenInterval: '7' as unknown as number });
+      expect('data' in r && r.data.autoGenInterval).toBe(7);
+    });
+
+    it('rejects a stored autoGenInterval of 0', async () => {
+      const t = await publishTemplate();
+      const r = await validateAutoGenConfig(prisma, { autoGenerate: true, autoGenMode: 'REPEAT', autoGenTemplateId: t.id, autoGenInterval: 0 });
+      expect('error' in r).toBe(true);
+    });
   });
 
   describe('parseInlineSet', () => {
@@ -144,6 +156,13 @@ describe('Auto-Generate Service', () => {
     it('parses a valid array', () => {
       const r = parseInlineSet([{ templateId: 1, orderIndex: 0 }, { templateId: 2, orderIndex: 1 }]);
       expect('items' in r && r.items.length).toBe(2);
+    });
+    it('coerces string-typed numerics (templateId, orderIndex, deadlineOffsetDays)', () => {
+      const r = parseInlineSet([{ templateId: '1', orderIndex: '0', deadlineOffsetDays: '3' }]);
+      expect('items' in r).toBe(true);
+      if ('items' in r) {
+        expect(r.items[0]).toMatchObject({ templateId: 1, orderIndex: 0, deadlineOffsetDays: 3 });
+      }
     });
   });
 
@@ -292,6 +311,25 @@ describe('Auto-Generate Service', () => {
       const r2 = await fireAutoGenForWp(wp.id, prisma);
       expect(r2.fired).toBe(false);
       expect(await prisma.task.count({ where: { wpId: wp.id } })).toBe(1);
+    });
+
+    it('malformed autoGenInlineSet surfaces a warning instead of a silent permanent no-op', async () => {
+      // Bypasses validateAutoGenConfig (which would reject this at create time)
+      // to simulate data that became malformed after the fact.
+      const wp = await createWp({ autoGenerate: true, autoGenMode: 'SINGLE_SHOT', autoGenInlineSet: [{ orderIndex: 0 }] });
+      const r = await fireAutoGenForWp(wp.id, prisma);
+      expect(r.fired).toBe(false);
+      expect(r.warnings && r.warnings.length).toBe(1);
+      expect(await prisma.task.count({ where: { wpId: wp.id } })).toBe(0);
+
+      const feedPost = await prisma.feedPost.findFirst({ where: { scope: 'WP', scopeId: wp.id, type: 'SYSTEM_EVENT' } });
+      expect(feedPost).not.toBeNull();
+      const auditEntry = await prisma.auditLog.findFirst({ where: { entityType: 'WorkPackage', entityId: String(wp.id), actionType: 'WP_AUTO_GEN_FAILED' } });
+      expect(auditEntry).not.toBeNull();
+
+      // Not stamped — once the data is fixed it can still fire normally.
+      const reloaded = await prisma.workPackage.findUnique({ where: { id: wp.id } });
+      expect(reloaded?.autoGenFiredAt).toBeNull();
     });
   });
 

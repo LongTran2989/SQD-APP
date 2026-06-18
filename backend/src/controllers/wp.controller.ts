@@ -190,8 +190,12 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
     // On-demand catch-up: REPEAT mode only. A missed cron day is caught when
     // someone opens the WP. SINGLE_SHOT is NEVER triggered on-demand — it must
     // fire via cron so a Manager opening the WP early can't spawn it prematurely.
+    // The Closed/Inactive check uses the stored status (not computedStatus's
+    // server-local "today") so this gate never disagrees with autoGenService's
+    // own APP_TIMEZONE-anchored timeframe check, which is the sole authority
+    // on whether "today" is actually within the WP's window.
     let autoGenResult = undefined;
-    if (wp.autoGenerate && wp.autoGenMode === 'REPEAT' && computedStatus === 'In Progress') {
+    if (wp.autoGenerate && wp.autoGenMode === 'REPEAT' && wp.status !== 'Closed' && wp.status !== 'Inactive') {
       autoGenResult = await fireAutoGenForWp(wp.id);
     }
 

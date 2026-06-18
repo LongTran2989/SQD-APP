@@ -13,6 +13,27 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-18 — Generalized Auto-Generate WP Foundation (P1–P3) Code Review (high effort)
+
+**Branch:** `claude/determined-shannon-efxjwm`
+**Scope:** Foundation-only auto-generate WP work (commit `eaaa522`) — `backend/prisma/schema.prisma` + migration `20260617000000_generalize_autogen_wp`, `backend/src/services/autoGenService.ts` (new, replaces deleted `wpCheckService.ts`), `backend/src/controllers/wp.controller.ts`, `backend/src/index.ts` (cron wiring), `backend/src/__tests__/autoGen.test.ts` (new), `backend/src/__tests__/wp.test.ts`.
+**Tests after all fixes:** 473 / 473 passing (21 suites). `tsc --noEmit` clean for all touched files (pre-existing unrelated errors in `scripts/importTemplates.ts` and `notification.test.ts` untouched).
+**Method:** 4 parallel finder agents → verify pass against exact source lines. 9 findings ranked (1 High, 4 Medium, 4 Low) + 2 minor notes. User accepted fixes #1/#3/#4/#5/#6/#7; #2 deferred to the P4 frontend follow-up; #8/#9 left as optional cleanup (not applied).
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| AG-1 | High (reliability) | `autoGenService.ts` `fireAutoGenForWp` | `$transaction` had no explicit `timeout`, so a SINGLE_SHOT WP spawning many tasks via looped `createTaskService` calls could exceed Prisma's default 5s interactive-transaction timeout and abort mid-batch. | ✅ Fixed — explicit `{ timeout: 30000 }` |
+| AG-2 | Medium (scope) | `wp.controller.ts` / frontend | New `autoGen*` fields are accepted by the WP create/update API but have no form UI yet. | ⏭ Deferred — P4 (WP form UI) is explicitly out of scope for this foundation phase per the approved plan |
+| AG-3 | Medium (correctness) | `autoGenService.ts` `validateAutoGenConfig` (interval) + `parseInlineSet` (templateId/orderIndex/deadlineOffsetDays/estimatedHours/skillLevel) | Numeric checks used `typeof === 'number'` / `Number.isInteger`, so JSON-body numerics arriving as strings (e.g. `"7"`) were silently rejected or dropped to `null` instead of treated as `7`. | ✅ Fixed — added `coerceInt`/`coerceNum` helpers, applied to both validators; new tests cover string-typed `autoGenInterval` and inline-set numerics |
+| AG-4 | Medium (silent failure) | `autoGenService.ts` `resolveItems` (inline-set branch) | A malformed `autoGenInlineSet` resolved to `[]` with no signal, so a WP with bad inline JSON would silently never fire, forever. | ✅ Fixed — `resolveItems` now returns `{ items, error? }`; `fireAutoGenForWp` writes a WP-scope `SYSTEM_EVENT` FeedPost + `WP_AUTO_GEN_FAILED` AuditLog entry (dual-write, Rule 3) and surfaces the error in `warnings` each run, without stamping `autoGenFiredAt`, so a fix to the data lets it fire normally |
+| AG-5 | Medium (consistency) | `wp.controller.ts` `getWorkPackageById` vs `autoGenService.ts` `calendarDateUtc` | The on-demand REPEAT catch-up gate used `computedStatus === 'In Progress'`, computed from server-local midnight (`computeWpStatus`), while the authoritative timeframe check inside `fireAutoGenForWp` uses `APP_TIMEZONE`-anchored calendar dates — the two clocks could disagree near a day boundary if the server's local TZ ≠ `APP_TIMEZONE`. | ✅ Fixed — gate now only excludes `Closed`/`Inactive` (stored `status`, not derived); the timeframe decision is left solely to `fireAutoGenForWp`'s single authoritative clock |
+| AG-6 | Low (defensive) | `autoGenService.ts` `fireAutoGenForWp` (REPEAT branch) | `const interval = wp.autoGenInterval ?? 1;` only guarded `null`/`undefined`, not a stored `0` (blocked by API validation today, but reachable via a direct DB upsert per DEF-5-style admin paths). A `0` would fire every cron run. | ✅ Fixed — `Math.max(1, wp.autoGenInterval ?? 1)`; new test asserts API validation rejects `autoGenInterval: 0` |
+| AG-7 | Low (robustness) | `autoGenService.ts` `runAutoGenCron` | The top-level `workPackage.findMany` candidate query wasn't wrapped in try/catch; a DB hiccup at cron time would reject the `void runAutoGenCron(prisma)` promise in `index.ts` with no per-WP isolation. | ✅ Fixed — wrapped in try/catch, logs and returns `{ processed: 0, fired: 0 }` on failure |
+| AG-8 | Low (cleanup) | `autoGenService.ts` `computeDeadline` | `if (!offsetDays) return new Date(timeframeTo);` treats a stored `0` offset the same as `null` (harmless today — both mean "no offset") and doesn't validate against an offset that would push the deadline past `timeframeTo`. | ✔ Accepted-as-is — no current input path produces a meaningful difference; revisit if offset validation is tightened |
+| AG-9 | Low (cleanup) | `autoGenService.ts` `resolveWpWatchers`/`createNotifications` post-commit block | Hardcoded to the module-level `prisma` client rather than the `client` parameter passed into `fireAutoGenForWp`. | ✔ Accepted-as-is — correct today (post-commit notification must run outside the just-committed transaction anyway); would only matter if `fireAutoGenForWp` were ever called with a non-default `PrismaClient` instance (e.g. a second connection pool) |
+
+---
+
 ## Session: 2026-06-16 — File Upload Infrastructure Code Review (high effort)
 
 **Branch:** `claude/file-upload-infrastructure-28r4m5`

@@ -33,6 +33,20 @@ function daysBetween(from: Date, to: Date): number {
   return Math.floor((to.getTime() - from.getTime()) / DAY_MS);
 }
 
+// JSON payloads (autoGenInlineSet, req.body) may carry numerics as strings;
+// coerce before validating so e.g. "7" is treated the same as 7.
+function coerceInt(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isInteger(value) ? value : null;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isInteger(Number(value))) return Number(value);
+  return null;
+}
+
+function coerceNum(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
+  return null;
+}
+
 // ─── Inline template set ────────────────────────────────────────────────────
 
 export interface InlineTemplateSetItem {
@@ -65,16 +79,17 @@ export function parseInlineSet(raw: unknown): { items: InlineTemplateSetItem[] }
   for (const [i, entry] of raw.entries()) {
     if (!entry || typeof entry !== 'object') return { error: `autoGenInlineSet[${i}] must be an object` };
     const e = entry as Record<string, unknown>;
-    if (!Number.isInteger(e.templateId)) return { error: `autoGenInlineSet[${i}].templateId must be an integer` };
-    const orderIndex = Number.isInteger(e.orderIndex) ? (e.orderIndex as number) : i;
+    const templateId = coerceInt(e.templateId);
+    if (templateId === null) return { error: `autoGenInlineSet[${i}].templateId must be an integer` };
+    const orderIndex = coerceInt(e.orderIndex) ?? i;
     if (seenOrder.has(orderIndex)) return { error: `autoGenInlineSet has a duplicate orderIndex ${orderIndex}` };
     seenOrder.add(orderIndex);
     items.push({
-      templateId: e.templateId as number,
+      templateId,
       orderIndex,
-      deadlineOffsetDays: typeof e.deadlineOffsetDays === 'number' ? e.deadlineOffsetDays : null,
-      estimatedHours: typeof e.estimatedHours === 'number' ? e.estimatedHours : null,
-      skillLevel: typeof e.skillLevel === 'number' ? e.skillLevel : null,
+      deadlineOffsetDays: coerceNum(e.deadlineOffsetDays),
+      estimatedHours: coerceNum(e.estimatedHours),
+      skillLevel: coerceInt(e.skillLevel),
       requiresApproval: typeof e.requiresApproval === 'boolean' ? e.requiresApproval : null,
       defaultNote: typeof e.defaultNote === 'string' ? e.defaultNote : null,
     });
@@ -144,11 +159,13 @@ export async function validateAutoGenConfig(
     return { error: 'Exactly one of autoGenTemplateId, autoGenSetId, or autoGenInlineSet must be set' };
   }
 
+  let intervalNum: number | null = null;
   if (mode === 'REPEAT') {
     if (!hasTemplate) {
       return { error: 'REPEAT mode requires a single autoGenTemplateId (sets/inline lists are SINGLE_SHOT only)' };
     }
-    if (!Number.isInteger(input.autoGenInterval) || (input.autoGenInterval as number) < 1) {
+    intervalNum = coerceInt(input.autoGenInterval);
+    if (intervalNum === null || intervalNum < 1) {
       return { error: 'REPEAT mode requires autoGenInterval to be a positive integer (days)' };
     }
   }
@@ -184,7 +201,7 @@ export async function validateAutoGenConfig(
     data: {
       autoGenerate: true,
       autoGenMode: mode,
-      autoGenInterval: mode === 'REPEAT' ? (input.autoGenInterval as number) : null,
+      autoGenInterval: mode === 'REPEAT' ? (intervalNum as number) : null,
       autoGenTemplateId: hasTemplate ? (input.autoGenTemplateId as number) : null,
       autoGenSetId: hasSet ? (input.autoGenSetId as number) : null,
       autoGenInlineSet: inlineJson ?? Prisma.DbNull,
@@ -224,44 +241,50 @@ async function resolveItems(tx: Prisma.TransactionClient, wp: {
   autoGenTemplateId: number | null;
   autoGenSetId: number | null;
   autoGenInlineSet: Prisma.JsonValue | null;
-}): Promise<ResolvedItem[]> {
+}): Promise<{ items: ResolvedItem[]; error?: string }> {
   const single = (templateId: number): ResolvedItem => ({
     templateId, orderIndex: 0, deadlineOffsetDays: null,
     estimatedHours: null, skillLevel: null, requiresApproval: null, defaultNote: null,
   });
 
-  if (wp.autoGenTemplateId != null) return [single(wp.autoGenTemplateId)];
+  if (wp.autoGenTemplateId != null) return { items: [single(wp.autoGenTemplateId)] };
 
   if (wp.autoGenSetId != null) {
     const items = await tx.templateSetItem.findMany({ where: { setId: wp.autoGenSetId }, orderBy: { orderIndex: 'asc' } });
-    return items.map((i) => ({
-      templateId: i.templateId,
-      orderIndex: i.orderIndex,
-      deadlineOffsetDays: i.deadlineOffsetDays,
-      estimatedHours: i.estimatedHours,
-      skillLevel: i.skillLevel,
-      requiresApproval: i.requiresApproval,
-      defaultNote: i.defaultNote,
-    }));
+    return {
+      items: items.map((i) => ({
+        templateId: i.templateId,
+        orderIndex: i.orderIndex,
+        deadlineOffsetDays: i.deadlineOffsetDays,
+        estimatedHours: i.estimatedHours,
+        skillLevel: i.skillLevel,
+        requiresApproval: i.requiresApproval,
+        defaultNote: i.defaultNote,
+      })),
+    };
   }
 
   if (wp.autoGenInlineSet != null) {
     const parsed = parseInlineSet(wp.autoGenInlineSet);
-    if ('error' in parsed) return [];
-    return parsed.items
-      .sort((a, b) => a.orderIndex - b.orderIndex)
-      .map((i) => ({
-        templateId: i.templateId,
-        orderIndex: i.orderIndex,
-        deadlineOffsetDays: i.deadlineOffsetDays ?? null,
-        estimatedHours: i.estimatedHours ?? null,
-        skillLevel: i.skillLevel ?? null,
-        requiresApproval: i.requiresApproval ?? null,
-        defaultNote: i.defaultNote ?? null,
-      }));
+    // Malformed inline JSON is reported to the caller (instead of silently
+    // resolving to an empty list) so the WP doesn't go permanently quiet.
+    if ('error' in parsed) return { items: [], error: parsed.error };
+    return {
+      items: parsed.items
+        .sort((a, b) => a.orderIndex - b.orderIndex)
+        .map((i) => ({
+          templateId: i.templateId,
+          orderIndex: i.orderIndex,
+          deadlineOffsetDays: i.deadlineOffsetDays ?? null,
+          estimatedHours: i.estimatedHours ?? null,
+          skillLevel: i.skillLevel ?? null,
+          requiresApproval: i.requiresApproval ?? null,
+          defaultNote: i.defaultNote ?? null,
+        })),
+    };
   }
 
-  return [];
+  return { items: [] };
 }
 
 /**
@@ -274,6 +297,7 @@ async function resolveItems(tx: Prisma.TransactionClient, wp: {
 export async function fireAutoGenForWp(wpId: number, client: PrismaClient = prisma): Promise<AutoGenResult> {
   const outcome = await client.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "WorkPackage" WHERE id = ${wpId} FOR UPDATE`;
+
 
     const wp = await tx.workPackage.findUnique({ where: { id: wpId, deletedAt: null } });
     if (!wp) return { fired: false, spawned: 0, spawnedTaskIds: [], reason: 'Work Package not found' } as AutoGenResult;
@@ -290,7 +314,7 @@ export async function fireAutoGenForWp(wpId: number, client: PrismaClient = pris
 
     // Mode-specific "should fire now?" gate (the single source of truth is autoGenFiredAt).
     if (wp.autoGenMode === 'REPEAT') {
-      const interval = wp.autoGenInterval ?? 1;
+      const interval = Math.max(1, wp.autoGenInterval ?? 1);
       if (wp.autoGenFiredAt != null) {
         const elapsed = daysBetween(calendarDateUtc(wp.autoGenFiredAt), today);
         if (elapsed < interval) {
@@ -305,7 +329,30 @@ export async function fireAutoGenForWp(wpId: number, client: PrismaClient = pris
       return { fired: false, spawned: 0, spawnedTaskIds: [], reason: `Unknown autoGenMode: ${wp.autoGenMode}` };
     }
 
-    const items = await resolveItems(tx, wp);
+    const resolved = await resolveItems(tx, wp);
+    if (resolved.error) {
+      // Malformed autoGenInlineSet: surface a visible WP-scope warning each run
+      // instead of a silent permanent no-op (dual-write per Rule 3).
+      const warnContent = `Auto-generate could not resolve a template source for Work Package ${wp.wpId}: ${resolved.error}`;
+      await createFeedPost(tx, {
+        type: 'SYSTEM_EVENT',
+        scope: 'WP',
+        scopeId: wp.id,
+        content: warnContent,
+        metadata: { mode: wp.autoGenMode, error: resolved.error },
+      });
+      await tx.auditLog.create({
+        data: {
+          actionType: 'WP_AUTO_GEN_FAILED',
+          entityType: 'WorkPackage',
+          entityId: String(wp.id),
+          performedByUserId: wp.creatorId,
+          details: { wpId: wp.wpId, mode: wp.autoGenMode, error: resolved.error },
+        },
+      });
+      return { fired: false, spawned: 0, spawnedTaskIds: [], reason: resolved.error, warnings: [resolved.error] };
+    }
+    const items = resolved.items;
     if (items.length === 0) {
       return { fired: false, spawned: 0, spawnedTaskIds: [], reason: 'No template source resolved' };
     }
@@ -370,7 +417,9 @@ export async function fireAutoGenForWp(wpId: number, client: PrismaClient = pris
     });
 
     return { fired: true, spawned: spawnedTaskIds.length, spawnedTaskIds, warnings };
-  });
+  // SINGLE_SHOT can loop createTaskService over a saved set with many items;
+  // the default 5s interactive-transaction timeout is too tight for that.
+  }, { timeout: 30000 });
 
   // Post-commit: notify WP watchers (best-effort, base client — mirrors task creation).
   if (outcome.fired && outcome.spawned > 0) {
@@ -403,14 +452,20 @@ export async function fireAutoGenForWp(wpId: number, client: PrismaClient = pris
  * checks. One WP's failure never aborts the batch.
  */
 export async function runAutoGenCron(client: PrismaClient = prisma): Promise<{ processed: number; fired: number }> {
-  const candidates = await client.workPackage.findMany({
-    where: {
-      autoGenerate: true,
-      deletedAt: null,
-      status: { notIn: ['Closed', 'Inactive'] },
-    },
-    select: { id: true },
-  });
+  let candidates: { id: number }[];
+  try {
+    candidates = await client.workPackage.findMany({
+      where: {
+        autoGenerate: true,
+        deletedAt: null,
+        status: { notIn: ['Closed', 'Inactive'] },
+      },
+      select: { id: true },
+    });
+  } catch (err) {
+    console.error('[autoGenCron] failed to load candidate Work Packages:', err);
+    return { processed: 0, fired: 0 };
+  }
 
   let fired = 0;
   for (const wp of candidates) {
