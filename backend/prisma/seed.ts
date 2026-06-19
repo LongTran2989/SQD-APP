@@ -16,10 +16,10 @@
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import bcrypt from 'bcrypt';
+import * as bcrypt from 'bcrypt';
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
-import path from 'path';
+import * as path from 'path';
 import 'dotenv/config';
 import { seedPrivileges } from '../src/seeds/seed-privileges';
 import { FILE_UPLOAD_CONFIG_KEY, DEFAULT_FILE_UPLOAD_CONFIG } from '../src/constants/fileUpload';
@@ -38,6 +38,7 @@ async function main() {
     prisma.role.upsert({ where: { name: 'Manager'      }, update: {}, create: { name: 'Manager'      } }),
     prisma.role.upsert({ where: { name: 'Group Leader' }, update: {}, create: { name: 'Group Leader' } }),
     prisma.role.upsert({ where: { name: 'Staff'        }, update: {}, create: { name: 'Staff'        } }),
+    prisma.role.upsert({ where: { name: 'Senior Advisor'}, update: {}, create: { name: 'Senior Advisor'} }),
   ]);
   const roleMap = Object.fromEntries(roles.map(r => [r.name, r.id]));
   console.log(`✅ Roles seeded (${roles.length})`);
@@ -79,6 +80,7 @@ async function main() {
     { name: 'Hanoi Quality Control',       code: 'QCH', department: 'SQD' },
     { name: 'Ho Chi Minh Quality Control', code: 'QCS', department: 'SQD' },
     { name: 'Staff Qualification',         code: 'KS',  department: 'SQD' },
+    { name: 'Director board',              code: 'BOD', department: 'SQD' },
   ];
 
   const divisions = await Promise.all(
@@ -186,8 +188,12 @@ async function main() {
   };
 
   const userData: UserRow[] = [
+    // ── BOD ─────────────────────────────────────────────────────────────────
+    { employeeId: 'VAE00071', name: 'Lê Viết Thành',           role: 'Director', division: 'BOD', phone: '0868325588', password: 'Abc@12345' },
+    { employeeId: 'VAE99999', name: 'Eve Admin',               role: 'Admin',    division: 'BOD', password: 'Abc@12345' },
+    { employeeId: 'VAE00048', name: 'Hà Tiến Dũng',            role: 'Senior Advisor', division: 'BOD', password: 'Abc@12345' },
+
     // ── QCH ─────────────────────────────────────────────────────────────────
-    { employeeId: 'VAE00071', name: 'Lê Viết Thành',           role: 'Director', division: 'QCH', phone: '0868325588', password: 'Abc@12345' },
     { employeeId: 'VAE00483', name: 'Vũ Hồng Hải',             role: 'Manager',  division: 'QCH', phone: '0912233470', password: 'Abc@12345' },
     { employeeId: 'VAE02285', name: 'Lê Xuân Anh',             role: 'Manager',  division: 'QCH', phone: '0983801230', password: 'Abc@12345' },
     { employeeId: 'VAE00057', name: 'Chu Thế Cường',           role: 'Staff',    division: 'QCH', phone: '0983012228', password: 'Abc@12345' },
@@ -226,7 +232,6 @@ async function main() {
     { employeeId: 'VAE02578', name: 'Đỗ Hoàng Tuấn',          role: 'Staff',    division: 'QCS', password: 'Abc@12345' },
 
     // ── QA ──────────────────────────────────────────────────────────────────
-    { employeeId: 'VAE99999', name: 'Eve Admin',               role: 'Admin',    division: 'QA',  password: 'Abc@12345' },
     { employeeId: 'VAE02566', name: 'Trần Thị Kim Tú',         role: 'Staff',    division: 'QA',  password: 'Abc@12345' },
     { employeeId: 'VAE00061', name: 'Trần Quốc Hải',           role: 'Manager',  division: 'QA',  password: 'Abc@12345' },
     { employeeId: 'VAE00548', name: 'Trần Quang Anh',          role: 'Staff',    division: 'QA',  password: 'Abc@12345' },
