@@ -17,8 +17,8 @@ export function EscalationWidget({ count = 0, isLoading }: EscalationWidgetProps
 
   return (
     <div className="bg-gradient-to-br from-red-50 to-white p-5 rounded-2xl shadow-sm border border-red-100 flex flex-col relative overflow-hidden group hover:shadow-md transition-all duration-300 h-full">
-      <div className="absolute -right-2 -top-2 opacity-5 transform group-hover:scale-110 transition-transform duration-500 pointer-events-none">
-        <ShieldAlert className="w-24 h-24 text-red-600" />
+      <div className="absolute -right-2 -top-2 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500 motion-reduce:transition-none motion-reduce:transform-none" aria-hidden="true">
+        <ShieldAlert className="w-24 h-24 text-red-600" aria-hidden="true" />
       </div>
       
       <div className="flex items-center space-x-3 mb-3 relative z-10">

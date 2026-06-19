@@ -9,10 +9,10 @@ interface ActivityFeedWidgetProps {
 
 export function ActivityFeedWidget({ posts, isLoading }: ActivityFeedWidgetProps) {
   return (
-    <div className="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full overflow-hidden">
-      <div className="p-5 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
-        <div className="p-2 bg-indigo-50 rounded-lg">
-          <Activity className="w-5 h-5 text-indigo-600" />
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
+      <div className="p-5 border-b border-slate-100 flex items-center gap-3">
+        <div className="p-2 bg-blue-50 rounded-lg">
+          <Activity className="w-5 h-5 text-blue-600" aria-hidden="true" />
         </div>
         <h2 className="text-lg font-semibold text-slate-800">Activity Feed</h2>
       </div>
@@ -42,15 +42,15 @@ export function ActivityFeedWidget({ posts, isLoading }: ActivityFeedWidgetProps
                 <div className="shrink-0 mt-1">
                   {post.type === 'COMMENT' ? (
                     <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 text-slate-500">
-                      <MessageSquare className="w-4 h-4" />
+                      <MessageSquare className="w-4 h-4" aria-hidden="true" />
                     </div>
                   ) : post.type === 'SYSTEM_EVENT' ? (
                     <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center border border-blue-100 text-blue-500">
-                      <Info className="w-4 h-4" />
+                      <Info className="w-4 h-4" aria-hidden="true" />
                     </div>
                   ) : post.type === 'ESCALATION_CARD' ? (
                     <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center border border-red-100 text-red-500">
-                      <AlertCircle className="w-4 h-4" />
+                      <AlertCircle className="w-4 h-4" aria-hidden="true" />
                     </div>
                   ) : (
                     <div className="w-8 h-8 rounded-full bg-slate-100"></div>

@@ -30,7 +30,7 @@ export function DetailedMetricWidget({
   const total = breakdown.reduce((sum, item) => sum + item.value, 0);
 
   return (
-    <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm hover:shadow-md border border-slate-100 flex flex-col transition-all duration-300 hover:-translate-y-1">
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-3">
           <div className={`p-2 rounded-lg ${iconBgColor}`}>
@@ -39,8 +39,8 @@ export function DetailedMetricWidget({
           <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
         </div>
         {linkTo && !isLoading && (
-          <Link href={linkTo} className="text-sm font-semibold text-indigo-600 hover:text-indigo-700 flex items-center">
-            View All <ChevronRight className="w-4 h-4 ml-1" />
+          <Link href={linkTo} className="text-sm font-semibold text-blue-600 hover:text-blue-700 flex items-center">
+            View All <ChevronRight className="w-4 h-4 ml-1" aria-hidden="true" />
           </Link>
         )}
       </div>
@@ -65,7 +65,7 @@ export function DetailedMetricWidget({
             {breakdown.map((item, idx) => (
               <div key={idx} className="flex justify-between items-center text-sm">
                 <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${item.colorClass}`}></div>
+                  <div className={`w-2 h-2 rounded-full ${item.colorClass}`} aria-hidden="true"></div>
                   <span className="text-slate-600 font-medium">{item.label}</span>
                 </div>
                 <span className="font-bold text-slate-700 bg-slate-50 px-2 py-0.5 rounded-md">
