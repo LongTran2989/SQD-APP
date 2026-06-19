@@ -400,7 +400,9 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    const isManager = wp.creatorId === userId || hasPrivilege(req.user!, 'wp:edit');
+    const isManager = wp.creatorId === userId ||
+      (hasPrivilege(req.user!, 'wp:edit') &&
+        (req.user!.role === 'Director' || req.user!.role === 'Admin' || req.user!.divisionId === wp.divisionId));
     // PR8: an assigned user may edit ONLY the timeframe; managers/creator/global edit everything.
     let isAssignee = false;
     if (!isManager) {
