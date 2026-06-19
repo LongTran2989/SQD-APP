@@ -39,8 +39,8 @@ export default function TemplateListPage() {
 
   const fetchTemplates = async () => {
     try {
-      const response = await apiClient.get('/templates');
-      setTemplates(response.data);
+      const response = await apiClient.get('/templates?limit=1000');
+      setTemplates(response.data.data || response.data);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to load templates');
     } finally {
@@ -70,9 +70,20 @@ export default function TemplateListPage() {
     }
   };
 
+  const matchWildcard = (str: string, query: string) => {
+    if (!query) return true;
+    const escaped = query.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    try {
+      return new RegExp(escaped, 'i').test(str);
+    } catch {
+      return str.toLowerCase().includes(query.toLowerCase());
+    }
+  };
+
   const filteredTemplates = templates.filter((t) => {
-    const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (t.templateId || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = matchWildcard(t.title, searchQuery) || 
+                          matchWildcard(t.templateId || '', searchQuery) || 
+                          matchWildcard(t.externalRef || '', searchQuery);
     const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -175,6 +186,11 @@ export default function TemplateListPage() {
                         <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-bold font-mono border border-slate-200">
                           {template.templateId}
                         </span>
+                        {template.externalRef && (
+                          <div className="mt-1 text-[10px] text-slate-400 font-mono">
+                            Ref: {template.externalRef}
+                          </div>
+                        )}
                       </td>
                       <td className="p-4 align-middle">
                         <div className="font-semibold text-slate-800">{template.title}</div>

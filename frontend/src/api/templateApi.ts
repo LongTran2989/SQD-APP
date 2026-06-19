@@ -1,9 +1,43 @@
 import { apiClient } from './client';
 import { Template } from '../types';
 
-// Fetches templates and narrows to Published ones — the only templates a new Task
-// (or an escalation→Create Task) may be created from. Centralised so the
-// GET /templates + Published filter lives in one place (was duplicated in the
-// new-task page and the escalation action modal).
+// ──────────────────────────────────────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────────────────────────────────────
+export interface TemplateSearchParams {
+  q?: string;
+  type?: string;
+  divisionId?: number;
+  status?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface TemplateSearchResult {
+  data: Template[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// API functions
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Server-side paginated template search with optional filters.
+ * Used by TemplatePickerModal.
+ */
+export const searchTemplates = (
+  params: TemplateSearchParams = {}
+): Promise<TemplateSearchResult> =>
+  apiClient.get('/templates', { params }).then((r) => r.data as TemplateSearchResult);
+
+/**
+ * Backward-compat helper — fetches all published templates in one call.
+ * Kept for existing consumers that expect a flat Template[]; migrate them to
+ * searchTemplates() over time.
+ * @deprecated Use searchTemplates() for new code.
+ */
 export const getPublishedTemplates = (): Promise<Template[]> =>
-  apiClient.get('/templates').then((r) => (r.data as Template[]).filter((t) => t.status === 'Published'));
+  searchTemplates({ status: 'Published', limit: 200 }).then((r) => r.data);

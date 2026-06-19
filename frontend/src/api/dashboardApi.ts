@@ -61,3 +61,25 @@ export const getDashboardFeed = async (): Promise<FeedPost[]> => {
   const { data } = await apiClient.get('/dashboard/feed');
   return data;
 };
+
+export interface OngoingWork {
+  id: string;
+  entityId: number;
+  link: string;
+  type: 'WP' | 'TASK' | 'BLUEPRINT';
+  title: string;
+  itemType: string;
+  status: string;
+  assignee: string;
+  deadline: string;
+  divisionAbbrev: string;
+  instructions: string | null;
+  findingsCount: number;
+  recentEvents: FeedPost[];
+  meta: any;
+}
+
+export const getOngoingWorks = async (statusFilter: string = 'All'): Promise<OngoingWork[]> => {
+  const { data } = await apiClient.get(`/dashboard/master-calendar?status=${encodeURIComponent(statusFilter)}`);
+  return data;
+};

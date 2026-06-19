@@ -32,11 +32,15 @@ export default function NewWorkPackagePage() {
         divisionId: Number(values.divisionId),
         timeframeFrom: values.timeframeFrom,
         timeframeTo: values.timeframeTo,
-        checkTemplateId: values.checkTemplateId ? Number(values.checkTemplateId) : undefined,
         acRegistration: values.acRegistration || null,
         customer: values.customer || null,
         authority: values.authority || null,
         targetDepartmentId: values.targetDepartmentId ? Number(values.targetDepartmentId) : null,
+        autoGenerate: values.autoGenerate,
+        autoGenMode: values.autoGenerate ? values.autoGenMode : null,
+        autoGenInterval: values.autoGenerate && values.autoGenMode === 'REPEAT' && values.autoGenInterval ? Number(values.autoGenInterval) : null,
+        autoGenTemplateId: values.autoGenerate && values.autoGenTemplateId ? Number(values.autoGenTemplateId) : null,
+        autoGenSetId: values.autoGenerate && values.autoGenSetId ? Number(values.autoGenSetId) : null,
       });
       toast.success(`Work Package ${wp.wpId} created`);
       router.push(`/dashboard/work-packages/${wp.id}`);

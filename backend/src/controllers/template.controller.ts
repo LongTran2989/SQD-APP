@@ -43,32 +43,87 @@ function deepEqualCanonical(a: unknown, b: unknown): boolean {
 // ─── GET /api/templates ──────────────────────────────────────────────
 export const getTemplates = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = req.user!.userId;
-    const userRole = req.user!.role;
-    const divisionId = req.user!.divisionId;
+    const userId           = req.user!.userId;
+    const userRole         = req.user!.role;
     const isAdminOrDirector = ['Admin', 'Director'].includes(userRole);
 
-    // Division scoping: Director/Admin see all templates; everyone else (Manager,
-    // Group Leader, Staff) is restricted to their own division plus the shared
-    // system ad-hoc template. Mirrors the write-side rule in createTemplate.
-    const where = isAdminOrDirector
-      ? {}
-      : { OR: [{ divisionId }, { templateId: 'GENERIC-ADHOC' }] };
+    // ── Query params ──────────────────────────────────────────────────
+    const q           = (req.query.q          as string | undefined)?.trim() || undefined;
+    const typeFilter  = (req.query.type        as string | undefined)?.trim() || undefined;
+    const divIdFilter = req.query.divisionId ? parseInt(req.query.divisionId as string, 10) : undefined;
+    const statusParam = (req.query.status      as string | undefined)?.trim();
+    const page        = Math.max(1, parseInt((req.query.page  as string) || '1',  10));
+    const limit       = Math.min(1000, Math.max(1, parseInt((req.query.limit as string) || '50', 10)));
+    const skip        = (page - 1) * limit;
 
-    const templates = await prisma.template.findMany({
-      where,
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        division: { select: { name: true, code: true } },
-        revisedByUser: { select: { id: true, name: true } },
-        owner: { select: { id: true, name: true } },
+    // ── Access filter ─────────────────────────────────────────────────
+    // All Published templates are globally visible to every authenticated user.
+    // Drafts are only visible to their owner, Admin, and Director.
+    // GENERIC-ADHOC is always accessible.
+    const accessFilter = isAdminOrDirector
+      ? {} // Admin/Director see everything (Draft, Published, Archived)
+      : {
+          OR: [
+            { status: 'Published' },
+            { ownerId: userId },          // own Drafts
+            { templateId: 'GENERIC-ADHOC' },
+          ],
+        };
+
+    // ── Optional query filters ────────────────────────────────────────
+    const queryFilter: any = {};
+    if (typeFilter)  queryFilter['type']       = typeFilter;
+    if (!isNaN(divIdFilter as number) && divIdFilter !== undefined)
+                     queryFilter['divisionId'] = divIdFilter;
+    // Status override: non-admin defaults to Published via accessFilter above;
+    // Admin/Director can pass ?status=Draft etc. to see specific statuses.
+    if (statusParam && isAdminOrDirector) queryFilter['status'] = statusParam;
+
+    const where: any = { AND: [accessFilter, queryFilter] };
+
+    // ── Search (with wildcard support) ──────────────────────────────
+    if (q) {
+      if (q.includes('*')) {
+        // Convert user's '*' to SQL '%' wildcard
+        const ilikeQuery = `%${q.replace(/\*/g, '%')}%`;
+        
+        // Find matching IDs via raw SQL to preserve Prisma's pagination/relation engine
+        const matches = await prisma.$queryRaw<Array<{ id: number }>>`
+          SELECT id FROM "Template" 
+          WHERE title ILIKE ${ilikeQuery} OR "templateId" ILIKE ${ilikeQuery} OR "externalRef" ILIKE ${ilikeQuery}
+        `;
+        where.AND.push({ id: { in: matches.map((m: {id: number}) => m.id) } });
+      } else {
+        // Standard contains search
+        where.AND.push({
+          OR: [
+            { title: { contains: q, mode: 'insensitive' } },
+            { templateId: { contains: q, mode: 'insensitive' } },
+            { externalRef: { contains: q, mode: 'insensitive' } }
+          ]
+        });
       }
-    });
+    }
+
+    const [templates, total] = await Promise.all([
+      prisma.template.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          division:      { select: { id: true, name: true, code: true } },
+          revisedByUser: { select: { id: true, name: true } },
+          owner:         { select: { id: true, name: true } },
+        },
+      }),
+      prisma.template.count({ where }),
+    ]);
 
     const mappedTemplates = templates.map(t => {
       const canSeeDraft = t.ownerId === userId || isAdminOrDirector;
-      // PR7: no longer mask Published-with-draft as 'Draft'. Return the TRUE status
-      // plus a hasPendingChanges flag; expose draftSchema only to owner/Admin/Director.
+      // No longer mask Published-with-draft as 'Draft'. Return true status
+      // plus hasPendingChanges flag; expose draftSchema only to owner/Admin/Director.
       return {
         ...t,
         hasPendingChanges: t.draftSchema != null,
@@ -76,7 +131,7 @@ export const getTemplates = async (req: Request, res: Response): Promise<void> =
       };
     });
 
-    res.json(mappedTemplates);
+    res.json({ data: mappedTemplates, total, page, limit });
   } catch (error) {
     console.error('Error fetching templates:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -520,6 +575,15 @@ export const deleteTemplate = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    const activeSetItem = await prisma.templateSetItem.findFirst({
+      where: { templateId: id, set: { isActive: true } },
+      include: { set: { select: { name: true, division: { select: { name: true } } } } }
+    });
+    if (activeSetItem) {
+      res.status(400).json({ message: `Cannot delete template because it is currently used by the active Template Set '${activeSetItem.set.name}' in ${activeSetItem.set.division.name}.` });
+      return;
+    }
+
     const tasksCount = await prisma.task.count({ where: { templateId: id, deletedAt: null } });
     if (tasksCount > 0) {
       await prisma.template.update({
@@ -553,6 +617,15 @@ export const archiveTemplate = async (req: Request, res: Response): Promise<void
 
     if (template.ownerId !== userId && !['Admin', 'Director'].includes(userRole)) {
       res.status(403).json({ message: 'Only the template owner can archive this template.' });
+      return;
+    }
+
+    const activeSetItem = await prisma.templateSetItem.findFirst({
+      where: { templateId: id, set: { isActive: true } },
+      include: { set: { select: { name: true, division: { select: { name: true } } } } }
+    });
+    if (activeSetItem) {
+      res.status(400).json({ message: `Cannot archive template because it is currently used by the active Template Set '${activeSetItem.set.name}' in ${activeSetItem.set.division.name}.` });
       return;
     }
 
