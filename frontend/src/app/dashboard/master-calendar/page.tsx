@@ -65,7 +65,7 @@ export default function MasterCalendarPage() {
       if (statusFilter === 'Awaiting Completion') filtered = filtered.filter(w => w.status === 'Awaiting Completion');
     }
 
-    return filtered.sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       let comparison = 0;
       if (sortColumn === 'deadline') {
         if (!a.deadline && !b.deadline) comparison = 0;
