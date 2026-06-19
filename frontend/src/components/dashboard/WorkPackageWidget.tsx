@@ -10,16 +10,16 @@ interface WorkPackageWidgetProps {
 
 export function WorkPackageWidget({ wps, isLoading }: WorkPackageWidgetProps) {
   return (
-    <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
+    <div className="bg-white p-6 rounded-xl border border-slate-200 flex flex-col h-full">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
-          <div className="p-2 bg-indigo-50 rounded-lg">
-            <Package className="w-5 h-5 text-indigo-600" />
+          <div className="p-2 bg-blue-50 rounded-lg">
+            <Package className="w-5 h-5 text-blue-600" aria-hidden="true" />
           </div>
           <h2 className="text-lg font-semibold text-slate-800">Active Work Packages</h2>
         </div>
-        <Link href="/dashboard/work-packages" className="text-sm font-semibold text-indigo-600 hover:text-indigo-700 flex items-center">
-          View All <ChevronRight className="w-4 h-4 ml-1" />
+        <Link href="/dashboard/work-packages" className="text-sm font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1">
+          View All <ChevronRight className="w-4 h-4" aria-hidden="true" />
         </Link>
       </div>
 
@@ -39,20 +39,20 @@ export function WorkPackageWidget({ wps, isLoading }: WorkPackageWidgetProps) {
           </>
         ) : wps.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
-            <Package className="w-8 h-8 mb-2 opacity-50" />
+            <Package className="w-8 h-8 mb-2 opacity-50" aria-hidden="true" />
             <p className="text-sm">No active work packages</p>
           </div>
         ) : (
           wps.map(wp => (
             <Link key={wp.id} href={`/dashboard/work-packages/${wp.id}`}>
-              <div className="group bg-white hover:bg-slate-50 rounded-xl p-4 border border-slate-100 hover:border-indigo-100 transition-all cursor-pointer shadow-sm hover:shadow">
+              <div className="group bg-white hover:bg-slate-50 rounded-xl p-4 border border-slate-200 hover:border-slate-300 transition-all cursor-pointer">
                 <div className="flex justify-between items-start mb-3">
                   <div>
-                    <h3 className="font-semibold text-slate-800 group-hover:text-indigo-700 transition-colors">{wp.name}</h3>
+                    <h3 className="font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">{wp.name}</h3>
                     <div className="flex items-center text-xs text-slate-500 mt-1 space-x-2">
                       <span className="bg-slate-100 px-2 py-0.5 rounded font-medium">{wp.type}</span>
                       <span className="flex items-center">
-                        <CalendarClock className="w-3 h-3 mr-1" />
+                        <CalendarClock className="w-3 h-3 mr-1" aria-hidden="true" />
                         Due {new Date(wp.timeframeTo).toLocaleDateString()}
                       </span>
                     </div>
@@ -61,16 +61,16 @@ export function WorkPackageWidget({ wps, isLoading }: WorkPackageWidgetProps) {
                     {wp.progress}%
                   </span>
                 </div>
-                
+
                 <div className="w-full bg-slate-100 rounded-full h-2 mb-2 overflow-hidden">
-                  <div 
-                    className={`h-2 rounded-full transition-all duration-1000 ${
-                      wp.progress === 100 ? 'bg-emerald-500' : 
-                      wp.progress > 75 ? 'bg-indigo-500' : 
-                      wp.progress > 25 ? 'bg-blue-500' : 'bg-amber-500'
+                  <div
+                    className={`h-2 rounded-full transition-all duration-300 motion-reduce:transition-none ${
+                      wp.progress === 100 ? 'bg-emerald-500' :
+                      wp.progress > 50  ? 'bg-blue-600'    :
+                      wp.progress > 25  ? 'bg-blue-500'    : 'bg-amber-500'
                     }`}
                     style={{ width: `${Math.max(wp.progress, 2)}%` }}
-                  ></div>
+                  />
                 </div>
                 <div className="flex justify-between text-xs text-slate-500 font-medium">
                   <span>{wp.completedTasks} / {wp.totalTasks} Tasks Completed</span>

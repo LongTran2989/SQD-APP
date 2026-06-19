@@ -32,8 +32,8 @@ export const STATUS_CONFIG: Record<
     icon: User,
   },
   'In Progress': {
-    color: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    dotColor: 'bg-indigo-500',
+    color: 'bg-blue-50 text-blue-700 border-blue-200',
+    dotColor: 'bg-blue-500',
     label: 'In Progress',
     icon: Loader2,
   },
@@ -92,7 +92,7 @@ export default function TaskStatusBadge({ status, size = 'md' }: TaskStatusBadge
     <span
       className={`inline-flex items-center font-medium rounded-full border whitespace-nowrap ${config.color} ${sizeClasses}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${config.dotColor}`} />
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${config.dotColor}`} aria-hidden="true" />
       {config.label}
     </span>
   );

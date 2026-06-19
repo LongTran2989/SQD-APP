@@ -53,11 +53,12 @@ export default function FeedPostItem({ post, currentUserId, flagTargets, onFlagg
   return (
     <div className={`flex items-start gap-2.5 ${isSelf ? 'flex-row-reverse' : ''}`}>
       <div
+        aria-label={isSelf ? 'You' : authorName}
         className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5 ${
-          isSelf ? 'bg-blue-600 text-white' : 'bg-indigo-100 text-indigo-700'
+          isSelf ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'
         }`}
       >
-        {getInitials(authorName)}
+        <span aria-hidden="true">{getInitials(authorName)}</span>
       </div>
 
       <div className={`flex-1 min-w-0 ${isSelf ? 'items-end' : 'items-start'} flex flex-col`}>

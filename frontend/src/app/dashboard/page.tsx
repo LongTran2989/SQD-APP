@@ -66,7 +66,7 @@ export default function DashboardHome() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-800 tracking-tight">
-              Welcome back, <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">{user?.name}</span>!
+              Welcome back, <span className="text-blue-600">{user?.name}</span>!
             </h1>
             <p className="text-slate-500 font-medium text-xs flex items-center gap-2 mt-0.5">
               <span className="bg-indigo-50 px-2 py-0.5 rounded-full text-indigo-600 font-bold border border-indigo-100">{user?.role}</span>

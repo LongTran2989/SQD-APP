@@ -12,7 +12,7 @@ interface MetricCardProps {
 
 export function MetricCard({ title, value, subtitle, icon, iconBgColor, iconTextColor, isLoading }: MetricCardProps) {
   return (
-    <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm hover:shadow-md border border-slate-100 flex flex-col transition-all duration-300 hover:-translate-y-1 group">
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col">
       <div className="flex items-center space-x-3 mb-4">
         <div className={`p-2 rounded-lg ${iconBgColor}`}>
           <div className={`${iconTextColor}`}>{icon}</div>

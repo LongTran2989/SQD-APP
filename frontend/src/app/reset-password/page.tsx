@@ -77,7 +77,7 @@ function ResetPasswordForm() {
       </div>
 
       {status === 'error' && (
-        <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded flex items-start">
+        <div role="alert" aria-live="polite" className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
           <p className="text-sm text-red-700">{message}</p>
         </div>
       )}
