@@ -69,7 +69,7 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
 
       metrics = { divisionPendingTasks, escalations: escalationsCount, findingsOverview };
       
-    } else if (role === 'Director' || role === 'Admin') {
+    } else if (role === 'Director' || role === 'Admin' || role === 'Senior Advisor') {
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
       const endOfToday = new Date(startOfToday.getTime() + 86400000);
