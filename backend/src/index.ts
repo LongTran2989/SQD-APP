@@ -41,6 +41,11 @@ import { prisma } from './lib/prisma';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Deployed behind exactly one reverse-proxy hop (nginx, see deploy.sh). Without
+// this, express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every
+// rate-limited request once nginx starts forwarding X-Forwarded-For.
+app.set('trust proxy', 1);
+
 // Auth now rides an httpOnly cookie, so CORS must allow credentials and name an
 // explicit origin (a wildcard origin is incompatible with credentialed
 // requests). Configure FRONTEND_ORIGIN per environment.

@@ -1703,7 +1703,7 @@ npm run start               # serves the optimized production build
 - [x] JWT in httpOnly cookie (not JS-readable); CORS locked to `FRONTEND_ORIGIN`
 - [ ] Set `JWT_SECRET`, `NODE_ENV=production`, `FRONTEND_ORIGIN` on the host
 - [ ] HTTPS enabled (required for the `Secure` cookie)
-- [ ] `trust proxy` configured if behind a reverse proxy
+- [x] `trust proxy` configured if behind a reverse proxy (`app.set('trust proxy', 1)` in `index.ts`, 2026-06-19 — fixed after `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` surfaced on the `sqdvaeco.duckdns.org` VPS)
 
 ---
 
