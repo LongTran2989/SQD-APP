@@ -413,6 +413,10 @@ export const launchBlueprint = async (req: Request, res: Response): Promise<void
     // Timeframe: from defaults to today; to defaults to from + defaultDuration days.
     const fromDate = timeframeFrom ? new Date(timeframeFrom) : new Date();
     const toDate = timeframeTo ? new Date(timeframeTo) : new Date(fromDate.getTime() + bp.defaultDuration * DAY_MS);
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+      res.status(400).json({ message: 'timeframeFrom/timeframeTo must be valid dates' });
+      return;
+    }
     if (fromDate >= toDate) {
       res.status(400).json({ message: 'timeframeFrom must be before timeframeTo' });
       return;

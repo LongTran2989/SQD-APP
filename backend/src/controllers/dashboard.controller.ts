@@ -227,33 +227,30 @@ export const getOngoingWorks = async (req: Request, res: Response): Promise<void
     let wpWhere: any = { deletedAt: null };
     let taskWhere: any = { wpId: null, deletedAt: null };
 
-    // We removed status filter at the DB level to allow filtering everything in the backend memory,
-    // or we can keep it for DB if it's standard. But because 'statusFilter' now means multiple things 
-    // and EntityType filter will be added in frontend, it's better to fetch active ones and let frontend filter,
-    // OR we just ignore statusFilter query param for now and fetch all active, letting frontend do the filtering.
-    // Wait, the API still receives statusFilter but frontend can just filter locally.
-    // I will just fetch ALL active works and let the frontend do the complex filtering.
-
     if (role === 'Staff') {
       wpWhere.assignments = { some: { userId } };
       taskWhere.assignedToUserId = userId;
-    } else if (role === 'Manager') {
+    } else if (role === 'Manager' || role === 'Group Leader') {
       wpWhere.divisionId = divisionId;
       taskWhere.targetDivisionId = divisionId;
     }
 
     wpWhere.status = { notIn: ['Closed', 'Inactive'] };
     taskWhere.status = { notIn: ['Closed', 'Inactive', 'Approved', 'Terminated'] };
-    
+
     // Blueprints
     let bpWhere: any = { isActive: true, recurrenceType: { not: null } };
-    if (role === 'Manager') {
+    if (role === 'Manager' || role === 'Group Leader' || role === 'Staff') {
       bpWhere.divisionId = divisionId;
     }
+
+    const MAX_RESULTS = 200;
 
     const [wps, tasks, bps] = await Promise.all([
       prisma.workPackage.findMany({
         where: wpWhere,
+        take: MAX_RESULTS,
+        orderBy: { timeframeTo: 'asc' },
         include: {
           division: { select: { code: true } },
           tasks: { select: { _count: { select: { sourceFindings: { where: { deletedAt: null } } } } } }
@@ -261,6 +258,8 @@ export const getOngoingWorks = async (req: Request, res: Response): Promise<void
       }),
       prisma.task.findMany({
         where: taskWhere,
+        take: MAX_RESULTS,
+        orderBy: { deadline: 'asc' },
         include: {
           targetDivision: { select: { code: true } },
           assignedToUser: { select: { name: true } },
@@ -270,6 +269,8 @@ export const getOngoingWorks = async (req: Request, res: Response): Promise<void
       }),
       prisma.wpBlueprint.findMany({
         where: bpWhere,
+        take: MAX_RESULTS,
+        orderBy: { nextRunAt: 'asc' },
         include: {
           division: { select: { code: true } },
           _count: { select: { instances: true } }
@@ -284,11 +285,13 @@ export const getOngoingWorks = async (req: Request, res: Response): Promise<void
       wpIds.length ? prisma.feedPost.findMany({
         where: { scope: 'WP', scopeId: { in: wpIds } },
         orderBy: { createdAt: 'desc' },
+        take: MAX_RESULTS,
         include: { author: { select: { name: true } } }
       }) : [],
       taskIds.length ? prisma.feedPost.findMany({
         where: { scope: 'TASK', scopeId: { in: taskIds } },
         orderBy: { createdAt: 'desc' },
+        take: MAX_RESULTS,
         include: { author: { select: { name: true } } }
       }) : []
     ]);

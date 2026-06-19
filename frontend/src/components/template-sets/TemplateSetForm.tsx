@@ -26,6 +26,7 @@ interface TemplateSetFormProps {
 
 // Local editable row (mirrors TemplateSetItemPayload but with form-friendly strings).
 interface ItemRow {
+  _key: string;
   templateId: number | '';
   deadlineOffsetDays: number | '';
   estimatedHours: number | '';
@@ -36,7 +37,7 @@ interface ItemRow {
 }
 
 const emptyRow = (): ItemRow => ({
-  templateId: '', deadlineOffsetDays: '', estimatedHours: '', skillLevel: '', requiresApproval: false, defaultNote: '',
+  _key: crypto.randomUUID(), templateId: '', deadlineOffsetDays: '', estimatedHours: '', skillLevel: '', requiresApproval: false, defaultNote: '',
 });
 
 const ADMIN_DIRECTOR = ['Admin', 'Director'];
@@ -63,19 +64,23 @@ export default function TemplateSetForm({ editId, cloneId, onClose, onSaved }: T
   );
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       try {
         const [divs, tplRes] = await Promise.all([getDivisions(), apiClient.get('/templates?status=Published&limit=500')]);
+        if (cancelled) return;
         setDivisions(divs);
         setAllTemplates((tplRes.data as { data: Template[] }).data ?? tplRes.data as Template[]);
 
         if (editId || cloneId) {
           const set = await getTemplateSet((editId || cloneId)!);
+          if (cancelled) return;
           setName(cloneId ? `${set.name} (Copy)` : set.name);
           setDescription(set.description ?? '');
           setDivisionId(cloneId ? (user?.divisionId ?? '') : set.divisionId);
           setRows(
             (set.items ?? []).map((it) => ({
+              _key: crypto.randomUUID(),
               templateId: it.templateId,
               deadlineOffsetDays: it.deadlineOffsetDays ?? '',
               estimatedHours: it.estimatedHours ?? '',
@@ -87,12 +92,13 @@ export default function TemplateSetForm({ editId, cloneId, onClose, onSaved }: T
           );
         }
       } catch {
-        toast.error('Failed to load form data');
+        if (!cancelled) toast.error('Failed to load form data');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     load();
+    return () => { cancelled = true; };
   }, [editId]);
 
   const updateRow = (i: number, patch: Partial<ItemRow>) =>
@@ -211,7 +217,7 @@ export default function TemplateSetForm({ editId, cloneId, onClose, onSaved }: T
               )}
 
               {rows.map((row, i) => (
-                <div key={i} className="border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50/50">
+                <div key={row._key} className="border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50/50">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-400 w-5 text-center">{i + 1}</span>
                     {/* Selected template display */}

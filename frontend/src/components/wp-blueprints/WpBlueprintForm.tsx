@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { X, Info, LayoutTemplate } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
-import { WpType, Template, TemplateSet } from '../../types';
+import { WpType, TemplateSet } from '../../types';
 import { getWpTypes } from '../../api/wpApi';
 import { getTemplateSets } from '../../api/templateSetApi';
 import { getDivisions } from '../../api/taskApi';
@@ -44,7 +44,7 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
   const [autoGenMode, setAutoGenMode] = useState<'SINGLE_SHOT' | 'REPEAT'>('SINGLE_SHOT');
   const [autoGenInterval, setAutoGenInterval] = useState<number | ''>('');
   const [autoGenTemplateId, setAutoGenTemplateId] = useState<number | ''>('');
-  const [selectedAutoGenTemplate, setSelectedAutoGenTemplate] = useState<Template | null>(null);
+  const [selectedAutoGenTemplate, setSelectedAutoGenTemplate] = useState<{ id: number; templateId: string; title: string } | null>(null);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [autoGenSetId, setAutoGenSetId] = useState<number | ''>('');
   const [autoGenSource, setAutoGenSource] = useState<'TEMPLATE' | 'SET'>('TEMPLATE');
@@ -63,17 +63,20 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       try {
         const [typesData, divsData, deptRes] = await Promise.all([
           getWpTypes(), getDivisions(), apiClient.get('/datasources/departments'),
         ]);
+        if (cancelled) return;
         setWpTypes(typesData);
         setDivisions(divsData);
         setDepartments(deptRes.data as { value: string; label: string }[]);
 
         if (editId) {
           const bp = await getWpBlueprint(editId);
+          if (cancelled) return;
           setName(bp.name);
           setDescription(bp.description ?? '');
           setType(bp.type);
@@ -89,7 +92,7 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
           setAutoGenTemplateId(bp.defaultAutoGenTemplateId ?? '');
           // Populate the selected template display object if editing
           if (bp.defaultAutoGenTemplate) {
-            setSelectedAutoGenTemplate(bp.defaultAutoGenTemplate as unknown as Template);
+            setSelectedAutoGenTemplate(bp.defaultAutoGenTemplate);
           }
           setAutoGenSetId(bp.defaultAutoGenSetId ?? '');
           setAutoGenSource(bp.defaultAutoGenSetId ? 'SET' : 'TEMPLATE');
@@ -101,12 +104,13 @@ export default function WpBlueprintForm({ editId, onClose, onSaved }: WpBlueprin
           }
         }
       } catch {
-        toast.error('Failed to load form data');
+        if (!cancelled) toast.error('Failed to load form data');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     load();
+    return () => { cancelled = true; };
   }, [editId]);
 
   // Saved sets are division-scoped; reload on division change.
