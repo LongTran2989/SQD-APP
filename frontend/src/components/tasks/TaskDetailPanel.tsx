@@ -110,7 +110,7 @@ export default function TaskDetailPanel({ task, currentUser }: TaskDetailPanelPr
               <UserIcon className="w-3.5 h-3.5 text-slate-400" />
               {task.assignedToUser.name}
               {task.assignedToUserId === currentUser.id && (
-                <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-semibold">YOU</span>
+                <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-semibold">YOU</span>
               )}
             </span>
           ) : (

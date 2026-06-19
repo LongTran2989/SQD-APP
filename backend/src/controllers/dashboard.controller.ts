@@ -211,7 +211,35 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       include: { author: { select: { name: true } } }
     });
 
-    res.json(posts);
+    // Resolve human-readable scopeNames in a single batch per entity type
+    const taskIds   = posts.filter(p => p.scope === 'TASK'     && p.scopeId != null).map(p => p.scopeId as number);
+    const findingIds= posts.filter(p => p.scope === 'FINDING'  && p.scopeId != null).map(p => p.scopeId as number);
+    const wpIds     = posts.filter(p => p.scope === 'WP'       && p.scopeId != null).map(p => p.scopeId as number);
+    const divIds    = posts.filter(p => p.scope === 'DIVISION' && p.scopeId != null).map(p => p.scopeId as number);
+
+    const [tasks, findings, wps, divisions] = await Promise.all([
+      taskIds.length    ? prisma.task.findMany        ({ where: { id: { in: taskIds    } }, select: { id: true, taskId: true   } }) : [],
+      findingIds.length ? prisma.finding.findMany     ({ where: { id: { in: findingIds } }, select: { id: true, findingId: true} }) : [],
+      wpIds.length      ? prisma.workPackage.findMany ({ where: { id: { in: wpIds      } }, select: { id: true, wpId: true     } }) : [],
+      divIds.length     ? prisma.division.findMany    ({ where: { id: { in: divIds     } }, select: { id: true, name: true     } }) : [],
+    ]);
+
+    const taskMap    = new Map(tasks.map(t    => [t.id, t.taskId   ]));
+    const findingMap = new Map(findings.map(f => [f.id, f.findingId]));
+    const wpMap      = new Map(wps.map(w      => [w.id, w.wpId     ]));
+    const divMap     = new Map(divisions.map(d=> [d.id, d.name     ]));
+
+    const enriched = posts.map(p => ({
+      ...p,
+      scopeName:
+        p.scope === 'TASK'     && p.scopeId ? (taskMap.get(p.scopeId)    ?? null) :
+        p.scope === 'FINDING'  && p.scopeId ? (findingMap.get(p.scopeId) ?? null) :
+        p.scope === 'WP'       && p.scopeId ? (wpMap.get(p.scopeId)      ?? null) :
+        p.scope === 'DIVISION' && p.scopeId ? (divMap.get(p.scopeId)     ?? null) :
+        p.scope === 'ORG'                   ? 'Organisation' : null,
+    }));
+
+    res.json(enriched);
   } catch (error) {
     console.error('Error fetching dashboard feed:', error);
     res.status(500).json({ message: 'Internal server error' });

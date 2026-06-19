@@ -17,7 +17,7 @@ export function ActivityFeedWidget({ posts, isLoading }: ActivityFeedWidgetProps
         <h2 className="text-lg font-semibold text-slate-800">Activity Feed</h2>
       </div>
 
-      <div className="p-5 overflow-y-auto flex-1 max-h-[400px]">
+      <div className="p-5 overflow-y-auto flex-1 max-h-[400px] [mask-image:linear-gradient(to_bottom,black_85%,transparent_100%)]">
         {isLoading ? (
           <div className="space-y-4">
             {[1, 2, 3, 4].map((i) => (
@@ -62,9 +62,9 @@ export function ActivityFeedWidget({ posts, isLoading }: ActivityFeedWidgetProps
                     <span className={post.type === 'COMMENT' ? 'text-slate-600' : ''}>{post.content}</span>
                   </div>
                   <div className="text-xs text-slate-400 mt-1 font-medium flex items-center gap-2">
-                    {new Date(post.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] uppercase tracking-wider">
-                      {post.scope} {post.scopeId ? `#${post.scopeId}` : ''}
+                    {new Date(post.createdAt).toLocaleDateString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] tracking-wide">
+                      {post.scopeName ?? `${post.scope.toLowerCase()}${post.scopeId ? ` #${post.scopeId}` : ''}`}
                     </span>
                   </div>
                 </div>

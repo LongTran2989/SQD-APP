@@ -186,7 +186,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
                     <span className="font-medium text-amber-600">Requires Approval</span>
                   )}
                   {selectedTemplate.skillLevel > 0 && (
-                    <span className="font-medium text-indigo-600">Skill Level {selectedTemplate.skillLevel}</span>
+                    <span className="font-medium text-blue-600">Skill Level {selectedTemplate.skillLevel}</span>
                   )}
                 </div>
               </div>

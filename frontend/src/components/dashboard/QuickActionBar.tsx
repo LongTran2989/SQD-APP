@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlusCircle, Briefcase, RefreshCw } from 'lucide-react';
+import { PlusCircle, Briefcase, RefreshCw, CalendarClock } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
 
@@ -10,7 +10,7 @@ interface QuickActionBarProps {
 
 export function QuickActionBar({ onRefresh, isRefreshing }: QuickActionBarProps) {
   const user = useAuthStore((state) => state.user);
-  const isManagerOrDirector = user?.role === 'Manager' || user?.role === 'Director';
+  const isManagerOrDirector = user?.role === 'Manager' || user?.role === 'Director' || user?.role === 'Admin';
 
   return (
     <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4 sticky top-4 z-[var(--z-sticky,10)]">
@@ -38,13 +38,22 @@ export function QuickActionBar({ onRefresh, isRefreshing }: QuickActionBarProps)
         </Link>
 
         {isManagerOrDirector && (
-          <Link
-            href="/dashboard/work-packages/new"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm shadow-blue-200"
-          >
-            <PlusCircle className="w-4 h-4" aria-hidden="true" />
-            New Work Package
-          </Link>
+          <>
+            <Link
+              href="/dashboard/master-calendar"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors"
+            >
+              <CalendarClock className="w-4 h-4" aria-hidden="true" />
+              Schedule
+            </Link>
+            <Link
+              href="/dashboard/work-packages/new"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm shadow-blue-200"
+            >
+              <PlusCircle className="w-4 h-4" aria-hidden="true" />
+              New Work Package
+            </Link>
+          </>
         )}
       </div>
     </div>

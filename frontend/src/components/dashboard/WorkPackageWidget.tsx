@@ -45,7 +45,7 @@ export function WorkPackageWidget({ wps, isLoading }: WorkPackageWidgetProps) {
         ) : (
           wps.map(wp => (
             <Link key={wp.id} href={`/dashboard/work-packages/${wp.id}`}>
-              <div className="group bg-white hover:bg-slate-50 rounded-xl p-4 border border-slate-200 hover:border-slate-300 transition-all cursor-pointer">
+              <div className="group bg-white hover:bg-slate-50 rounded-xl p-4 border border-slate-200 hover:border-slate-300 transition-colors">
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <h3 className="font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">{wp.name}</h3>
@@ -53,7 +53,7 @@ export function WorkPackageWidget({ wps, isLoading }: WorkPackageWidgetProps) {
                       <span className="bg-slate-100 px-2 py-0.5 rounded font-medium">{wp.type}</span>
                       <span className="flex items-center">
                         <CalendarClock className="w-3 h-3 mr-1" aria-hidden="true" />
-                        Due {new Date(wp.timeframeTo).toLocaleDateString()}
+                        Due {new Date(wp.timeframeTo).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </span>
                     </div>
                   </div>

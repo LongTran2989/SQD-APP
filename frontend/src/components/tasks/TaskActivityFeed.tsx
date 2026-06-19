@@ -134,7 +134,7 @@ export default function TaskActivityFeed({
               <div key={entry.id} className={`flex items-start gap-2.5 ${isSelf ? 'flex-row-reverse' : ''}`}>
                 {/* Avatar */}
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5 ${
-                  isSelf ? 'bg-blue-600 text-white' : 'bg-indigo-100 text-indigo-700'
+                  isSelf ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'
                 }`}>
                   {getInitials(authorName)}
                 </div>

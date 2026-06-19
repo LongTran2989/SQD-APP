@@ -7,8 +7,8 @@ import { FeedPostEnriched, EscalationTargetScope, EscalationAction } from '../ty
 /** Human-readable label for an escalation target scope. */
 export const TARGET_SCOPE_LABEL: Record<EscalationTargetScope, string> = {
   WP: 'Work Package',
-  DIVISION: 'Division Board',
-  ORG: 'Org Feed',
+  DIVISION: 'Division Feed',
+  ORG: 'Organisation Feed',
 };
 
 /** Past-tense label for a completed escalation action (history summary line). */

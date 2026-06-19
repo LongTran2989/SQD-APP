@@ -57,23 +57,15 @@ export default function DashboardHome() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12">
-      {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-white via-slate-50/50 to-white border border-slate-200/60 p-5 rounded-2xl shadow-sm flex items-center justify-between relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mt-6 -mr-6 w-24 h-24 bg-indigo-500/5 rounded-full blur-xl"></div>
-        <div className="flex items-center space-x-5 relative z-10">
-          <div className="w-14 h-14 bg-white rounded-xl flex items-center justify-center p-2 shadow-sm border border-slate-100">
-            <img src="/logo.png" alt="VAECO Logo" className="w-full h-full object-contain" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight">
-              Welcome back, <span className="text-blue-600">{user?.name}</span>!
-            </h1>
-            <p className="text-slate-500 font-medium text-xs flex items-center gap-2 mt-0.5">
-              <span className="bg-indigo-50 px-2 py-0.5 rounded-full text-indigo-600 font-bold border border-indigo-100">{user?.role}</span>
-              <span>{isStaff ? 'Here are your assigned tasks and recent updates.' : "Here is the overview of your division's operations today."}</span>
-            </p>
-          </div>
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800 tracking-tight">Operations Overview</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
         </div>
+        <span className="bg-blue-50 px-2.5 py-1 rounded-lg text-blue-700 text-xs font-semibold border border-blue-100">{user?.role}</span>
       </div>
 
       <QuickActionBar 
@@ -124,9 +116,9 @@ export default function DashboardHome() {
               breakdown={[
                 { label: 'Unassigned', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.unassigned : summary?.divisionPendingTasks?.unassigned) ?? 0, colorClass: 'bg-slate-400' },
                 { label: 'Due Today', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.dueToday : summary?.divisionPendingTasks?.dueToday) ?? 0, colorClass: 'bg-amber-500' },
-                { label: 'Overdue', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.overdue : summary?.divisionPendingTasks?.overdue) ?? 0, colorClass: 'bg-red-500' },
+                { label: 'Overdue', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.overdue : summary?.divisionPendingTasks?.overdue) ?? 0, colorClass: 'bg-red-500', urgent: true },
                 { label: 'In Review', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.inReview : summary?.divisionPendingTasks?.inReview) ?? 0, colorClass: 'bg-blue-500' },
-                { label: 'Pending Rating', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.pendingRating : summary?.divisionPendingTasks?.pendingRating) ?? 0, colorClass: 'bg-indigo-500' },
+                { label: 'Pending Rating', value: (user?.role === 'Director' ? summary?.systemPendingTasks?.pendingRating : summary?.divisionPendingTasks?.pendingRating) ?? 0, colorClass: 'bg-blue-400' },
               ]}
               linkTo="/dashboard/tasks"
             />

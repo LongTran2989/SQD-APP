@@ -21,7 +21,7 @@ const TITLES: Record<ModalAction, string> = {
   RAISE_FINDING: 'Raise Finding from escalation',
   CREATE_TASK: 'Create Task from escalation',
   REASSIGN_TASK: 'Reassign source task',
-  DISSEMINATE: 'Disseminate to Org Feed',
+  DISSEMINATE: 'Disseminate to Organisation Feed',
 };
 
 interface Props {
@@ -246,7 +246,7 @@ export default function EscalationActionModal({ flagId, action, sourceTaskId, so
 
         {action === 'DISSEMINATE' && (
           <div className="space-y-3">
-            <p className="text-xs text-slate-500">Posts this escalation to the Org Feed for organisation-wide awareness. Optionally tag specific divisions.</p>
+            <p className="text-xs text-slate-500">Posts this escalation to the Organisation Feed for organisation-wide awareness. Optionally tag specific divisions.</p>
             <div className="space-y-1.5 max-h-48 overflow-y-auto">
               {divisions.map((d) => (
                 <label key={d.value} className="flex items-center gap-2 text-sm text-slate-700">

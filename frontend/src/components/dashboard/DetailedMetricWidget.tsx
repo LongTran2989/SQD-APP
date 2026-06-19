@@ -6,6 +6,7 @@ interface BreakdownItem {
   label: string;
   value: number;
   colorClass: string;
+  urgent?: boolean;
 }
 
 interface DetailedMetricWidgetProps {
@@ -63,12 +64,12 @@ export function DetailedMetricWidget({
           </div>
           <div className="space-y-2 mt-auto">
             {breakdown.map((item, idx) => (
-              <div key={idx} className="flex justify-between items-center text-sm">
+              <div key={idx} className={`flex justify-between items-center text-sm rounded-lg px-2 py-1 -mx-2 ${item.urgent && item.value > 0 ? 'bg-red-50' : ''}`}>
                 <div className="flex items-center space-x-2">
                   <div className={`w-2 h-2 rounded-full ${item.colorClass}`} aria-hidden="true"></div>
-                  <span className="text-slate-600 font-medium">{item.label}</span>
+                  <span className={`font-medium ${item.urgent && item.value > 0 ? 'text-red-700' : 'text-slate-600'}`}>{item.label}</span>
                 </div>
-                <span className="font-bold text-slate-700 bg-slate-50 px-2 py-0.5 rounded-md">
+                <span className={`font-bold px-2 py-0.5 rounded-md ${item.urgent && item.value > 0 ? 'text-red-700 bg-red-100' : 'text-slate-700 bg-slate-50'}`}>
                   {item.value}
                 </span>
               </div>

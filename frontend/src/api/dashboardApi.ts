@@ -41,6 +41,7 @@ export interface FeedPost {
   type: string;
   scope: string;
   scopeId: number | null;
+  scopeName?: string | null;
   content: string;
   author: { name: string } | null;
   createdAt: string;

@@ -33,7 +33,7 @@ export default function DivisionBoardPage() {
           <LayoutPanelTop className="w-5 h-5 text-blue-600" />
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold text-slate-800">Division Board</h1>
+          <h1 className="text-xl font-bold text-slate-800">Division Feed</h1>
           <p className="text-sm text-slate-500">Division-wide discussion and escalations.</p>
         </div>
 
@@ -63,7 +63,7 @@ export default function DivisionBoardPage() {
             scope="DIVISION"
             scopeId={selectedDivisionId}
             currentUser={user}
-            title="Division Board"
+            title="Division Feed"
           />
         </div>
       )}

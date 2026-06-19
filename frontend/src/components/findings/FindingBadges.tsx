@@ -20,7 +20,7 @@ export function SeverityBadge({ severity }: { severity: FindingSeverity | null }
 
 export const FINDING_STATUS_CONFIG: Record<FindingStatus, { label: string; color: string }> = {
   'Open': { label: 'Open', color: 'bg-blue-50 text-blue-700 border-blue-200' },
-  'In Progress': { label: 'In Progress', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  'In Progress': { label: 'In Progress', color: 'bg-blue-50 text-blue-700 border-blue-200' },
   'Pending Verification': { label: 'Pending Verification', color: 'bg-amber-50 text-amber-700 border-amber-200' },
   'Closed': { label: 'Closed', color: 'bg-green-50 text-green-700 border-green-200' },
   'Dismissed': { label: 'Dismissed', color: 'bg-rose-50 text-rose-700 border-rose-200' },
@@ -45,7 +45,7 @@ export function CapaTypeBadge({ type }: { type: CapaType }) {
 
 const CAPA_STATUS_CONFIG: Record<CapaStatus, { label: string; color: string }> = {
   'Open': { label: 'Open', color: 'bg-slate-100 text-slate-600 border-slate-200' },
-  'In Progress': { label: 'In Progress', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  'In Progress': { label: 'In Progress', color: 'bg-blue-50 text-blue-700 border-blue-200' },
   'Completed': { label: 'Completed', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   'Verified': { label: 'Verified', color: 'bg-green-50 text-green-700 border-green-200' },
   'Waived': { label: 'Waived', color: 'bg-amber-50 text-amber-700 border-amber-200' },

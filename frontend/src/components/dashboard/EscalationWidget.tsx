@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, ShieldAlert, ArrowRight } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ArrowRight } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
 
@@ -15,45 +15,55 @@ export function EscalationWidget({ count = 0, isLoading }: EscalationWidgetProps
     return null;
   }
 
+  const hasEscalations = !isLoading && count > 0;
+
   return (
-    <div className="bg-gradient-to-br from-red-50 to-white p-5 rounded-2xl shadow-sm border border-red-100 flex flex-col relative overflow-hidden group hover:shadow-md transition-all duration-300 h-full">
-      <div className="absolute -right-2 -top-2 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500 motion-reduce:transition-none motion-reduce:transform-none" aria-hidden="true">
-        <ShieldAlert className="w-24 h-24 text-red-600" aria-hidden="true" />
-      </div>
-      
-      <div className="flex items-center space-x-3 mb-3 relative z-10">
-        <div className="p-2 bg-red-100 rounded-lg">
-          <AlertTriangle className="w-5 h-5 text-red-600" />
+    <div className={`p-5 rounded-xl shadow-sm border flex flex-col h-full ${hasEscalations ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
+      <div className="flex items-center space-x-3 mb-3">
+        <div className={`p-2 rounded-lg ${hasEscalations ? 'bg-red-100' : 'bg-slate-100'}`}>
+          <AlertTriangle className={`w-5 h-5 ${hasEscalations ? 'text-red-600' : 'text-slate-400'}`} aria-hidden="true" />
         </div>
-        <h2 className="text-base font-semibold text-slate-800">Action Center</h2>
+        <h2 className="text-base font-semibold text-slate-800">Escalations</h2>
       </div>
-      
-      <div className="relative z-10 mt-auto flex flex-col items-center justify-center py-4">
+
+      <div
+        className="mt-auto flex flex-col items-center justify-center py-4"
+        role="status"
+        aria-live="polite"
+        aria-label={isLoading ? 'Loading escalations' : `${count} escalation${count !== 1 ? 's' : ''} pending`}
+      >
         {isLoading ? (
           <div className="animate-pulse flex flex-col items-center gap-2 w-full">
-            <div className="h-10 bg-red-200/50 rounded w-16"></div>
-            <div className="h-4 bg-red-200/50 rounded w-2/3 mt-1"></div>
+            <div className="h-10 bg-slate-200 rounded w-16"></div>
+            <div className="h-4 bg-slate-200 rounded w-2/3 mt-1"></div>
           </div>
-        ) : (
+        ) : count > 0 ? (
           <>
             <span className="text-4xl font-extrabold text-red-600 tracking-tight leading-none">{count}</span>
             <p className="text-xs text-slate-600 mt-2 font-medium text-center">
               {count === 1 ? 'Escalation requires' : 'Escalations require'} your attention
             </p>
           </>
+        ) : (
+          <>
+            <CheckCircle2 className="w-10 h-10 text-emerald-500 mb-2" aria-hidden="true" />
+            <p className="text-xs text-slate-500 font-medium text-center">No pending escalations</p>
+          </>
         )}
       </div>
-      
-      {!isLoading && count > 0 ? (
-        <Link 
-          href="/dashboard/escalations" 
-          className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl text-sm font-semibold transition-colors shadow-sm shadow-red-200 relative z-10 flex items-center justify-center gap-2"
-        >
-          Review
-          <ArrowRight className="w-4 h-4" />
-        </Link>
-      ) : (
-        <div className="mt-3 h-9" />
+
+      {!isLoading && (
+        count > 0 ? (
+          <Link
+            href="/dashboard/escalations"
+            className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl text-sm font-semibold transition-colors shadow-sm shadow-red-200 flex items-center justify-center gap-2"
+          >
+            Review
+            <ArrowRight className="w-4 h-4" aria-hidden="true" />
+          </Link>
+        ) : (
+          <div className="mt-3 h-9" />
+        )
       )}
     </div>
   );
