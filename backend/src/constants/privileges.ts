@@ -14,9 +14,9 @@
 // by deliberate design (see CLAUDE_HANDOVER.md §3.4 and the Phase 7 plan).
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type RoleName = 'Director' | 'Admin' | 'Manager' | 'Group Leader' | 'Staff';
+export type RoleName = 'Director' | 'Admin' | 'Manager' | 'Group Leader' | 'Staff' | 'Senior Advisor';
 
-export const ROLE_NAMES: RoleName[] = ['Director', 'Admin', 'Manager', 'Group Leader', 'Staff'];
+export const ROLE_NAMES: RoleName[] = ['Director', 'Admin', 'Manager', 'Group Leader', 'Staff', 'Senior Advisor'];
 
 export type PrivilegeKey =
   // Tasks
@@ -167,4 +167,5 @@ export const DEFAULT_PRIVILEGES: Record<RoleName, PrivilegeMap> = {
   ),
   'Group Leader': grant(),
   Staff: grant(),
+  'Senior Advisor': grant(),
 };
