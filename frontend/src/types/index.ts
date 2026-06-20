@@ -92,6 +92,7 @@ export interface FormField {
 export interface Template {
   id: number;
   templateId: string;
+  externalRef?: string | null;
   title: string;
   description: string | null;
   status: 'Draft' | 'Published' | 'Archived';
@@ -169,6 +170,7 @@ export interface TaskEnriched extends Task {
   // backend is the authority (privilege-aware); the client must not recompute it.
   isReviewer: boolean;
   lastActivityAt?: string;
+  recentActivities?: { content: string; createdAt: string; author: { id: number; name: string | null } | null }[];
   template: { id: number; templateId: string; title: string; allowsFindings?: boolean } | null;
   issuer: { id: number; name: string } | null;
   assignedToUser: { id: number; name: string; role?: string } | null;
@@ -190,7 +192,13 @@ export interface WorkPackage {
   timeframeFrom: string;
   timeframeTo: string;
   creatorId: number;
-  checkTemplateId: number | null;
+  autoGenerate: boolean;
+  autoGenMode: 'SINGLE_SHOT' | 'REPEAT' | null;
+  autoGenInterval: number | null;
+  autoGenTemplateId: number | null;
+  autoGenSetId: number | null;
+  autoGenInlineSet: unknown | null;
+  autoGenFiredAt: string | null;
   acRegistration: string | null;
   customer: string | null;
   authority: string | null;
@@ -206,6 +214,67 @@ export interface WpType {
   code: string;
   description: string | null;
   isActive?: boolean;
+}
+
+// ── Template Sets (P5) — ordered, reusable lists of templates for SINGLE_SHOT autogen ──
+export interface TemplateSetItem {
+  id: number;
+  setId: number;
+  templateId: number;
+  orderIndex: number;
+  deadlineOffsetDays: number | null;
+  estimatedHours: number | null;
+  skillLevel: number | null;
+  requiresApproval: boolean | null;
+  defaultNote: string | null;
+  template?: { id: number; templateId: string; title: string; status: string };
+}
+
+export interface TemplateSet {
+  id: number;
+  name: string;
+  description: string | null;
+  divisionId: number;
+  ownerId: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  division?: { id: number; name: string; code: string } | null;
+  owner?: { id: number; name: string } | null;
+  items?: TemplateSetItem[];
+  _count?: { items: number };
+}
+
+// ── WP Blueprints (P6) — reusable WP templates with a manual launch ──
+export interface WpBlueprint {
+  id: number;
+  name: string;
+  description: string | null;
+  type: string;
+  divisionId: number;
+  defaultDuration: number;
+  defaultAutoGenerate: boolean;
+  defaultAutoGenMode: 'SINGLE_SHOT' | 'REPEAT' | null;
+  defaultAutoGenInterval: number | null;
+  defaultAutoGenTemplateId: number | null;
+  defaultAutoGenSetId: number | null;
+  recurrenceType: 'CALENDAR' | 'LAST_DONE' | null;
+  recurrenceInterval: number | null;
+  recurrenceStartDate: string | null;
+  nextRunAt: string | null;
+  acRegistration: string | null;
+  customer: string | null;
+  authority: string | null;
+  targetDepartmentId: number | null;
+  ownerId: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  division?: { id: number; name: string; code: string } | null;
+  owner?: { id: number; name: string } | null;
+  defaultAutoGenTemplate?: { id: number; templateId: string; title: string } | null;
+  defaultAutoGenSet?: { id: number; name: string } | null;
+  _count?: { instances: number };
 }
 
 export interface EventType {
@@ -243,6 +312,13 @@ export interface WorkPackageDetail extends WorkPackage {
   creator: { id: number; name: string } | null;
   assignments: { id: number; wpId: number; userId: number; user: { id: number; name: string; email: string } }[];
   tasks: WpTaskRow[];
+  autoGenResult?: {
+    fired: boolean;
+    spawned: number;
+    spawnedTaskIds: number[];
+    reason?: string;
+    warnings?: string[];
+  };
 }
 
 // Backed by the unified FeedPost model. The Task feed is scope 'TASK',
@@ -637,7 +713,9 @@ export type NotificationType =
   | 'TASK_SUBMITTED'
   | 'ESCALATION_QUEUED'
   | 'FINDING_CREATED'
-  | 'FEED_ACTIVITY';
+  | 'FEED_ACTIVITY'
+  | 'BLUEPRINT_LAUNCHED'
+  | 'TASKS_GENERATED';
 
 export type NotificationLinkScope = 'TASK' | 'WP' | 'FINDING' | 'ESCALATION';
 

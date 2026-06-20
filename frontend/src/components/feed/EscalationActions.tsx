@@ -56,7 +56,7 @@ export default function EscalationActions({ flagId, sourceTaskId, sourceWpId, on
           Create Task
         </button>
         {sourceTaskId != null && (
-          <button onClick={() => setModalAction('REASSIGN_TASK')} disabled={busy} className={`${btn} border-indigo-300 text-indigo-700 hover:bg-indigo-100`}>
+          <button onClick={() => setModalAction('REASSIGN_TASK')} disabled={busy} className={`${btn} border-slate-300 text-slate-700 hover:bg-slate-100`}>
             Reassign
           </button>
         )}

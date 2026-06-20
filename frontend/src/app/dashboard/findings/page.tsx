@@ -13,7 +13,7 @@ import {
   SEVERITY_CONFIG,
 } from '../../../components/findings/FindingBadges';
 import toast from 'react-hot-toast';
-import { AlertTriangle, Eye, ClipboardList, PlusCircle } from 'lucide-react';
+import { AlertTriangle, ClipboardList, PlusCircle } from 'lucide-react';
 import RaiseFindingPanel from '../../../components/findings/RaiseFindingPanel';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -208,7 +208,6 @@ export default function FindingsListPage() {
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date</th>
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Reported By</th>
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Created</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -226,7 +225,13 @@ export default function FindingsListPage() {
                       <div className="text-xs text-slate-400 mt-1">{f.eventType}</div>
                     </td>
                     <td className="p-4 align-middle max-w-xs">
-                      <div className="text-sm text-slate-700 truncate">{f.description}</div>
+                      <Link
+                        href={`/dashboard/findings/${f.id}`}
+                        title={f.description}
+                        className="text-sm text-slate-700 hover:text-blue-600 truncate block focus:outline-none focus:underline"
+                      >
+                        {f.description}
+                      </Link>
                     </td>
                     <td className="p-4 align-middle">
                       {f.sourceTask ? (
@@ -257,17 +262,6 @@ export default function FindingsListPage() {
                     </td>
                     <td className="p-4 align-middle text-sm text-slate-600 whitespace-nowrap">
                       {formatDate(f.createdAt)}
-                    </td>
-                    <td className="p-4 align-middle">
-                      <div className="flex items-center justify-end">
-                        <Link
-                          href={`/dashboard/findings/${f.id}`}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="View Finding"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Link>
-                      </div>
                     </td>
                   </tr>
                 ))}

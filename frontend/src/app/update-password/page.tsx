@@ -68,8 +68,8 @@ export default function UpdatePasswordPage() {
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r flex items-start">
-            <ShieldAlert className="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
+          <div role="alert" aria-live="polite" className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
             <p className="text-sm text-red-700">{error}</p>
           </div>
         )}

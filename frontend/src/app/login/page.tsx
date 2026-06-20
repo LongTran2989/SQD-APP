@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '../../api/client';
@@ -14,6 +14,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const login = useAuthStore((state) => state.login);
+  const idRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    idRef.current?.focus();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,16 +28,12 @@ export default function LoginPage() {
     try {
       const response = await apiClient.post('/auth/login', { employeeId, password });
 
-      // If backend returns 202, forcePasswordChange is true. The backend has set
-      // the httpOnly auth cookie; the middleware restricts that session to
-      // /update-password, so no JS-readable temporary token is needed.
       if (response.status === 202 && response.data.requirePasswordChange) {
         router.push('/update-password');
         return;
       }
 
       const { user } = response.data;
-
       login(user);
       router.push('/dashboard');
     } catch (err: any) {
@@ -47,70 +48,105 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 relative overflow-hidden">
-      {/* Decorative background elements */}
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-100 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob"></div>
-      <div className="absolute top-[20%] right-[-10%] w-96 h-96 bg-cyan-100 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-2000"></div>
-      <div className="absolute bottom-[-20%] left-[20%] w-96 h-96 bg-sky-100 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-4000"></div>
+    <div
+      className="min-h-screen flex items-center justify-center bg-slate-50"
+      style={{
+        backgroundImage: 'radial-gradient(circle, #e2e8f0 1px, transparent 1px)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="w-full max-w-md px-4 py-8">
+        <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-[0_8px_24px_rgba(15,23,42,0.10),0_2px_6px_rgba(15,23,42,0.06)]">
 
-      <div className="w-full max-w-md p-8 bg-white/80 backdrop-blur-xl rounded-2xl shadow-xl z-10 border border-slate-100">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-20 h-20 flex items-center justify-center mb-4">
-            <img src="/logo.png" alt="SQD Logo" className="w-full h-full object-contain" />
+          {/* Header */}
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-16 h-16 flex items-center justify-center mb-4">
+              <img src="/logo.png" alt="SQD Logo" className="w-full h-full object-contain" />
+            </div>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight text-balance">
+              SQD-APP
+            </h1>
+            <p className="text-slate-500 text-sm font-medium mt-1">Aviation QA System</p>
           </div>
-          <h1 className="text-3xl font-bold text-slate-800 tracking-tight">SQD-APP</h1>
-          <p className="text-slate-500 font-medium">Aviation QA System</p>
+
+          {/* Error alert */}
+          {error && (
+            <div
+              role="alert"
+              aria-live="polite"
+              className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3"
+            >
+              <ShieldAlert className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div className="space-y-1.5">
+              <label htmlFor="employeeId" className="block text-sm font-semibold text-slate-700">
+                Staff ID
+              </label>
+              <input
+                ref={idRef}
+                id="employeeId"
+                type="text"
+                required
+                autoComplete="username"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow duration-150"
+                placeholder="e.g. VAE00071"
+                value={employeeId}
+                onChange={(e) => setEmployeeId(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <label htmlFor="password" className="block text-sm font-semibold text-slate-700">
+                  Password
+                </label>
+                <Link
+                  href="/forgot-password"
+                  className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors duration-150"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+              <input
+                id="password"
+                type="password"
+                required
+                autoComplete="current-password"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow duration-150"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-semibold rounded-xl shadow-[0_2px_6px_rgba(37,99,235,0.25)] hover:shadow-[0_4px_12px_rgba(37,99,235,0.30)] transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100 flex justify-center items-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <span
+                    className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin"
+                    aria-hidden="true"
+                  />
+                  <span>Signing in…</span>
+                </>
+              ) : (
+                'Sign In'
+              )}
+            </button>
+          </form>
         </div>
 
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r flex items-start">
-            <ShieldAlert className="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-
-        <form onSubmit={handleLogin} className="space-y-5">
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1">Staff ID</label>
-            <input
-              type="text"
-              required
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white/50"
-              placeholder="e.g. VAE00071"
-              value={employeeId}
-              onChange={(e) => setEmployeeId(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <label className="block text-sm font-semibold text-slate-700">Password</label>
-              <Link href="/forgot-password" className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors">
-                Forgot password?
-              </Link>
-            </div>
-            <input
-              type="password"
-              required
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white/50"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md shadow-blue-500/30 transition-all transform active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex justify-center"
-          >
-            {loading ? (
-              <div className="h-5 w-5 rounded-full border-2 border-white border-t-transparent animate-spin"></div>
-            ) : (
-              'Sign In to Dashboard'
-            )}
-          </button>
-        </form>
+        <p className="text-center text-xs text-slate-400 mt-6">
+          SQD-APP · Aviation MRO Quality Assurance
+        </p>
       </div>
     </div>
   );

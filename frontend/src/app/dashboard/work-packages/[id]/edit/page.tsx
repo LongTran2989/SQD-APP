@@ -55,11 +55,15 @@ export default function EditWorkPackagePage() {
         name: values.name,
         timeframeFrom: values.timeframeFrom,
         timeframeTo: values.timeframeTo,
-        checkTemplateId: values.checkTemplateId ? Number(values.checkTemplateId) : null,
         acRegistration: values.acRegistration || null,
         customer: values.customer || null,
         authority: values.authority || null,
         targetDepartmentId: values.targetDepartmentId ? Number(values.targetDepartmentId) : null,
+        autoGenerate: values.autoGenerate,
+        autoGenMode: values.autoGenerate ? values.autoGenMode : null,
+        autoGenInterval: values.autoGenerate && values.autoGenMode === 'REPEAT' && values.autoGenInterval ? Number(values.autoGenInterval) : null,
+        autoGenTemplateId: values.autoGenerate && values.autoGenTemplateId ? Number(values.autoGenTemplateId) : null,
+        autoGenSetId: values.autoGenerate && values.autoGenSetId ? Number(values.autoGenSetId) : null,
       });
       toast.success('Work Package updated');
       router.push(`/dashboard/work-packages/${wpId}`);
@@ -113,11 +117,15 @@ export default function EditWorkPackagePage() {
     divisionId: wp.divisionId,
     timeframeFrom: toDateString(wp.timeframeFrom),
     timeframeTo: toDateString(wp.timeframeTo),
-    checkTemplateId: wp.checkTemplateId ?? '',
     acRegistration: wp.acRegistration ?? '',
     customer: wp.customer ?? '',
     authority: wp.authority ?? '',
     targetDepartmentId: wp.targetDepartmentId ?? '',
+    autoGenerate: wp.autoGenerate ?? false,
+    autoGenMode: wp.autoGenMode ?? 'SINGLE_SHOT',
+    autoGenInterval: wp.autoGenInterval ?? '',
+    autoGenTemplateId: wp.autoGenTemplateId ?? '',
+    autoGenSetId: wp.autoGenSetId ?? '',
   };
 
   return (

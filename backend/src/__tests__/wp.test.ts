@@ -4,7 +4,6 @@ import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { generateDailyCheckTasks } from '../services/wpCheckService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -142,7 +141,7 @@ describe('Work Package Backend', () => {
       expect(res.body.message).toMatch(/Invalid WP type/);
     });
 
-    it('should reject CHECK type without checkTemplateId', async () => {
+    it('should allow CHECK type without any special template (CHECK is now just a label)', async () => {
       const res = await request(app)
         .post('/api/work-packages')
         .set('Authorization', `Bearer ${managerToken}`)
@@ -154,8 +153,9 @@ describe('Work Package Backend', () => {
           timeframeTo: '2026-06-30'
         });
 
-      expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/checkTemplateId/);
+      expect(res.status).toBe(201);
+      expect(res.body.type).toBe('CHECK');
+      expect(res.body.autoGenerate).toBe(false);
     });
 
     it('should reject creation with invalid timeframe', async () => {
@@ -407,184 +407,6 @@ describe('Work Package Backend', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch(/not in a final state/);
-    });
-  });
-
-  // ─── CHECK TASK GENERATION ───────────────────────────────────────────
-
-  describe('On-Demand CHECK Task Generation', () => {
-    it('should generate a task from a Published template', async () => {
-      // Create a published template
-      const template = await prisma.template.create({
-        data: {
-          templateId: 'WPT-001',
-          title: 'Daily Check Template',
-          formSchema: [{ id: '1', type: 'radio', label: 'Pass/Fail', options: ['Pass', 'Fail'] }],
-          status: 'Published',
-          publishedAt: new Date(),
-          ownerId: managerUserId,
-          divisionId
-        }
-      });
-
-      // Create a CHECK WP with today inside the timeframe
-      const now = new Date();
-      const pastDate = new Date(now);
-      pastDate.setDate(now.getDate() - 1);
-      const futureDate = new Date(now);
-      futureDate.setDate(now.getDate() + 30);
-
-      const wp = await prisma.workPackage.create({
-        data: {
-          wpId: 'WPT-WP-999010',
-          name: 'Check Gen Test',
-          type: 'CHECK',
-          divisionId,
-          timeframeFrom: pastDate,
-          timeframeTo: futureDate,
-          creatorId: managerUserId,
-          checkTemplateId: template.id,
-          status: 'Open'
-        }
-      });
-
-      // Call the service function directly
-      const result = await generateDailyCheckTasks(wp.id, prisma);
-
-      expect(result.generated).toBe(true);
-      expect(result.taskId).toMatch(/^WPT-\d{6}$/);
-
-      // Verify the task was created in DB
-      const task = await prisma.task.findUnique({ where: { id: result.taskDbId! } });
-      expect(task).not.toBeNull();
-      expect(task!.status).toBe('Unassigned');
-      expect(task!.wpId).toBe(wp.id);
-      expect(task!.schemaSnapshot).toBeDefined();
-
-      // Verify TaskActivity was logged
-      const activity = await prisma.feedPost.findFirst({
-        where: { scope: 'TASK', scopeId: result.taskDbId! }
-      });
-      expect(activity).not.toBeNull();
-      expect(activity!.type).toBe('SYSTEM_EVENT');
-      expect(activity!.content).toMatch(/auto-generated/i);
-    });
-
-    it('should NOT generate task from Archived template (guard test)', async () => {
-      const template = await prisma.template.create({
-        data: {
-          templateId: 'WPT-002',
-          title: 'Archived Template',
-          formSchema: [{ id: '1', type: 'text', label: 'Test' }],
-          status: 'Archived',
-          ownerId: managerUserId,
-          divisionId
-        }
-      });
-
-      const now = new Date();
-      const pastDate = new Date(now);
-      pastDate.setDate(now.getDate() - 1);
-      const futureDate = new Date(now);
-      futureDate.setDate(now.getDate() + 30);
-
-      const wp = await prisma.workPackage.create({
-        data: {
-          wpId: 'WPT-WP-999011',
-          name: 'Archived Template Guard',
-          type: 'CHECK',
-          divisionId,
-          timeframeFrom: pastDate,
-          timeframeTo: futureDate,
-          creatorId: managerUserId,
-          checkTemplateId: template.id,
-          status: 'Open'
-        }
-      });
-
-      const result = await generateDailyCheckTasks(wp.id, prisma);
-
-      expect(result.generated).toBe(false);
-      expect(result.checkTemplateWarning).toMatch(/archived/i);
-
-      // Verify NO task was created
-      const tasks = await prisma.task.findMany({ where: { wpId: wp.id } });
-      expect(tasks.length).toBe(0);
-    });
-
-    it('should NOT generate duplicate tasks for the same day', async () => {
-      const template = await prisma.template.create({
-        data: {
-          templateId: 'WPT-003',
-          title: 'Dedup Template',
-          formSchema: [{ id: '1', type: 'text', label: 'Test' }],
-          status: 'Published',
-          publishedAt: new Date(),
-          ownerId: managerUserId,
-          divisionId
-        }
-      });
-
-      const now = new Date();
-      const pastDate = new Date(now);
-      pastDate.setDate(now.getDate() - 1);
-      const futureDate = new Date(now);
-      futureDate.setDate(now.getDate() + 30);
-
-      const wp = await prisma.workPackage.create({
-        data: {
-          wpId: 'WPT-WP-999012',
-          name: 'Dedup Test',
-          type: 'CHECK',
-          divisionId,
-          timeframeFrom: pastDate,
-          timeframeTo: futureDate,
-          creatorId: managerUserId,
-          checkTemplateId: template.id,
-          status: 'Open'
-        }
-      });
-
-      // First call should generate
-      const result1 = await generateDailyCheckTasks(wp.id, prisma);
-      expect(result1.generated).toBe(true);
-
-      // Second call should be deduplicated
-      const result2 = await generateDailyCheckTasks(wp.id, prisma);
-      expect(result2.generated).toBe(false);
-      expect(result2.reason).toMatch(/already been generated today/i);
-    });
-
-    it('should NOT generate task when WP is not In Progress (future timeframe)', async () => {
-      const template = await prisma.template.create({
-        data: {
-          templateId: 'WPT-004',
-          title: 'Future Check Template',
-          formSchema: [{ id: '1', type: 'text', label: 'Test' }],
-          status: 'Published',
-          publishedAt: new Date(),
-          ownerId: managerUserId,
-          divisionId
-        }
-      });
-
-      const wp = await prisma.workPackage.create({
-        data: {
-          wpId: 'WPT-WP-999013',
-          name: 'Future Check',
-          type: 'CHECK',
-          divisionId,
-          timeframeFrom: new Date('2030-01-01'),
-          timeframeTo: new Date('2030-12-31'),
-          creatorId: managerUserId,
-          checkTemplateId: template.id,
-          status: 'Open'
-        }
-      });
-
-      const result = await generateDailyCheckTasks(wp.id, prisma);
-      expect(result.generated).toBe(false);
-      expect(result.reason).toMatch(/not started/i);
     });
   });
 
@@ -968,13 +790,12 @@ describe('Work Package Backend', () => {
     const future = (days: number) => new Date(Date.now() + days * 86400000).toISOString();
 
     it('PR8-A: CHECK WP persists acRegistration/customer/authority', async () => {
-      // Seed CHECK type + a published check template.
+      // Seed CHECK type (CHECK no longer requires a special template).
       await prisma.wpType.upsert({ where: { code: 'CHECK' }, update: {}, create: { code: 'CHECK', description: 'Check' } });
-      const tmpl = await prisma.template.create({ data: { templateId: `WP-CHK-${Date.now() % 100000}`, title: 'Chk', formSchema: [{ id: '1', type: 'text', label: 'x' }], status: 'Published', publishedAt: new Date(), ownerId: managerUserId, divisionId } });
       const res = await request(app)
         .post('/api/work-packages')
         .set('Authorization', `Bearer ${managerToken}`)
-        .send({ name: 'Check WP', type: 'CHECK', divisionId, timeframeFrom: future(1), timeframeTo: future(10), checkTemplateId: tmpl.id, acRegistration: 'VN-A361', customer: 'VNA', authority: 'CAAV' });
+        .send({ name: 'Check WP', type: 'CHECK', divisionId, timeframeFrom: future(1), timeframeTo: future(10), acRegistration: 'VN-A361', customer: 'VNA', authority: 'CAAV' });
       expect(res.status).toBe(201);
       expect(res.body.acRegistration).toBe('VN-A361');
       expect(res.body.customer).toBe('VNA');
@@ -1050,6 +871,49 @@ describe('Work Package Backend', () => {
         .set('Authorization', `Bearer ${staffToken}`)
         .send({ timeframeFrom: future(2), timeframeTo: future(12) });
       expect(res.status).toBe(403);
+    });
+  });
+
+  // ─── Auto-generated task catch-up on assignment (P8) ──────────────────
+  describe('Auto-gen catch-up on WP assignment', () => {
+    it('notifies a newly-assigned user when the WP already auto-generated tasks', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-CATCH01', name: 'Catch-up WP', type: 'AUDIT', divisionId,
+          timeframeFrom: new Date('2026-06-01'), timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId, status: 'In Progress',
+          autoGenerate: true, autoGenMode: 'SINGLE_SHOT', autoGenFiredAt: new Date(),
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/work-packages/${wp.id}/assign`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ userId: staffUserId });
+      expect(res.status).toBe(201);
+
+      const notes = await prisma.notification.findMany({ where: { userId: staffUserId, type: 'TASKS_GENERATED', linkId: wp.id } });
+      expect(notes).toHaveLength(1);
+      expect(notes[0]!.linkScope).toBe('WP');
+    });
+
+    it('does not notify when the WP has no auto-generated tasks', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-CATCH02', name: 'Plain WP', type: 'AUDIT', divisionId,
+          timeframeFrom: new Date('2026-06-01'), timeframeTo: new Date('2026-06-30'),
+          creatorId: managerUserId, status: 'In Progress', autoGenerate: false,
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/work-packages/${wp.id}/assign`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ userId: staffUserId });
+      expect(res.status).toBe(201);
+
+      const notes = await prisma.notification.findMany({ where: { userId: staffUserId, type: 'TASKS_GENERATED', linkId: wp.id } });
+      expect(notes).toHaveLength(0);
     });
   });
 });

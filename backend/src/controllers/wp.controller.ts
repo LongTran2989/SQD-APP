@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { generateDailyCheckTasks } from '../services/wpCheckService';
+import { Prisma, PrismaClient, WorkPackage } from '@prisma/client';
+import { fireAutoGenForWp, validateAutoGenConfig, AutoGenColumns, calendarDateUtc } from '../services/autoGenService';
+import { rearmLastDoneRecurrence } from '../services/recurrenceService';
 import { createFeedPost } from '../services/feedService';
+import { createNotifications } from '../services/notificationService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege } from '../utils/privilegeAccess';
 
@@ -187,16 +189,22 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
 
     const computedStatus = await computeWpStatus(wp);
 
-    // On-demand CHECK task generation
-    let checkTaskResult = undefined;
-    if (wp.type === 'CHECK' && wp.checkTemplateId && computedStatus === 'In Progress') {
-      checkTaskResult = await generateDailyCheckTasks(wp.id);
+    // On-demand catch-up: REPEAT mode only. A missed cron day is caught when
+    // someone opens the WP. SINGLE_SHOT is NEVER triggered on-demand — it must
+    // fire via cron so a Manager opening the WP early can't spawn it prematurely.
+    // The Closed/Inactive check uses the stored status (not computedStatus's
+    // server-local "today") so this gate never disagrees with autoGenService's
+    // own APP_TIMEZONE-anchored timeframe check, which is the sole authority
+    // on whether "today" is actually within the WP's window.
+    let autoGenResult = undefined;
+    if (wp.autoGenerate && wp.autoGenMode === 'REPEAT' && wp.status !== 'Closed' && wp.status !== 'Inactive') {
+      autoGenResult = await fireAutoGenForWp(wp.id);
     }
 
     res.json({
       ...wp,
       computedStatus,
-      checkTaskResult
+      autoGenResult
     });
   } catch (error) {
     console.error('Error fetching work package:', error);
@@ -204,11 +212,113 @@ export const getWorkPackageById = async (req: Request, res: Response): Promise<v
   }
 };
 
+// ─── WP creation core (shared by the HTTP handler + blueprint launch) ────────
+
+type PrismaLike = PrismaClient | Prisma.TransactionClient;
+
+export interface CreateWorkPackageInput {
+  name: string;
+  type: string;
+  divisionId: number;
+  timeframeFrom: Date;
+  timeframeTo: Date;
+  typeFields: { acRegistration: string | null; customer: string | null; authority: string | null; targetDepartmentId: number | null };
+  autoGenData: AutoGenColumns;
+  blueprintId?: number | null;
+  isRoutine?: boolean;
+  auditActionType?: string;
+  auditDetails?: Record<string, unknown>;
+  systemEventContent?: string;
+}
+
+/**
+ * Generates the next per-division wpId under a Division FOR UPDATE lock, creates
+ * the WorkPackage, and dual-writes (AuditLog + WP SYSTEM_EVENT). Shared by the
+ * create handler and the blueprint launch endpoint (mirrors how createTaskService
+ * is reused by autoGenService). Throws 'Division not found' for the caller to map.
+ */
+export async function createWorkPackageService(
+  client: PrismaLike,
+  actor: { userId: number },
+  input: CreateWorkPackageInput
+): Promise<WorkPackage> {
+  const { name, type, divisionId, timeframeFrom, timeframeTo, typeFields, autoGenData } = input;
+
+  // Reuse the caller's transaction if given one; otherwise open our own so the
+  // sequence lock + create stay atomic (preserves the handler's original behavior).
+  const run = async (tx: Prisma.TransactionClient): Promise<WorkPackage> => {
+    const divRaw = await tx.$queryRaw<{ id: number, code: string }[]>`SELECT id, code FROM "Division" WHERE id = ${divisionId} FOR UPDATE`;
+    if (divRaw.length === 0) throw new Error('Division not found');
+    const division = divRaw[0]!;
+
+    const lastWp = await tx.workPackage.findFirst({
+      where: { wpId: { startsWith: `${division.code}-WP-` } },
+      orderBy: { id: 'desc' },
+      select: { wpId: true }
+    });
+
+    let nextSeq = 1;
+    if (lastWp?.wpId) {
+      const parts = lastWp.wpId.split('-');
+      const seqPart = parts[parts.length - 1];
+      if (seqPart) {
+        nextSeq = parseInt(seqPart) + 1;
+      }
+    }
+
+    const generatedWpId = `${division.code}-WP-${String(nextSeq).padStart(6, '0')}`;
+
+    return tx.workPackage.create({
+      data: {
+        wpId: generatedWpId,
+        name,
+        type,
+        divisionId,
+        timeframeFrom,
+        timeframeTo,
+        creatorId: actor.userId,
+        ...autoGenData,
+        ...typeFields,
+        blueprintId: input.blueprintId ?? null,
+        isRoutine: input.isRoutine ?? false,
+        status: 'Open',
+      },
+      include: {
+        division: { select: { id: true, name: true, code: true } },
+        creator: { select: { id: true, name: true } },
+      }
+    });
+  };
+
+  const isTx = !(client as PrismaClient).$transaction;
+  const wp = isTx
+    ? await run(client as Prisma.TransactionClient)
+    : await (client as PrismaClient).$transaction((tx) => run(tx));
+
+  // Dual-write (parameterized): AuditLog + WP-scope SYSTEM_EVENT, after commit.
+  await prisma.auditLog.create({
+    data: {
+      actionType: input.auditActionType ?? 'WORK_PACKAGE_CREATED',
+      entityType: 'WorkPackage',
+      entityId: String(wp.id),
+      performedByUserId: actor.userId,
+      details: (input.auditDetails ?? { wpId: wp.wpId, type, divisionId }) as Prisma.InputJsonValue,
+    }
+  });
+  await logWpSystemEvent(wp.id, input.systemEventContent ?? `Work Package "${wp.name}" created.`, { wpId: wp.wpId, type });
+
+  return wp;
+}
+
 // ─── POST /api/work-packages ─────────────────────────────────────────
 export const createWorkPackage = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const { name, type, divisionId, timeframeFrom, timeframeTo, checkTemplateId, acRegistration, customer, authority, targetDepartmentId } = req.body;
+    const {
+      name, type, divisionId, timeframeFrom, timeframeTo,
+      acRegistration, customer, authority, targetDepartmentId,
+      autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId, autoGenSetId, autoGenInlineSet,
+    } = req.body;
 
     if (!name || !type || !divisionId || !timeframeFrom || !timeframeTo) {
       res.status(400).json({ message: 'name, type, divisionId, timeframeFrom, and timeframeTo are required' });
@@ -234,80 +344,28 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // CHECK type requires checkTemplateId
-    if (type === 'CHECK' && !checkTemplateId) {
-      res.status(400).json({ message: 'CHECK type Work Packages require a checkTemplateId' });
+    // Validate + normalize the auto-generate config (any WP type may opt in).
+    const autoGen = await validateAutoGenConfig(prisma, {
+      autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId, autoGenSetId, autoGenInlineSet,
+    });
+    if ('error' in autoGen) {
+      res.status(400).json({ message: autoGen.error });
       return;
     }
 
-    // Validate checkTemplateId if provided
-    if (checkTemplateId) {
-      const template = await prisma.template.findUnique({ where: { id: checkTemplateId } });
-      if (!template) {
-        res.status(400).json({ message: 'checkTemplateId references a non-existent template' });
-        return;
-      }
-      if (template.status !== 'Published') {
-        res.status(400).json({ message: 'checkTemplateId must reference a Published template' });
-        return;
+    const wp = await createWorkPackageService(prisma, { userId }, {
+      name, type, divisionId,
+      timeframeFrom: fromDate, timeframeTo: toDate,
+      typeFields, autoGenData: autoGen.data,
+    });
+
+    if (wp.autoGenerate) {
+      const today = calendarDateUtc(new Date());
+      const from = calendarDateUtc(wp.timeframeFrom);
+      if (today >= from) {
+        await fireAutoGenForWp(wp.id);
       }
     }
-
-    // Auto-generate wpId
-    const wp = await prisma.$transaction(async (tx) => {
-      const divRaw = await tx.$queryRaw<{ id: number, code: string }[]>`SELECT id, code FROM "Division" WHERE id = ${divisionId} FOR UPDATE`;
-      if (divRaw.length === 0) throw new Error('Division not found');
-      const division = divRaw[0]!;
-
-      const lastWp = await tx.workPackage.findFirst({
-        where: { wpId: { startsWith: `${division.code}-WP-` } },
-        orderBy: { id: 'desc' },
-        select: { wpId: true }
-      });
-
-      let nextSeq = 1;
-      if (lastWp?.wpId) {
-        const parts = lastWp.wpId.split('-');
-        const seqPart = parts[parts.length - 1];
-        if (seqPart) {
-          nextSeq = parseInt(seqPart) + 1;
-        }
-      }
-
-      const generatedWpId = `${division.code}-WP-${String(nextSeq).padStart(6, '0')}`;
-
-      return tx.workPackage.create({
-        data: {
-          wpId: generatedWpId,
-          name,
-          type,
-          divisionId,
-          timeframeFrom: fromDate,
-          timeframeTo: toDate,
-          creatorId: userId,
-          checkTemplateId: checkTemplateId || null,
-          ...typeFields,
-          status: 'Open',
-        },
-        include: {
-          division: { select: { id: true, name: true, code: true } },
-          creator: { select: { id: true, name: true } },
-        }
-      });
-    });
-
-    // Log to AuditLog
-    await prisma.auditLog.create({
-      data: {
-        actionType: 'WORK_PACKAGE_CREATED',
-        entityType: 'WorkPackage',
-        entityId: String(wp.id),
-        performedByUserId: userId,
-        details: { wpId: wp.wpId, type, divisionId }
-      }
-    });
-
-    await logWpSystemEvent(wp.id, `Work Package "${wp.name}" created.`, { wpId: wp.wpId, type });
 
     res.status(201).json(wp);
   } catch (error: any) {
@@ -326,7 +384,10 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
     const id = parseInt(req.params.id as string);
     const userId = req.user!.userId;
     const userRole = req.user!.role;
-    const { name, timeframeFrom, timeframeTo, checkTemplateId, acRegistration, customer, authority, targetDepartmentId } = req.body;
+    const {
+      name, timeframeFrom, timeframeTo, acRegistration, customer, authority, targetDepartmentId,
+      autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId, autoGenSetId, autoGenInlineSet,
+    } = req.body;
 
     const wp = await prisma.workPackage.findUnique({ where: { id, deletedAt: null } });
     if (!wp) {
@@ -339,7 +400,9 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    const isManager = wp.creatorId === userId || hasPrivilege(req.user!, 'wp:edit');
+    const isManager = wp.creatorId === userId ||
+      (hasPrivilege(req.user!, 'wp:edit') &&
+        (req.user!.role === 'Director' || req.user!.role === 'Admin' || req.user!.divisionId === wp.divisionId));
     // PR8: an assigned user may edit ONLY the timeframe; managers/creator/global edit everything.
     let isAssignee = false;
     if (!isManager) {
@@ -355,8 +418,10 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
     // Assignees can only touch timeframe fields.
     if (!isManager) {
       const touchesNonTimeframe =
-        name !== undefined || checkTemplateId !== undefined || acRegistration !== undefined ||
-        customer !== undefined || authority !== undefined || targetDepartmentId !== undefined;
+        name !== undefined || acRegistration !== undefined ||
+        customer !== undefined || authority !== undefined || targetDepartmentId !== undefined ||
+        autoGenerate !== undefined || autoGenMode !== undefined || autoGenInterval !== undefined ||
+        autoGenTemplateId !== undefined || autoGenSetId !== undefined || autoGenInlineSet !== undefined;
       if (touchesNonTimeframe) {
         res.status(403).json({ message: 'Assigned users may only edit the timeframe of a Work Package' });
         return;
@@ -374,13 +439,26 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
     if (name !== undefined) dataToUpdate.name = name;
     if (timeframeFrom !== undefined) dataToUpdate.timeframeFrom = new Date(timeframeFrom);
     if (timeframeTo !== undefined) dataToUpdate.timeframeTo = new Date(timeframeTo);
-    if (checkTemplateId !== undefined) dataToUpdate.checkTemplateId = checkTemplateId;
 
     // Type-specific fields (managers only; resolved/validated against the WP type).
     if (isManager && (acRegistration !== undefined || customer !== undefined || authority !== undefined || targetDepartmentId !== undefined)) {
       const typeFields = await resolveWpTypeFields(wp.type, { acRegistration, customer, authority, targetDepartmentId }, res);
       if (typeFields === null) return;
       Object.assign(dataToUpdate, typeFields);
+    }
+
+    // Auto-generate config (managers only). Replace-semantics: to change it, the
+    // client sends the full block (autoGenerate present). autoGenFiredAt is left
+    // untouched so an already-fired SINGLE_SHOT never silently re-spawns.
+    if (isManager && autoGenerate !== undefined) {
+      const autoGen = await validateAutoGenConfig(prisma, {
+        autoGenerate, autoGenMode, autoGenInterval, autoGenTemplateId, autoGenSetId, autoGenInlineSet,
+      });
+      if ('error' in autoGen) {
+        res.status(400).json({ message: autoGen.error });
+        return;
+      }
+      Object.assign(dataToUpdate, autoGen.data);
     }
 
     // Validate the resulting timeframe ordering.
@@ -411,6 +489,14 @@ export const updateWorkPackage = async (req: Request, res: Response): Promise<vo
       }
     });
     await logWpSystemEvent(id, `Work Package "${updated.name}" updated.`, { fields: Object.keys(dataToUpdate) });
+
+    if (updated.autoGenerate && updated.autoGenFiredAt === null && updated.status !== 'Closed' && updated.status !== 'Inactive') {
+      const today = calendarDateUtc(new Date());
+      const from = calendarDateUtc(updated.timeframeFrom);
+      if (today >= from) {
+        await fireAutoGenForWp(updated.id);
+      }
+    }
 
     res.json(updated);
   } catch (error) {
@@ -471,30 +557,44 @@ export const updateWorkPackageStatus = async (req: Request, res: Response): Prom
       };
     }
 
-    // Reactivation clears inactivation log  
+    // Reactivation clears inactivation log
     if (status === 'Open' && wp.status === 'Inactive') {
       dataToUpdate.inactivationLog = null;
     }
 
-    const updated = await prisma.workPackage.update({
-      where: { id },
-      data: dataToUpdate,
-      include: {
-        division: { select: { id: true, name: true, code: true } },
-        creator: { select: { id: true, name: true } },
-      }
-    });
+    // Stamp closedAt on close — anchors LAST_DONE recurrence (P7).
+    if (status === 'Closed') {
+      dataToUpdate.closedAt = new Date();
+    }
 
-    // Log to AuditLog
-    await prisma.auditLog.create({
-      data: {
-        actionType: `WORK_PACKAGE_${status.toUpperCase().replace(' ', '_')}`,
-        entityType: 'WorkPackage',
-        entityId: String(wp.id),
-        performedByUserId: userId,
-        comment: reason || null,
-        details: { fromStatus: wp.status, toStatus: status }
+    const updated = await prisma.$transaction(async (tx) => {
+      const wpUpdated = await tx.workPackage.update({
+        where: { id },
+        data: dataToUpdate,
+        include: {
+          division: { select: { id: true, name: true, code: true } },
+          creator: { select: { id: true, name: true } },
+        }
+      });
+
+      // Log to AuditLog
+      await tx.auditLog.create({
+        data: {
+          actionType: `WORK_PACKAGE_${status.toUpperCase().replace(' ', '_')}`,
+          entityType: 'WorkPackage',
+          entityId: String(wp.id),
+          performedByUserId: userId,
+          comment: reason || null,
+          details: { fromStatus: wp.status, toStatus: status }
+        }
+      });
+
+      // On close, re-arm a LAST_DONE blueprint's schedule (no-op otherwise).
+      if (status === 'Closed' && wpUpdated.blueprintId != null) {
+        await rearmLastDoneRecurrence(tx, { blueprintId: wpUpdated.blueprintId, closedAt: wpUpdated.closedAt });
       }
+
+      return wpUpdated;
     });
 
     const statusLabel = status === 'Open' && wp.status === 'Inactive' ? 'reactivated' : status.toLowerCase();
@@ -578,6 +678,25 @@ export const assignUserToWp = async (req: Request, res: Response): Promise<void>
     });
 
     await logWpSystemEvent(wpId, `${targetUser.name} was assigned to this Work Package.`, { assignedUserId: userId });
+
+    // Late-joiner catch-up: if this WP has already auto-generated tasks (e.g. a
+    // SINGLE_SHOT spawn that fired before this user joined, with no future spawn to
+    // notify them), tell the new assignee so they don't miss pre-existing work.
+    // Best-effort — never affects the assignment response.
+    if (wp.autoGenerate && wp.autoGenFiredAt != null) {
+      try {
+        await createNotifications(prisma, [{
+          userId,
+          type: 'TASKS_GENERATED',
+          title: 'Auto-generated tasks in your work package',
+          body: `You were assigned to ${wp.wpId}, which has auto-generated tasks.`,
+          linkScope: 'WP',
+          linkId: wpId,
+        }]);
+      } catch (err) {
+        console.error(`[assignUserToWp] catch-up notification failed for wpId=${wpId}`, err);
+      }
+    }
 
     res.status(201).json({ message: 'User assigned successfully', assignment });
   } catch (error) {

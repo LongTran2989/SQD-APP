@@ -1,0 +1,10 @@
+{
+  "detector": {
+    "ignoreRules": [
+      "gray-on-color",
+      "border-accent-on-rounded"
+    ],
+    "ignoreFiles": [],
+    "ignoreValues": []
+  }
+}

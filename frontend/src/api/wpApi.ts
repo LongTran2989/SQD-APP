@@ -19,13 +19,22 @@ export const createWpType = (code: string, description?: string): Promise<WpType
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
-export interface CreateWpPayload {
+// Auto-generate config accepted by both create and update.
+export interface AutoGenPayload {
+  autoGenerate?: boolean;
+  autoGenMode?: 'SINGLE_SHOT' | 'REPEAT' | null;
+  autoGenInterval?: number | null;
+  autoGenTemplateId?: number | null;
+  autoGenSetId?: number | null;
+  autoGenInlineSet?: unknown;
+}
+
+export interface CreateWpPayload extends AutoGenPayload {
   name: string;
   type: string;
   divisionId: number;
   timeframeFrom: string;
   timeframeTo: string;
-  checkTemplateId?: number;
   acRegistration?: string | null;
   customer?: string | null;
   authority?: string | null;
@@ -35,11 +44,10 @@ export interface CreateWpPayload {
 export const createWorkPackage = (payload: CreateWpPayload): Promise<WorkPackageDetail> =>
   apiClient.post('/work-packages', payload).then((r) => r.data);
 
-export interface UpdateWpPayload {
+export interface UpdateWpPayload extends AutoGenPayload {
   name?: string;
   timeframeFrom?: string;
   timeframeTo?: string;
-  checkTemplateId?: number | null;
   acRegistration?: string | null;
   customer?: string | null;
   authority?: string | null;

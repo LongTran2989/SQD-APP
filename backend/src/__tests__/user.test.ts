@@ -45,6 +45,8 @@ describe('User RBAC Endpoints', () => {
   });
 
   afterAll(async () => {
+    await prisma.task.deleteMany({});
+    await prisma.template.deleteMany({});
     await prisma.user.deleteMany({});
     await prisma.division.deleteMany({});
     await prisma.department.deleteMany({});

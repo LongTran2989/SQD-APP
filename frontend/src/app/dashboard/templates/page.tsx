@@ -14,7 +14,6 @@ import {
   Archive, 
   Search,
   Filter,
-  Eye,
   Edit,
   Trash2,
   RotateCcw
@@ -39,8 +38,8 @@ export default function TemplateListPage() {
 
   const fetchTemplates = async () => {
     try {
-      const response = await apiClient.get('/templates');
-      setTemplates(response.data);
+      const response = await apiClient.get('/templates?limit=1000');
+      setTemplates(response.data.data || response.data);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to load templates');
     } finally {
@@ -70,9 +69,20 @@ export default function TemplateListPage() {
     }
   };
 
+  const matchWildcard = (str: string, query: string) => {
+    if (!query) return true;
+    const escaped = query.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    try {
+      return new RegExp(escaped, 'i').test(str);
+    } catch {
+      return str.toLowerCase().includes(query.toLowerCase());
+    }
+  };
+
   const filteredTemplates = templates.filter((t) => {
-    const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (t.templateId || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = matchWildcard(t.title, searchQuery) || 
+                          matchWildcard(t.templateId || '', searchQuery) || 
+                          matchWildcard(t.externalRef || '', searchQuery);
     const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -175,9 +185,20 @@ export default function TemplateListPage() {
                         <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-bold font-mono border border-slate-200">
                           {template.templateId}
                         </span>
+                        {template.externalRef && (
+                          <div className="mt-1 text-[10px] text-slate-400 font-mono">
+                            Ref: {template.externalRef}
+                          </div>
+                        )}
                       </td>
                       <td className="p-4 align-middle">
-                        <div className="font-semibold text-slate-800">{template.title}</div>
+                        <Link
+                          href={`/dashboard/templates/${template.id}`}
+                          title={template.title}
+                          className="font-semibold text-slate-800 hover:text-blue-600 focus:outline-none focus:underline"
+                        >
+                          {template.title}
+                        </Link>
                         <div className="flex items-center gap-2 mt-1">
                           {template.hasPendingChanges && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">
@@ -212,13 +233,6 @@ export default function TemplateListPage() {
                       </td>
                       <td className="p-4 align-middle text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Link
-                            href={`/dashboard/templates/${template.id}`}
-                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                            title="View"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Link>
                           {hasPrivilege && (
                             <>
                               {template.status !== 'Archived' && (

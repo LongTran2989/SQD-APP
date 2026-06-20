@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../store/authStore';
-import { LogOut, Bell, Search } from 'lucide-react';
+import { LogOut, Bell, Flag, Menu } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '../../api/client';
 import { getPendingEscalations, ESCALATIONS_CHANGED_EVENT } from '../../api/escalationApi';
 import { ESCALATION_ACTION_ROLES } from '../../constants/escalationRoles';
+import { useUIStore } from '../../store/uiStore';
 import NotificationBell from './NotificationBell';
 
 export default function Header() {
@@ -16,6 +17,7 @@ export default function Header() {
 
   // Only actioner roles have a queue (#22) — others never poll and see no badge.
   const canSeeEscalations = !!user && ESCALATION_ACTION_ROLES.includes(user.role);
+  const setMobileSidebarOpen = useUIStore((s) => s.setMobileSidebarOpen);
 
   // Pending escalations the viewer can action (RBAC-scoped server-side). Polled
   // like the Sidebar findings badge — setState lives in the promise callback so
@@ -57,20 +59,31 @@ export default function Header() {
   };
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shadow-sm sticky top-0 z-10">
-      <div className="flex items-center bg-slate-50 rounded-lg px-3 py-1.5 border border-slate-200 w-64 focus-within:ring-2 focus-within:ring-blue-100 focus-within:border-blue-400 transition-all">
-        <Search className="w-4 h-4 text-slate-400 mr-2" />
-        <input 
-          type="text" 
-          placeholder="Search SQD..." 
-          className="bg-transparent border-none focus:outline-none text-sm w-full text-slate-700"
-        />
+    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shadow-sm sticky top-0 z-[var(--z-header,20)]">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setMobileSidebarOpen(true)}
+          className="lg:hidden p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+          aria-label="Open navigation"
+        >
+          <Menu className="w-5 h-5" aria-hidden="true" />
+        </button>
+        <p className="text-sm font-semibold text-slate-700">
+          {new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+        </p>
       </div>
 
       <div className="flex items-center space-x-4">
         <button
           onClick={() => { if (canSeeEscalations) router.push('/dashboard/escalations'); }}
           className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-colors relative"
+          aria-label={
+            !canSeeEscalations
+              ? 'Escalations'
+              : pendingEscalations > 0
+                ? `${pendingEscalations} pending escalation(s)`
+                : 'No pending escalations'
+          }
           title={
             !canSeeEscalations
               ? 'Escalations'
@@ -79,7 +92,7 @@ export default function Header() {
                 : 'No pending escalations'
           }
         >
-          <Bell className="w-5 h-5" />
+          <Flag className="w-5 h-5" aria-hidden="true" />
           {canSeeEscalations && pendingEscalations > 0 && (
             <span className="absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-white">
               {pendingEscalations > 9 ? '9+' : pendingEscalations}
@@ -102,12 +115,13 @@ export default function Header() {
           </div>
         </div>
 
-        <button 
+        <button
           onClick={handleLogout}
           className="ml-2 p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-          title="Logout"
+          aria-label="Log out"
+          title="Log out"
         >
-          <LogOut className="w-5 h-5" />
+          <LogOut className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
     </header>

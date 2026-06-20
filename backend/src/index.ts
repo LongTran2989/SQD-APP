@@ -12,6 +12,8 @@ import userRoutes from './routes/user.routes';
 import templateRoutes from './routes/template.routes';
 import datasourceRoutes from './routes/datasource.routes';
 import wpRoutes from './routes/wp.routes';
+import templateSetRoutes from './routes/templateSet.routes';
+import wpBlueprintRoutes from './routes/wpBlueprint.routes';
 import taskRoutes from './routes/task.routes';
 import findingRoutes from './routes/finding.routes';
 import taxonomyRoutes from './routes/taxonomy.routes';
@@ -24,9 +26,14 @@ import notificationRoutes from './routes/notification.routes';
 import realtimeRoutes from './routes/realtime.routes';
 import referenceDataRoutes from './routes/referenceData.routes';
 import attachmentRoutes from './routes/attachment.routes';
+import dashboardRoutes from './routes/dashboard.routes';
+import workloadRoutes from './routes/workload.routes';
+import cron from 'node-cron';
 import { startRealtimeListener } from './realtime/pgEvents';
 import { purgeOldNotifications } from './services/notificationService';
 import { initStorage } from './services/storage';
+import { runAutoGenCron, APP_TIMEZONE } from './services/autoGenService';
+import { runRecurrenceCron } from './services/recurrenceService';
 
 dotenv.config();
 
@@ -34,6 +41,11 @@ import { prisma } from './lib/prisma';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Deployed behind exactly one reverse-proxy hop (nginx, see deploy.sh). Without
+// this, express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every
+// rate-limited request once nginx starts forwarding X-Forwarded-For.
+app.set('trust proxy', 1);
 
 // Auth now rides an httpOnly cookie, so CORS must allow credentials and name an
 // explicit origin (a wildcard origin is incompatible with credentialed
@@ -49,6 +61,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/datasources', datasourceRoutes);
 app.use('/api/work-packages', wpRoutes);
+app.use('/api/template-sets', templateSetRoutes);
+app.use('/api/wp-blueprints', wpBlueprintRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/findings', findingRoutes);
 app.use('/api/taxonomy', taxonomyRoutes);
@@ -61,6 +75,8 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/events', realtimeRoutes);
 app.use('/api/admin/reference-data', referenceDataRoutes);
 app.use('/api/attachments', attachmentRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/workload', workloadRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {
@@ -110,6 +126,14 @@ if (process.env.NODE_ENV !== 'test') {
   // shutdown (clean exit on SIGTERM/SIGINT during a deploy).
   void purgeOldNotifications(prisma);
   setInterval(() => void purgeOldNotifications(prisma), 24 * 60 * 60 * 1000).unref();
+  // Nightly auto-generate sweep (00:05 in APP_TIMEZONE). The per-WP FOR UPDATE
+  // lock + autoGenFiredAt make each fire idempotent, so a missed/duplicate run
+  // is safe. APP_TIMEZONE anchors both this trigger and the service's date math.
+  cron.schedule('5 0 * * *', () => { void runAutoGenCron(prisma); }, { timezone: APP_TIMEZONE });
+  // Nightly recurrence sweep (00:15 in APP_TIMEZONE), staggered after the auto-gen
+  // job. Each blueprint's FOR UPDATE lock + nextRunAt anchor make every auto-launch
+  // idempotent, so a missed/duplicate run is safe.
+  cron.schedule('15 0 * * *', () => { void runRecurrenceCron(prisma); }, { timezone: APP_TIMEZONE });
 }
 
 export default app;

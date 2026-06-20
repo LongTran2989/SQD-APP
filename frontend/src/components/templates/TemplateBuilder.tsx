@@ -17,6 +17,8 @@ import {
   Info
 } from 'lucide-react';
 import RichTextEditor from '../ui/RichTextEditor';
+import { ALL_TEMPLATE_TYPES } from '../../constants/templateTypes';
+
 
 interface DataSourceOption {
   value: string;
@@ -248,12 +250,18 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                   <label className="block text-sm font-semibold text-slate-700 mb-1">Type</label>
                   <input
                     type="text"
+                    list="template-types-list"
                     value={type}
                     onChange={(e) => { setType(e.target.value); markChanged(); }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    placeholder="Reserved for future use"
+                    placeholder="e.g. AUD-1.1, CAR, SI-5…"
                   />
-                  <p className="text-xs text-slate-400 mt-1">Reserved for future classification</p>
+                  <datalist id="template-types-list">
+                    {ALL_TEMPLATE_TYPES.map((t) => (
+                      <option key={t} value={t} />
+                    ))}
+                  </datalist>
+                  <p className="text-xs text-slate-400 mt-1">Choose from list or type a custom value</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">Estimated Hours</label>

@@ -23,6 +23,8 @@ export const NOTIFICATION_EVENT_KEYS = [
   'ESCALATION_QUEUED',
   'FEED_ACTIVITY_TASK',
   'FEED_ACTIVITY_WP',
+  'BLUEPRINT_LAUNCHED',
+  'TASKS_GENERATED',
 ] as const;
 
 export type NotificationEventKey = (typeof NOTIFICATION_EVENT_KEYS)[number];
@@ -51,6 +53,8 @@ export const NOTIFICATION_EVENT_CATALOG: EventCatalogItem[] = [
   { key: 'ESCALATION_QUEUED', group: 'Escalation', label: 'Escalation queued', description: 'Sent to escalation reviewers when a comment is escalated.', recipientsFromPrivileges: true },
   { key: 'FEED_ACTIVITY_TASK', group: 'Feed activity', label: 'New comment on a task', description: 'Sent to task watchers (issuer + assignee) when a comment is posted.', recipientsFromPrivileges: false },
   { key: 'FEED_ACTIVITY_WP', group: 'Feed activity', label: 'New comment on a work package', description: 'Sent to work package watchers (creator + members) when a comment is posted.', recipientsFromPrivileges: false },
+  { key: 'BLUEPRINT_LAUNCHED', group: 'Work packages', label: 'Routine WP auto-launch', description: 'Sent to the blueprint owner and division managers when a recurring blueprint auto-launches a work package, or when an auto-launch fails.', recipientsFromPrivileges: false },
+  { key: 'TASKS_GENERATED', group: 'Work packages', label: 'Tasks auto-generated', description: "Sent to a work package's assigned members when tasks are auto-generated into it, and to a member newly assigned to a work package that already has auto-generated tasks.", recipientsFromPrivileges: false },
 ];
 
 const DEFAULT_VALUE: EventConfigValue = { enabled: true, ccManagers: false };

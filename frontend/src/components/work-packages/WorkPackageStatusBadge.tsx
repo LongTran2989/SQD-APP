@@ -20,8 +20,8 @@ export const WP_STATUS_CONFIG: Record<
     icon: Circle,
   },
   'In Progress': {
-    color: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    dotColor: 'bg-indigo-500',
+    color: 'bg-blue-50 text-blue-700 border-blue-200',
+    dotColor: 'bg-blue-500',
     label: 'In Progress',
     icon: Loader2,
   },

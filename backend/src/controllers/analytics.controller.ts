@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { FINDING_SEVERITIES, FINDING_STATUSES } from '../constants/findingTaxonomy';
 import { hasPrivilege } from '../utils/privilegeAccess';
+import { aggregateStaffEfficiency, RatedTaskInput } from '../utils/staffEfficiencyAggregation';
 
 import { prisma } from '../lib/prisma';
 
@@ -36,16 +37,6 @@ interface TemplateAgg {
   actualCount: number;
   overBudgetCount: number;
   reasonCounts: Map<string, number>;
-}
-
-// Per-staff running accumulator
-interface StaffAgg {
-  userId: number;
-  name: string;
-  ratingSum: number;
-  ratedTaskCount: number;
-  ratioSum: number;
-  ratioCount: number;
 }
 
 // ─── GET /api/analytics/time-booking ─────────────────────────────────────────
@@ -133,9 +124,8 @@ export const getTimeBookingAnalytics = async (req: Request, res: Response): Prom
       },
     });
 
-    // ── STEP 2: Single-pass aggregation for both template efficiency and staff performance ──
+    // ── STEP 2: Single-pass template aggregation ──
     const templateMap = new Map<number, TemplateAgg>();
-    const staffMap = new Map<number, StaffAgg>();
 
     for (const t of tasks) {
       // — Template bucket —
@@ -173,30 +163,6 @@ export const getTimeBookingAnalytics = async (req: Request, res: Response): Prom
           );
         }
       }
-
-      // — Staff bucket (rated tasks with a known assignee only) —
-      if (t.rating !== null && t.assignedToUser !== null) {
-        const uid = t.assignedToUser.id;
-        let sAgg = staffMap.get(uid);
-        if (!sAgg) {
-          sAgg = {
-            userId: uid,
-            name: t.assignedToUser.name,
-            ratingSum: 0,
-            ratedTaskCount: 0,
-            ratioSum: 0,
-            ratioCount: 0,
-          };
-          staffMap.set(uid, sAgg);
-        }
-        sAgg.ratingSum += t.rating;
-        sAgg.ratedTaskCount += 1;
-        // Guard > 0 is consistent with the template over-budget guard above.
-        if (tb && tb.estimatedHours !== null && tb.estimatedHours > 0) {
-          sAgg.ratioSum += tb.totalHours / tb.estimatedHours;
-          sAgg.ratioCount += 1;
-        }
-      }
     }
 
     // ── STEP 3: Finalise template rows ──
@@ -229,13 +195,7 @@ export const getTimeBookingAnalytics = async (req: Request, res: Response): Prom
     });
 
     // ── STEP 4: Finalise staff rows ──
-    const staff = Array.from(staffMap.values()).map((agg) => ({
-      userId: agg.userId,
-      name: agg.name,
-      avgRating: agg.ratedTaskCount > 0 ? round2(agg.ratingSum / agg.ratedTaskCount) : null,
-      ratedTaskCount: agg.ratedTaskCount,
-      avgEfficiencyRatio: agg.ratioCount > 0 ? round2(agg.ratioSum / agg.ratioCount) : null,
-    }));
+    const staff = aggregateStaffEfficiency(tasks as RatedTaskInput[]);
 
     res.status(200).json({ templates, staff, incompleteBookings });
   } catch (error) {

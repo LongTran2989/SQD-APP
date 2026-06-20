@@ -50,11 +50,13 @@ describe('Template Builder & Management', () => {
 
   beforeEach(async () => {
     // Wipe templates and archives
+    await prisma.task.deleteMany({});
     await prisma.templateRevisionArchive.deleteMany({});
     await prisma.template.deleteMany({});
   });
 
   afterAll(async () => {
+    await prisma.task.deleteMany({});
     await prisma.templateRevisionArchive.deleteMany({});
     await prisma.template.deleteMany({});
     await prisma.user.deleteMany({

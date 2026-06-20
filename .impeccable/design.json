@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-19T00:00:00Z",
+  "title": "Design System: SQD-APP",
+  "extensions": {
+    "colorMeta": {
+      "signal-blue":          { "role": "primary",   "displayName": "Signal Blue",          "canonical": "#2563eb", "tonalRamp": ["#1e3a8a","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#93c5fd","#bfdbfe","#eff6ff"] },
+      "signal-blue-hover":    { "role": "primary",   "displayName": "Signal Blue Hover",    "canonical": "#1d4ed8", "tonalRamp": ["#1e3a8a","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#93c5fd","#bfdbfe","#eff6ff"] },
+      "signal-blue-surface":  { "role": "primary",   "displayName": "Signal Blue Surface",  "canonical": "#eff6ff", "tonalRamp": ["#1e3a8a","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#93c5fd","#bfdbfe","#eff6ff"] },
+      "amber-caution":        { "role": "secondary", "displayName": "Amber Caution",        "canonical": "#d97706", "tonalRamp": ["#78350f","#92400e","#b45309","#d97706","#f59e0b","#fbbf24","#fde68a","#fffbeb"] },
+      "amber-caution-surface":{ "role": "secondary", "displayName": "Amber Caution Surface","canonical": "#fffbeb", "tonalRamp": ["#78350f","#92400e","#b45309","#d97706","#f59e0b","#fbbf24","#fde68a","#fffbeb"] },
+      "red-finding":          { "role": "tertiary",  "displayName": "Red Finding",          "canonical": "#dc2626", "tonalRamp": ["#7f1d1d","#991b1b","#b91c1c","#dc2626","#ef4444","#f87171","#fca5a5","#fef2f2"] },
+      "red-finding-surface":  { "role": "tertiary",  "displayName": "Red Finding Surface",  "canonical": "#fef2f2", "tonalRamp": ["#7f1d1d","#991b1b","#b91c1c","#dc2626","#ef4444","#f87171","#fca5a5","#fef2f2"] },
+      "emerald-clear":        { "role": "tertiary",  "displayName": "Emerald Clear",        "canonical": "#059669", "tonalRamp": ["#064e3b","#065f46","#047857","#059669","#10b981","#34d399","#6ee7b7","#ecfdf5"] },
+      "emerald-clear-surface":{ "role": "tertiary",  "displayName": "Emerald Clear Surface","canonical": "#ecfdf5", "tonalRamp": ["#064e3b","#065f46","#047857","#059669","#10b981","#34d399","#6ee7b7","#ecfdf5"] },
+      "ink-primary":          { "role": "neutral",   "displayName": "Ink Primary",          "canonical": "#1e293b", "tonalRamp": ["#0f172a","#1e293b","#334155","#475569","#64748b","#94a3b8","#cbd5e1","#f1f5f9"] },
+      "ink-secondary":        { "role": "neutral",   "displayName": "Ink Secondary",        "canonical": "#475569", "tonalRamp": ["#0f172a","#1e293b","#334155","#475569","#64748b","#94a3b8","#cbd5e1","#f1f5f9"] },
+      "ink-muted":            { "role": "neutral",   "displayName": "Ink Muted",            "canonical": "#94a3b8", "tonalRamp": ["#0f172a","#1e293b","#334155","#475569","#64748b","#94a3b8","#cbd5e1","#f1f5f9"] },
+      "surface-base":         { "role": "neutral",   "displayName": "Surface Base",         "canonical": "#f8fafc", "tonalRamp": ["#0f172a","#1e293b","#334155","#475569","#64748b","#94a3b8","#cbd5e1","#f8fafc"] },
+      "surface-card":         { "role": "neutral",   "displayName": "Surface Card",         "canonical": "#ffffff", "tonalRamp": ["#0f172a","#1e293b","#334155","#475569","#64748b","#94a3b8","#f1f5f9","#ffffff"] },
+      "border-default":       { "role": "neutral",   "displayName": "Border Default",       "canonical": "#e2e8f0", "tonalRamp": ["#334155","#475569","#64748b","#94a3b8","#cbd5e1","#e2e8f0","#f1f5f9","#f8fafc"] },
+      "border-subtle":        { "role": "neutral",   "displayName": "Border Subtle",        "canonical": "#f1f5f9", "tonalRamp": ["#334155","#475569","#64748b","#94a3b8","#cbd5e1","#e2e8f0","#f1f5f9","#f8fafc"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display",  "purpose": "Page-level section headings. One per view." },
+      "headline": { "displayName": "Headline", "purpose": "Widget headings, card titles, modal headings." },
+      "title":    { "displayName": "Title",    "purpose": "Table column headers, sidebar section labels, form group labels." },
+      "body":     { "displayName": "Body",     "purpose": "All prose content, descriptions, task fields. Max 72ch." },
+      "label":    { "displayName": "Label",    "purpose": "Status badge text, role chips, metadata tags. Uppercase only at this size." },
+      "mono":     { "displayName": "Mono",     "purpose": "Employee IDs, task reference numbers, schema field names, log entries." }
+    },
+    "shadows": [
+      { "name": "card-rest",    "value": "none",                                                                       "purpose": "Cards at rest use border-only separation. No shadow." },
+      { "name": "card-hover",   "value": "0 4px 16px rgba(15, 23, 42, 0.08)",                                         "purpose": "Lift on interactive summary widgets on hover only." },
+      { "name": "popover",      "value": "0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06)",      "purpose": "Dropdown menus and popovers floating above page content." },
+      { "name": "modal",        "value": "0 20px 48px rgba(15, 23, 42, 0.18)",                                        "purpose": "Modal dialogs. Appears with backdrop overlay." },
+      { "name": "button-primary","value": "0 2px 6px rgba(37, 99, 235, 0.25)",                                        "purpose": "Primary button resting shadow. Signal Blue glow, the one deliberate use of a coloured shadow." }
+    ],
+    "motion": [
+      { "name": "ease-standard",  "value": "cubic-bezier(0.4, 0, 0.2, 1)",   "purpose": "Default easing for state transitions (color, background, border)." },
+      { "name": "ease-out-quart", "value": "cubic-bezier(0.25, 1, 0.5, 1)",  "purpose": "Entrance animations, expanding panels." },
+      { "name": "duration-fast",  "value": "120ms",                           "purpose": "Focus rings, badge visibility toggles." },
+      { "name": "duration-base",  "value": "150ms",                           "purpose": "Button hover, nav item transitions." },
+      { "name": "duration-slow",  "value": "200ms",                           "purpose": "Modal open/close, dropdown expand." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary action trigger. Signal Blue. Used for form submission, creating records, confirming actions.",
+      "html": "<button class=\"ds-btn-primary\">Sign In to Dashboard</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #2563eb; color: #ffffff; font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 600; line-height: 1; padding: 12px 20px; border: none; border-radius: 12px; box-shadow: 0 2px 6px rgba(37,99,235,0.25); cursor: pointer; transition: background 150ms cubic-bezier(0.4,0,0.2,1), box-shadow 150ms cubic-bezier(0.4,0,0.2,1), transform 100ms cubic-bezier(0.4,0,0.2,1); } .ds-btn-primary:hover { background: #1d4ed8; box-shadow: 0 4px 12px rgba(37,99,235,0.30); } .ds-btn-primary:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; } .ds-btn-primary:active { transform: scale(0.97); } .ds-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; } @media (prefers-reduced-motion: reduce) { .ds-btn-primary { transition: none; transform: none; } }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action. Transparent with border. Used alongside a primary button.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: transparent; color: #475569; font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1; padding: 12px 20px; border: 1px solid #e2e8f0; border-radius: 12px; cursor: pointer; transition: background 150ms cubic-bezier(0.4,0,0.2,1), color 150ms cubic-bezier(0.4,0,0.2,1); } .ds-btn-ghost:hover { background: #f8fafc; color: #1e293b; } .ds-btn-ghost:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; } @media (prefers-reduced-motion: reduce) { .ds-btn-ghost { transition: none; } }"
+    },
+    {
+      "name": "Status Badge — Caution",
+      "kind": "chip",
+      "refersTo": "badge-caution",
+      "description": "Overdue tasks, escalations, warnings. Amber. The most common non-blue colour in the system.",
+      "html": "<span class=\"ds-badge ds-badge-caution\">OVERDUE</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 10px; border-radius: 9999px; white-space: nowrap; } .ds-badge-caution { background: #fffbeb; color: #d97706; }"
+    },
+    {
+      "name": "Status Badge — Finding",
+      "kind": "chip",
+      "refersTo": "badge-finding",
+      "description": "Open findings, errors, validation failures. Red. Highest urgency.",
+      "html": "<span class=\"ds-badge ds-badge-finding\">OPEN</span>",
+      "css": ".ds-badge-finding { background: #fef2f2; color: #dc2626; }"
+    },
+    {
+      "name": "Status Badge — Clear",
+      "kind": "chip",
+      "refersTo": "badge-clear",
+      "description": "Closed findings, completed tasks, cleared work packages. Emerald. Signals resolution.",
+      "html": "<span class=\"ds-badge ds-badge-clear\">CLOSED</span>",
+      "css": ".ds-badge-clear { background: #ecfdf5; color: #059669; }"
+    },
+    {
+      "name": "Status Badge — Active",
+      "kind": "chip",
+      "refersTo": "nav-item-active",
+      "description": "In-progress tasks, active states. Signal Blue surface.",
+      "html": "<span class=\"ds-badge ds-badge-active\">IN PROGRESS</span>",
+      "css": ".ds-badge-active { background: #eff6ff; color: #2563eb; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Standard text field. Used on forms for task data, filters, search.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-field-label\">Staff ID</label><input class=\"ds-input\" type=\"text\" placeholder=\"e.g. VAE00071\" /></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; } .ds-field-label { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 600; color: #1e293b; } .ds-input { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 400; color: #1e293b; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 16px; width: 100%; outline: none; transition: box-shadow 120ms cubic-bezier(0.4,0,0.2,1), border-color 120ms cubic-bezier(0.4,0,0.2,1); } .ds-input::placeholder { color: #94a3b8; } .ds-input:focus { border-color: transparent; box-shadow: 0 0 0 2px #2563eb; } @media (prefers-reduced-motion: reduce) { .ds-input { transition: none; } }"
+    },
+    {
+      "name": "Sidebar Navigation Item",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Left sidebar navigation. Default, hover, and active states. Active state = Signal Blue surface.",
+      "html": "<nav class=\"ds-sidebar-nav\"><a class=\"ds-nav-item\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\"/></svg><span>Dashboard</span></a><a class=\"ds-nav-item ds-nav-item--active\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9 11l3 3L22 4\"/><path d=\"M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11\"/></svg><span>Tasks</span><span class=\"ds-nav-badge\">3</span></a><a class=\"ds-nav-item\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z\"/></svg><span>Work Packages</span></a></nav>",
+      "css": ".ds-sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 16px; } .ds-nav-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 400; color: #475569; text-decoration: none; transition: background 150ms cubic-bezier(0.4,0,0.2,1), color 150ms cubic-bezier(0.4,0,0.2,1); } .ds-nav-item:hover { background: #f8fafc; color: #1e293b; } .ds-nav-item--active { background: #eff6ff; color: #2563eb; font-weight: 500; } .ds-nav-item--active svg { color: #2563eb; } .ds-nav-badge { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 9999px; background: #fffbeb; color: #d97706; font-size: 0.75rem; font-weight: 700; } @media (prefers-reduced-motion: reduce) { .ds-nav-item { transition: none; } }"
+    },
+    {
+      "name": "Metric Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Dashboard summary widget. White card, border, metric value, subtitle, icon with tinted background.",
+      "html": "<div class=\"ds-metric-card\"><div class=\"ds-metric-icon ds-metric-icon--caution\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><polyline points=\"12 6 12 12 16 14\"/></svg></div><div class=\"ds-metric-content\"><div class=\"ds-metric-value\">12</div><div class=\"ds-metric-title\">Pending Tasks</div><div class=\"ds-metric-sub\">Tasks assigned to you</div></div></div>",
+      "css": ".ds-metric-card { display: flex; align-items: flex-start; gap: 16px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; } .ds-metric-icon { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0; } .ds-metric-icon--caution { background: #fffbeb; color: #d97706; } .ds-metric-icon--finding { background: #fef2f2; color: #dc2626; } .ds-metric-icon--blue { background: #eff6ff; color: #2563eb; } .ds-metric-content { display: flex; flex-direction: column; gap: 2px; } .ds-metric-value { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 2rem; font-weight: 700; line-height: 1; color: #1e293b; letter-spacing: -0.02em; } .ds-metric-title { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.9375rem; font-weight: 600; color: #1e293b; margin-top: 4px; } .ds-metric-sub { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.75rem; font-weight: 400; color: #94a3b8; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Technical Manual",
+    "overview": "SQD-APP is designed like a well-structured technical manual: every element earns its place through function, hierarchy is derived from information importance, and no decoration is applied without a structural reason. The system communicates authority through precision — tight typographic rhythm, a disciplined neutral palette, and a status-color vocabulary that fires only when something genuinely demands attention.\n\nThis is a tool used by maintenance technicians and quality officers under operational conditions. It must be readable at a glance, scannable under time pressure, and absolutely unambiguous about status. The interface does not attempt to charm or engage — it informs and enables. Restraint is the aesthetic: the absence of noise is itself the signal that the system is under control.\n\nThe palette is slate-forward with a single Signal Blue accent that marks interactive elements and active states. Status colours — amber for caution, red for findings and overdue, emerald for cleared/complete — appear only in badges and alert surfaces, never as decorative elements.",
+    "keyCharacteristics": [
+      "Dense-but-legible: tight rows, clear typographic hierarchy, breathing room earned through structure not padding",
+      "Status-first: finding counts, overdue indicators, and escalation badges are impossible to miss",
+      "Role-adaptive: the interface surfaces what each role needs",
+      "Flat-by-default: depth is structural not decorative",
+      "Monochromatic discipline: Signal Blue does exactly one job; status colours do theirs; the rest is slate"
+    ],
+    "rules": [
+      { "name": "The One Signal Rule",        "body": "Signal Blue is the only colour used for interactive affordances. No secondary accent, no gradient treatment. If the user needs to act on something, it is blue. If it is not blue, it is for reading.",                 "section": "colors" },
+      { "name": "The Status Firewall Rule",   "body": "Amber, Red, and Emerald are status colours, not brand colours. They appear only on status chips, alert surfaces, badge counts, and system-reported conditions. Prohibited on buttons, illustrations, or any decorative element.", "section": "colors" },
+      { "name": "The Weight-Not-Size Rule",   "body": "Hierarchy is expressed through weight contrast before size contrast. Reserve size increases for genuine level jumps.",                                                                                                           "section": "typography" },
+      { "name": "The Uppercase Ceiling Rule", "body": "Uppercase with tracked letterspacing is limited to Labels (badges, metadata chips). Prohibited on headings, body copy, buttons, or any element larger than 12px.",                                                               "section": "typography" },
+      { "name": "The Flat-By-Default Rule",   "body": "Surfaces are flat at rest. A shadow that appears without a user action (hover, focus, modal open) is a decoration masquerading as structure — forbidden.",                                                                      "section": "elevation" },
+      { "name": "The One-Badge Rule",         "body": "No element carries more than one status badge. If two statuses apply, surface the higher-urgency one. The interface resolves conflicts; it does not pile them on the user.",                                                    "section": "components" }
+    ],
+    "dos": [
+      "Do use Signal Blue exclusively for interactive affordances (buttons, links, active nav, focus rings).",
+      "Do use status colours (Amber, Red, Emerald) only on live system-reported conditions: badge counts, status chips, alert surfaces.",
+      "Do keep body text at Ink Primary (#1e293b) on Surface Card (#ffffff) — confirmed 4.5:1+ contrast.",
+      "Do use Geist Mono for employee IDs, task reference numbers, schema field names, and system-generated identifiers.",
+      "Do express hierarchy through font weight contrast before font size contrast.",
+      "Do keep cards flat at rest. Border separation is structural; shadow at rest is decoration.",
+      "Do verify every new status badge achieves 4.5:1 contrast between text and its surface background.",
+      "Do use text-wrap: balance on page-level headings to prevent orphan lines."
+    ],
+    "donts": [
+      "Don't use gradient text (background-clip: text with a gradient). Prohibited on all elements.",
+      "Don't make the interface look like a consumer SaaS product: no playful blob backgrounds, no pastel accents, no whitespace-as-personality.",
+      "Don't tip into military-ops UI theatre: no dark-mode-by-default, no amber glows, no radar-screen aesthetics.",
+      "Don't use border-left or border-right wider than 1px as a coloured stripe accent on cards, list items, or alerts.",
+      "Don't apply hover shadows to non-interactive data cards.",
+      "Don't use uppercase tracked letters above 12px or on more than one element per component.",
+      "Don't introduce a second accent colour without a specific, documented status role.",
+      "Don't nest cards. Use internal dividers and section headings within a single card instead.",
+      "Don't rely on colour alone to communicate status. Every status badge carries a text label alongside its colour."
+    ]
+  }
+}

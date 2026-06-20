@@ -18,13 +18,13 @@ export default function OrgFeedPage() {
           <Globe className="w-5 h-5 text-blue-600" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Org Feed</h1>
+          <h1 className="text-xl font-bold text-slate-800">Organisation Feed</h1>
           <p className="text-sm text-slate-500">Organisation-wide announcements and escalations.</p>
         </div>
       </div>
 
       <div className="h-[calc(100vh-12rem)]">
-        <FeedPanel scope="ORG" currentUser={user} title="Org Feed" />
+        <FeedPanel scope="ORG" currentUser={user} title="Organisation Feed" />
       </div>
     </div>
   );
