@@ -11,7 +11,6 @@ import {
   Plus,
   Search,
   FolderOpen,
-  Eye,
   CalendarRange,
   Users,
 } from 'lucide-react';
@@ -229,7 +228,6 @@ export default function WorkPackageListPage() {
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Assigned</th>
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tasks</th>
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -244,7 +242,13 @@ export default function WorkPackageListPage() {
 
                     {/* Name */}
                     <td className="p-4 align-middle max-w-xs">
-                      <div className="font-medium text-slate-800 truncate">{wp.name}</div>
+                      <Link
+                        href={`/dashboard/work-packages/${wp.id}`}
+                        title={wp.name}
+                        className="font-medium text-slate-800 hover:text-blue-600 truncate block focus:outline-none focus:underline"
+                      >
+                        {wp.name}
+                      </Link>
                       {wp.creator && (
                         <div className="text-xs text-slate-400 mt-0.5">by {wp.creator.name}</div>
                       )}
@@ -290,18 +294,6 @@ export default function WorkPackageListPage() {
                       <WorkPackageStatusBadge status={wp.computedStatus} />
                     </td>
 
-                    {/* Actions */}
-                    <td className="p-4 align-middle">
-                      <div className="flex items-center justify-end">
-                        <Link
-                          href={`/dashboard/work-packages/${wp.id}`}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="View Work Package"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Link>
-                      </div>
-                    </td>
                   </tr>
                 ))}
               </tbody>

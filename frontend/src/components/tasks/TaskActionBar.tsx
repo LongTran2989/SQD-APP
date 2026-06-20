@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { TaskEnriched, User } from '../../types';
 import { FINAL_TASK_STATUSES } from '../../constants/taskStatus';
 import StarRating from './StarRating';
@@ -22,7 +22,6 @@ import {
 } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import {
-  Zap,
   Send,
   CheckCircle2,
   MessageSquare,
@@ -204,6 +203,15 @@ export default function TaskActionBar({
   const [loading, setLoading] = useState<string | null>(null);
   const [allUsers, setAllUsers] = useState<UserOption[]>([]);
 
+  // Self-assign confirmation: first click arms a 3s window, second click
+  // commits. Claiming the wrong task creates an audit trail under the user's
+  // name, so this isn't a single-click action.
+  const [confirmingSelfAssign, setConfirmingSelfAssign] = useState(false);
+  const selfAssignConfirmTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (selfAssignConfirmTimeout.current) clearTimeout(selfAssignConfirmTimeout.current);
+  }, []);
+
   // Review
   const [showReviewInput, setShowReviewInput] = useState<'follow-up' | 'reject' | null>(null);
   const [reviewComment, setReviewComment] = useState('');
@@ -326,6 +334,17 @@ export default function TaskActionBar({
       toast.success('Task claimed — you are now the assignee');
       return r;
     });
+
+  const handlePerformClick = () => {
+    if (selfAssignConfirmTimeout.current) clearTimeout(selfAssignConfirmTimeout.current);
+    if (confirmingSelfAssign) {
+      setConfirmingSelfAssign(false);
+      handleSelfAssign();
+      return;
+    }
+    setConfirmingSelfAssign(true);
+    selfAssignConfirmTimeout.current = setTimeout(() => setConfirmingSelfAssign(false), 3000);
+  };
 
   const handleAssign = () => {
     if (!assignUserId) { toast.error('Please select a user to assign'); return; }
@@ -533,12 +552,16 @@ export default function TaskActionBar({
             </p>
             <ActionButton
               id="btn-self-assign"
-              onClick={handleSelfAssign}
+              onClick={handlePerformClick}
               disabled={loading === 'self-assign'}
-              variant="primary"
-              icon={Zap}
+              variant={confirmingSelfAssign ? 'warning' : 'primary'}
+              icon={UserCheck}
             >
-              {loading === 'self-assign' ? 'Claiming...' : 'PERFORM THIS TASK'}
+              {loading === 'self-assign'
+                ? 'Claiming...'
+                : confirmingSelfAssign
+                ? 'Confirm?'
+                : 'Perform This Task'}
             </ActionButton>
           </div>
         )}

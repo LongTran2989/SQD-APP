@@ -14,7 +14,6 @@ import {
   Archive, 
   Search,
   Filter,
-  Eye,
   Edit,
   Trash2,
   RotateCcw
@@ -193,7 +192,13 @@ export default function TemplateListPage() {
                         )}
                       </td>
                       <td className="p-4 align-middle">
-                        <div className="font-semibold text-slate-800">{template.title}</div>
+                        <Link
+                          href={`/dashboard/templates/${template.id}`}
+                          title={template.title}
+                          className="font-semibold text-slate-800 hover:text-blue-600 focus:outline-none focus:underline"
+                        >
+                          {template.title}
+                        </Link>
                         <div className="flex items-center gap-2 mt-1">
                           {template.hasPendingChanges && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">
@@ -228,13 +233,6 @@ export default function TemplateListPage() {
                       </td>
                       <td className="p-4 align-middle text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Link
-                            href={`/dashboard/templates/${template.id}`}
-                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                            title="View"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Link>
                           {hasPrivilege && (
                             <>
                               {template.status !== 'Archived' && (

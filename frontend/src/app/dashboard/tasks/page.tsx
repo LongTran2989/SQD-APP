@@ -7,6 +7,7 @@ import { useAuthStore } from '../../../store/authStore';
 import { TaskEnriched, TaskStatus, DeadlineStatus } from '../../../types';
 import { getTasks, getMyTasks, getUnassignedTasks, selfAssignTask } from '../../../api/taskApi';
 import { updateMyPreferences } from '../../../api/userApi';
+import { formatRelativeTime } from '../../../utils/feedHelpers';
 import TaskStatusBadge, { STATUS_CONFIG } from '../../../components/tasks/TaskStatusBadge';
 import toast from 'react-hot-toast';
 import {
@@ -14,10 +15,11 @@ import {
   Search,
   ClipboardList,
   AlertTriangle,
-  Eye,
-  Zap,
+  UserCheck,
   Columns3,
   ChevronDown,
+  ArrowUpDown,
+  ChevronUp,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -31,10 +33,12 @@ const ALL_STATUSES: TaskStatus[] = [
   'Follow-up Required', 'Closed', 'Rejected', 'Terminated', 'Inactive',
 ];
 
-// Toggleable list columns (Actions is always shown). Order here = render order.
+const FILTERS_STORAGE_KEY = 'sqd:taskListFilters';
+
+// Toggleable list columns (Title and Actions are always shown — Title is the
+// row's only navigation entry point now that the separate View icon is gone).
 const TASK_COLUMNS: { key: string; label: string }[] = [
   { key: 'taskId', label: 'Task ID' },
-  { key: 'title', label: 'Title' },
   { key: 'status', label: 'Status' },
   { key: 'assignee', label: 'Assignee' },
   { key: 'issuer', label: 'Issuer' },
@@ -46,11 +50,15 @@ const TASK_COLUMNS: { key: string; label: string }[] = [
 const DEFAULT_HIDDEN_COLUMNS = ['taskId', 'division'];
 const DEFAULT_VISIBLE_COLUMNS = TASK_COLUMNS.map((c) => c.key).filter((k) => !DEFAULT_HIDDEN_COLUMNS.includes(k));
 
-// Tiered deadline badge styling: increasing urgency Yellow → Orange → Red.
+type SortColumn = 'taskId' | 'title' | 'status' | 'deadline' | 'lastActivity';
+type DueFilter = 'today' | 'week' | null;
+
+// Tiered deadline badge styling, on the same two-tier severity vocabulary as
+// TaskStatusBadge: Caution (Amber) for approaching, Finding (Red) for overdue.
 const DEADLINE_BADGE: Record<Exclude<DeadlineStatus, null>, { label: string; className: string }> = {
-  'Due Soon':  { label: 'DUE SOON',  className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
-  'Due Today': { label: 'DUE TODAY', className: 'bg-orange-50 text-orange-700 border-orange-200' },
-  'Overdue':   { label: 'OVERDUE',   className: 'bg-red-50 text-red-600 border-red-200' },
+  'Due Soon':  { label: 'DUE SOON',  className: 'bg-amber-caution-surface text-amber-caution border-amber-caution/20' },
+  'Due Today': { label: 'DUE TODAY', className: 'bg-amber-caution-surface text-amber-caution border-amber-caution/20' },
+  'Overdue':   { label: 'OVERDUE',   className: 'bg-red-finding-surface text-red-finding border-red-finding/20' },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -58,6 +66,19 @@ const DEADLINE_BADGE: Record<Exclude<DeadlineStatus, null>, { label: string; cla
 function formatDeadline(deadline: string | null): string {
   if (!deadline) return '—';
   return new Date(deadline).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function toInputDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function startOfDay(d: Date): Date {
+  const copy = new Date(d);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -77,6 +98,8 @@ export default function TaskListPage() {
   // Close either dropdown when the user clicks outside of it.
   const colMenuRef = useRef<HTMLDivElement>(null);
   const statusMenuRef = useRef<HTMLDivElement>(null);
+  const colButtonRef = useRef<HTMLButtonElement>(null);
+  const statusButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!showColMenu && !showStatusMenu) return;
     const handleClick = (e: MouseEvent) => {
@@ -84,8 +107,17 @@ export default function TaskListPage() {
       if (colMenuRef.current && !colMenuRef.current.contains(target)) setShowColMenu(false);
       if (statusMenuRef.current && !statusMenuRef.current.contains(target)) setShowStatusMenu(false);
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showColMenu) { setShowColMenu(false); colButtonRef.current?.focus(); }
+      if (showStatusMenu) { setShowStatusMenu(false); statusButtonRef.current?.focus(); }
+    };
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [showColMenu, showStatusMenu]);
 
   const toggleColumn = async (key: string) => {
@@ -109,15 +141,80 @@ export default function TaskListPage() {
   const [endDate, setEndDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [dueFilter, setDueFilter] = useState<DueFilter>(null);
+
+  // ── Sorting ──
+  const [sortColumn, setSortColumn] = useState<SortColumn>('deadline');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleSort = (col: SortColumn) => {
+    if (sortColumn === col) setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortColumn(col); setSortDirection('asc'); }
+  };
+
+  const renderSortIcon = (col: SortColumn) => {
+    if (sortColumn !== col) return <ArrowUpDown className="w-3 h-3 ml-1 inline text-slate-300" />;
+    return sortDirection === 'asc'
+      ? <ChevronUp className="w-3 h-3 ml-1 inline text-signal-blue" />
+      : <ChevronDown className="w-3 h-3 ml-1 inline text-signal-blue" />;
+  };
+
+  // Quick presets for the "Created" date range — fill the existing inputs, no new filter dimension.
+  const applyCreatedPreset = (preset: 'today' | 'last3' | 'week') => {
+    const today = startOfDay(new Date());
+    const start = new Date(today);
+    if (preset === 'last3') start.setDate(start.getDate() - 2);
+    else if (preset === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    setStartDate(toInputDate(start));
+    setEndDate(toInputDate(today));
+  };
 
   // ── Data state ──
   const [tasks, setTasks] = useState<TaskEnriched[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [selfAssigning, setSelfAssigning] = useState<number | null>(null);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Persisted filters: hydrate once on mount ──
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(FILTERS_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved.activeTab) setActiveTab(saved.activeTab);
+      if (saved.statusFilters) setStatusFilters(saved.statusFilters);
+      if (saved.assigneeFilter !== undefined) setAssigneeFilter(saved.assigneeFilter);
+      if (saved.startDate) setStartDate(saved.startDate);
+      if (saved.endDate) setEndDate(saved.endDate);
+      if (saved.overdueOnly) setOverdueOnly(saved.overdueOnly);
+      if (saved.dueFilter) setDueFilter(saved.dueFilter);
+    } catch {
+      // Corrupt or unavailable storage — fall back to defaults silently.
+    }
+  }, []);
+
+  // ── Persisted filters: save on every change (search query excluded — it's a one-off lookup, not a saved view) ──
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify({
+        activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter,
+      }));
+    } catch {
+      // sessionStorage unavailable (private browsing, etc.) — filters just won't persist.
+    }
+  }, [activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter]);
+
+  // Clear any pending self-assign confirmation timeout on unmount.
+  useEffect(() => () => {
+    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+  }, []);
 
   // ── Fetch on tab change ──
   const fetchTasks = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       let data: TaskEnriched[];
       if (activeTab === 'unassigned') data = await getUnassignedTasks();
@@ -125,7 +222,7 @@ export default function TaskListPage() {
       else data = await getTasks();
       setTasks(data);
     } catch {
-      toast.error('Failed to load tasks');
+      setFetchError('Failed to load tasks. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -134,6 +231,40 @@ export default function TaskListPage() {
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
+
+  // ── Tab badges ──
+  // Unassigned: every unassigned task is itself the urgency signal.
+  // My Tasks / All Tasks: count of tasks needing attention — overdue, due
+  // today, or awaiting follow-up. Each badge is fetched once on mount (for
+  // whichever tabs aren't the active one) so it's visible no matter which
+  // tab the user is currently viewing, then kept in sync from the live list
+  // whenever that tab itself is the one being viewed.
+  const countNeedsAttention = (list: TaskEnriched[]) =>
+    list.filter((t) => t.deadlineStatus === 'Overdue' || t.deadlineStatus === 'Due Today' || t.status === 'Follow-up Required').length;
+
+  const [unassignedCount, setUnassignedCount] = useState<number | null>(null);
+  const [myAttentionCount, setMyAttentionCount] = useState<number | null>(null);
+  const [allAttentionCount, setAllAttentionCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'unassigned') {
+      getUnassignedTasks().then((data) => setUnassignedCount(data.length)).catch(() => {});
+    }
+    if (activeTab !== 'my-tasks') {
+      getMyTasks().then((data) => setMyAttentionCount(countNeedsAttention(data))).catch(() => {});
+    }
+    if (activeTab !== 'all') {
+      getTasks().then((data) => setAllAttentionCount(countNeedsAttention(data))).catch(() => {});
+    }
+    // Mount-only: each tab's own badge stays current via the sync effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'unassigned') setUnassignedCount(tasks.length);
+    else if (activeTab === 'my-tasks') setMyAttentionCount(countNeedsAttention(tasks));
+    else if (activeTab === 'all') setAllAttentionCount(countNeedsAttention(tasks));
+  }, [activeTab, tasks]);
 
   // Distinct assignees present in the current list (for the assignee dropdown).
   const assigneeOptions = Array.from(
@@ -151,6 +282,14 @@ export default function TaskListPage() {
       if (new Date(t.createdAt) > end) return false;
     }
     if (overdueOnly && !t.isOverdue) return false;
+    if (dueFilter) {
+      if (!t.deadline) return false;
+      const due = new Date(t.deadline);
+      const todayStart = startOfDay(new Date());
+      const rangeEnd = new Date(todayStart);
+      rangeEnd.setDate(rangeEnd.getDate() + (dueFilter === 'today' ? 1 : 7));
+      if (due < todayStart || due >= rangeEnd) return false;
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const title = (t.schemaSnapshot as any)?.[0]?.label ?? t.template?.title ?? '';
@@ -161,6 +300,35 @@ export default function TaskListPage() {
       );
     }
     return true;
+  });
+
+  // ── Sort (applied after filtering, before render) ──
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
+    let comparison = 0;
+    switch (sortColumn) {
+      case 'taskId':
+        comparison = a.taskId.localeCompare(b.taskId);
+        break;
+      case 'title':
+        comparison = (a.template?.title ?? '').localeCompare(b.template?.title ?? '');
+        break;
+      case 'status':
+        comparison = a.status.localeCompare(b.status);
+        break;
+      case 'deadline':
+        if (!a.deadline && !b.deadline) comparison = 0;
+        else if (!a.deadline) comparison = 1;
+        else if (!b.deadline) comparison = -1;
+        else comparison = new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+        break;
+      case 'lastActivity':
+        if (!a.lastActivityAt && !b.lastActivityAt) comparison = 0;
+        else if (!a.lastActivityAt) comparison = 1;
+        else if (!b.lastActivityAt) comparison = -1;
+        else comparison = new Date(a.lastActivityAt).getTime() - new Date(b.lastActivityAt).getTime();
+        break;
+    }
+    return sortDirection === 'asc' ? comparison : -comparison;
   });
 
   // ── Self-assign handler ──
@@ -176,14 +344,23 @@ export default function TaskListPage() {
     }
   };
 
-  // ── Tab click resets status filter ──
+  // First click arms a 3-second confirmation window; a second click within
+  // that window commits the assignment. Claiming the wrong task creates an
+  // audit trail under the user's name, so this isn't a single-click action.
+  const handlePerformClick = (task: TaskEnriched) => {
+    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+    if (confirmingId === task.id) {
+      setConfirmingId(null);
+      handleSelfAssign(task);
+      return;
+    }
+    setConfirmingId(task.id);
+    confirmTimeoutRef.current = setTimeout(() => setConfirmingId(null), 3000);
+  };
+
+  // ── Tab click switches the data source; filters persist across tabs ──
   const handleTabChange = (tab: ActiveTab) => {
     setActiveTab(tab);
-    setStatusFilters([]);
-    setAssigneeFilter('');
-    setStartDate('');
-    setEndDate('');
-    setOverdueOnly(false);
     setShowStatusMenu(false);
   };
 
@@ -202,7 +379,7 @@ export default function TaskListPage() {
         {canCreateTask && (
           <Link
             href="/dashboard/tasks/new"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-signal-blue hover:bg-signal-blue-hover text-white font-semibold rounded-xl shadow-[0_2px_6px_rgba(37,99,235,0.25)] transition-all"
           >
             <Plus className="w-5 h-5" />
             Create Task
@@ -211,24 +388,29 @@ export default function TaskListPage() {
       </div>
 
       {/* Tab Bar */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="flex border-b border-slate-100">
+      <div className="bg-white rounded-2xl border border-slate-100">
+        <div className="flex border-b border-slate-100 rounded-t-2xl overflow-hidden">
           {([
-            { key: 'unassigned', label: 'Unassigned' },
-            { key: 'my-tasks', label: 'My Tasks' },
-            { key: 'all', label: 'All Tasks' },
-          ] as { key: ActiveTab; label: string }[]).map((tab) => (
+            { key: 'unassigned', label: 'Unassigned', count: unassignedCount },
+            { key: 'my-tasks', label: 'My Tasks', count: myAttentionCount },
+            { key: 'all', label: 'All Tasks', count: allAttentionCount },
+          ] as { key: ActiveTab; label: string; count: number | null }[]).map((tab) => (
             <button
               key={tab.key}
               id={`tab-${tab.key}`}
               onClick={() => handleTabChange(tab.key)}
-              className={`px-6 py-3.5 text-sm font-semibold border-b-2 transition-colors ${
+              className={`inline-flex items-center gap-2 px-6 py-3.5 text-sm font-semibold border-b-2 transition-colors ${
                 activeTab === tab.key
-                  ? 'border-blue-600 text-blue-700 bg-blue-50/50'
+                  ? 'border-signal-blue text-signal-blue bg-signal-blue-surface/50'
                   : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
               }`}
             >
               {tab.label}
+              {!!tab.count && (
+                <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[11px] font-bold bg-amber-caution-surface text-amber-caution">
+                  {tab.count}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -237,6 +419,7 @@ export default function TaskListPage() {
         <div className="p-4 flex flex-col sm:flex-row gap-3 border-b border-slate-50">
           {/* Search */}
           <div className="relative flex-1">
+            <label htmlFor="task-search" className="sr-only">Search by Task ID or title</label>
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               id="task-search"
@@ -244,7 +427,7 @@ export default function TaskListPage() {
               placeholder="Search by Task ID or title..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-signal-blue transition-all"
             />
           </div>
 
@@ -252,10 +435,14 @@ export default function TaskListPage() {
           <div className="relative" ref={statusMenuRef}>
             <button
               id="status-filter-button"
+              ref={statusButtonRef}
               onClick={() => setShowStatusMenu((v) => !v)}
+              aria-haspopup="true"
+              aria-expanded={showStatusMenu}
+              aria-controls="status-filter-menu"
               className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition-colors ${
                 statusFilters.length > 0
-                  ? 'bg-blue-50 text-blue-700 border-blue-300'
+                  ? 'bg-signal-blue-surface text-signal-blue border-signal-blue/30'
                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
             >
@@ -267,14 +454,19 @@ export default function TaskListPage() {
               <ChevronDown className="w-4 h-4" />
             </button>
             {showStatusMenu && (
-              <div className="absolute left-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2">
-                <label className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm font-semibold text-slate-700">
+              <div
+                id="status-filter-menu"
+                role="group"
+                aria-label="Filter by status"
+                className="absolute left-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2"
+              >
+                <label className="flex items-center gap-2 px-2 py-2.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm font-semibold text-slate-700 min-h-11">
                   <input
                     id="status-filter-all"
                     type="checkbox"
                     checked={statusFilters.length === 0}
                     onChange={() => setStatusFilters([])}
-                    className="w-4 h-4 text-blue-600 rounded"
+                    className="w-4 h-4 text-signal-blue rounded"
                   />
                   All Statuses
                 </label>
@@ -284,7 +476,7 @@ export default function TaskListPage() {
                   return (
                     <label
                       key={s}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm"
+                      className="flex items-center gap-2 px-2 py-2.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm min-h-11"
                     >
                       <input
                         id={`status-filter-${s.replace(/\s+/g, '-').toLowerCase()}`}
@@ -295,7 +487,7 @@ export default function TaskListPage() {
                             prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
                           )
                         }
-                        className="w-4 h-4 text-blue-600 rounded"
+                        className="w-4 h-4 text-signal-blue rounded"
                       />
                       <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${cfg.color}`}>
                         {cfg.label}
@@ -312,7 +504,7 @@ export default function TaskListPage() {
             id="overdue-toggle"
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer select-none transition-colors ${
               overdueOnly
-                ? 'bg-red-50 text-red-700 border-red-200'
+                ? 'bg-red-finding-surface text-red-finding border-red-finding/20'
                 : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
             }`}
           >
@@ -325,29 +517,51 @@ export default function TaskListPage() {
             <AlertTriangle className="w-3.5 h-3.5" />
             Overdue Only
           </label>
+
+          {/* Due quick filter — upcoming deadlines, separate dimension from Overdue */}
+          <div className="flex items-center gap-1.5" role="group" aria-label="Filter by upcoming deadline">
+            {([
+              { key: 'today' as const, label: 'Due Today' },
+              { key: 'week' as const, label: 'Due This Week' },
+            ]).map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setDueFilter((prev) => (prev === opt.key ? null : opt.key))}
+                aria-pressed={dueFilter === opt.key}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                  dueFilter === opt.key
+                    ? 'bg-amber-caution-surface text-amber-caution border-amber-caution/20'
+                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Secondary filters: assignee + created-date range */}
         <div className="px-4 pb-4 flex flex-col sm:flex-row gap-3 border-b border-slate-50">
+          <label htmlFor="assignee-filter" className="sr-only">Filter by assignee</label>
           <select
             id="assignee-filter"
             value={assigneeFilter}
             onChange={(e) => setAssigneeFilter(e.target.value ? Number(e.target.value) : '')}
-            className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-signal-blue"
           >
             <option value="">All assignees</option>
             {assigneeOptions.map((a) => (
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <label className="text-xs font-semibold text-slate-500" htmlFor="filter-start-date">Created</label>
             <input
               id="filter-start-date"
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-signal-blue"
             />
             <span className="text-slate-400 text-sm">→</span>
             <input
@@ -355,29 +569,53 @@ export default function TaskListPage() {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-signal-blue"
             />
+            <div className="flex items-center gap-1" role="group" aria-label="Created date quick presets">
+              {([
+                { key: 'today' as const, label: 'Today' },
+                { key: 'last3' as const, label: 'Last 3 Days' },
+                { key: 'week' as const, label: 'This Week' },
+              ]).map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => applyCreatedPreset(opt.key)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-500 border border-slate-200 hover:border-slate-400 hover:text-slate-700 transition-colors"
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Column selector */}
           <div className="relative sm:ml-auto" ref={colMenuRef}>
             <button
               id="columns-button"
+              ref={colButtonRef}
               onClick={() => setShowColMenu((v) => !v)}
+              aria-haspopup="true"
+              aria-expanded={showColMenu}
+              aria-controls="columns-menu"
               className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:border-slate-400"
             >
               <Columns3 className="w-4 h-4" />
               Columns
             </button>
             {showColMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2">
+              <div
+                id="columns-menu"
+                role="group"
+                aria-label="Toggle visible columns"
+                className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2"
+              >
                 {TASK_COLUMNS.map((c) => (
-                  <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm">
+                  <label key={c.key} className="flex items-center gap-2 px-2 py-2.5 rounded-lg hover:bg-slate-50 cursor-pointer text-sm min-h-11">
                     <input
                       type="checkbox"
                       checked={isColVisible(c.key)}
                       onChange={() => toggleColumn(c.key)}
-                      className="w-4 h-4 text-blue-600 rounded"
+                      className="w-4 h-4 text-signal-blue rounded"
                     />
                     {c.label}
                   </label>
@@ -389,11 +627,23 @@ export default function TaskListPage() {
 
         {/* Table */}
         {loading ? (
-          <div className="flex items-center justify-center h-48">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
+          <div className="flex items-center justify-center h-48 rounded-b-2xl overflow-hidden">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-signal-blue" />
+          </div>
+        ) : fetchError ? (
+          <div className="p-12 text-center rounded-b-2xl overflow-hidden">
+            <AlertTriangle className="w-12 h-12 text-red-finding/40 mx-auto mb-4" />
+            <h2 className="text-lg font-semibold text-slate-700 mb-2">Couldn&apos;t load tasks</h2>
+            <p className="text-slate-500 mb-4">{fetchError}</p>
+            <button
+              onClick={fetchTasks}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-signal-blue hover:bg-signal-blue-hover text-white text-sm font-semibold rounded-xl transition-all"
+            >
+              Try again
+            </button>
           </div>
         ) : filteredTasks.length === 0 ? (
-          <div className="p-12 text-center">
+          <div className="p-12 text-center rounded-b-2xl overflow-hidden">
             <ClipboardList className="w-12 h-12 text-slate-300 mx-auto mb-4" />
             <h2 className="text-lg font-semibold text-slate-700 mb-2">
               {tasks.length === 0 ? 'No tasks found' : 'No matching tasks'}
@@ -407,23 +657,51 @@ export default function TaskListPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-b-2xl">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  {isColVisible('taskId') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Task ID</th>}
-                  {isColVisible('title') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Title</th>}
-                  {isColVisible('status') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>}
+                  {isColVisible('taskId') && (
+                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                      <button onClick={() => handleSort('taskId')} className="inline-flex items-center hover:text-slate-700 transition-colors">
+                        Task ID{renderSortIcon('taskId')}
+                      </button>
+                    </th>
+                  )}
+                  <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    <button onClick={() => handleSort('title')} className="inline-flex items-center hover:text-slate-700 transition-colors">
+                      Title{renderSortIcon('title')}
+                    </button>
+                  </th>
+                  {isColVisible('status') && (
+                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                      <button onClick={() => handleSort('status')} className="inline-flex items-center hover:text-slate-700 transition-colors">
+                        Status{renderSortIcon('status')}
+                      </button>
+                    </th>
+                  )}
                   {isColVisible('assignee') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Assignee</th>}
                   {isColVisible('issuer') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Issuer</th>}
-                  {isColVisible('deadline') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Deadline</th>}
+                  {isColVisible('deadline') && (
+                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                      <button onClick={() => handleSort('deadline')} className="inline-flex items-center hover:text-slate-700 transition-colors">
+                        Deadline{renderSortIcon('deadline')}
+                      </button>
+                    </th>
+                  )}
                   {isColVisible('division') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Division</th>}
-                  {isColVisible('lastActivity') && <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Last Activity</th>}
+                  {isColVisible('lastActivity') && (
+                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                      <button onClick={() => handleSort('lastActivity')} className="inline-flex items-center hover:text-slate-700 transition-colors">
+                        Last Activity{renderSortIcon('lastActivity')}
+                      </button>
+                    </th>
+                  )}
                   <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredTasks.map((task) => (
+                {sortedTasks.map((task) => (
                   <tr key={task.id} className="hover:bg-slate-50/80 transition-colors group">
                     {/* Task ID */}
                     {isColVisible('taskId') && (
@@ -434,19 +712,23 @@ export default function TaskListPage() {
                     </td>
                     )}
 
-                    {/* Title */}
-                    {isColVisible('title') && (
+                    {/* Title — the row's primary link to the detail page (Eye icon removed) */}
                     <td className="p-4 align-middle max-w-xs">
-                      <div className="font-medium text-slate-800 truncate">
+                      <Link
+                        href={`/dashboard/tasks/${task.id}`}
+                        id={`view-task-${task.id}`}
+                        title={task.template?.title ?? undefined}
+                        aria-label={`View task ${task.taskId}`}
+                        className="font-medium text-slate-800 hover:text-signal-blue truncate block focus:outline-none focus:underline"
+                      >
                         {task.template?.title ?? '—'}
-                      </div>
+                      </Link>
                       {task.wp && (
                         <div className="text-xs text-slate-400 mt-0.5 truncate">
                           WP: {task.wp.wpId}
                         </div>
                       )}
                     </td>
-                    )}
 
                     {/* Status + overdue badge */}
                     {isColVisible('status') && (
@@ -467,7 +749,7 @@ export default function TaskListPage() {
                     {isColVisible('assignee') && (
                     <td className="p-4 align-middle text-sm text-slate-600">
                       {task.assignedToUser?.name ?? (
-                        <span className="text-slate-400 italic">Unassigned</span>
+                        <span className="text-ink-secondary italic">Unassigned</span>
                       )}
                     </td>
                     )}
@@ -483,9 +765,9 @@ export default function TaskListPage() {
                     {isColVisible('deadline') && (
                     <td className="p-4 align-middle text-sm">
                       <span className={
-                        task.deadlineStatus === 'Overdue' ? 'text-red-600 font-semibold'
-                        : task.deadlineStatus === 'Due Today' ? 'text-orange-600 font-semibold'
-                        : task.deadlineStatus === 'Due Soon' ? 'text-yellow-700 font-medium'
+                        task.deadlineStatus === 'Overdue' ? 'text-red-finding font-semibold'
+                        : task.deadlineStatus === 'Due Today' ? 'text-amber-caution font-semibold'
+                        : task.deadlineStatus === 'Due Soon' ? 'text-amber-caution font-medium'
                         : 'text-slate-600'
                       }>
                         {formatDeadline(task.deadline)}
@@ -500,40 +782,54 @@ export default function TaskListPage() {
                     </td>
                     )}
 
-                    {/* Last Activity */}
+                    {/* Last Activity — up to 2 most recent feed-post summaries, relative time */}
                     {isColVisible('lastActivity') && (
-                    <td className="p-4 align-middle text-sm text-slate-500">
-                      {task.lastActivityAt ? formatDeadline(task.lastActivityAt) : '—'}
+                    <td className="p-4 align-middle text-sm">
+                      {task.recentActivities && task.recentActivities.length > 0 ? (
+                        <div className="space-y-0.5 max-w-[220px]">
+                          {task.recentActivities.map((a, i) => (
+                            <div key={i} className="truncate text-slate-600">
+                              <span className="truncate">{a.content}</span>
+                              <span className="text-slate-400"> — {formatRelativeTime(a.createdAt)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-slate-500">
+                          {task.lastActivityAt ? formatRelativeTime(task.lastActivityAt) : '—'}
+                        </span>
+                      )}
                     </td>
                     )}
 
-                    {/* Actions */}
+                    {/* Actions — title is now the row's view link; this column is
+                        self-assign only, and empty otherwise. */}
                     <td className="p-4 align-middle">
                       <div className="flex items-center justify-end gap-2">
-                        {/* View */}
-                        <Link
-                          href={`/dashboard/tasks/${task.id}`}
-                          id={`view-task-${task.id}`}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="View Task"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Link>
-
-                        {/* PERFORM THIS TASK — Unassigned tab only */}
+                        {/* PERFORM THIS TASK — Unassigned tab only. First click arms a
+                            3s confirmation window; second click commits. */}
                         {activeTab === 'unassigned' && task.status === 'Unassigned' && (
                           <button
                             id={`self-assign-${task.id}`}
-                            onClick={() => handleSelfAssign(task)}
+                            onClick={() => handlePerformClick(task)}
                             disabled={selfAssigning === task.id}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition-all"
+                            aria-label={
+                              confirmingId === task.id
+                                ? `Confirm assigning task ${task.taskId} to yourself`
+                                : `Perform task ${task.taskId}`
+                            }
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 disabled:opacity-60 text-xs font-semibold rounded-lg transition-all ${
+                              confirmingId === task.id
+                                ? 'bg-amber-caution-surface text-amber-caution border border-amber-caution/30'
+                                : 'bg-signal-blue hover:bg-signal-blue-hover text-white'
+                            }`}
                           >
                             {selfAssigning === task.id ? (
-                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
                             ) : (
-                              <Zap className="w-3.5 h-3.5" />
+                              <UserCheck className="w-3.5 h-3.5" />
                             )}
-                            PERFORM THIS TASK
+                            {confirmingId === task.id ? 'Confirm?' : 'Perform This Task'}
                           </button>
                         )}
                       </div>

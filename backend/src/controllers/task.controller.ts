@@ -246,6 +246,45 @@ async function getLastActivityMap(taskIds: number[]): Promise<Map<number, Date>>
   return map;
 }
 
+type RecentActivity = { content: string; createdAt: Date; author: { id: number; name: string | null } | null };
+
+/**
+ * Batched "recent activities" lookup: the `limit` most recent FeedPost entries
+ * per task, for the list-page activity preview. Fetches all matching posts in
+ * one query (covered by the existing [scope, scopeId, createdAt] index) and
+ * groups/slices in JS — Postgres has no simple top-N-per-group without a raw
+ * SQL window function, and the per-task volume here doesn't warrant one.
+ */
+async function getRecentActivitiesMap(taskIds: number[], limit = 2): Promise<Map<number, RecentActivity[]>> {
+  const map = new Map<number, RecentActivity[]>();
+  if (taskIds.length === 0) return map;
+
+  const posts = await prisma.feedPost.findMany({
+    where: { scope: 'TASK', scopeId: { in: taskIds } },
+    orderBy: [{ scopeId: 'asc' }, { createdAt: 'desc' }],
+    select: { scopeId: true, content: true, createdAt: true, authorId: true }
+  });
+
+  const authorIds = [...new Set(posts.map((p) => p.authorId).filter((id): id is number => id != null))];
+  const authors = authorIds.length > 0
+    ? await prisma.user.findMany({ where: { id: { in: authorIds } }, select: { id: true, name: true } })
+    : [];
+  const authorMap = new Map(authors.map((a) => [a.id, a.name]));
+
+  for (const p of posts) {
+    if (p.scopeId == null) continue;
+    const bucket = map.get(p.scopeId) ?? [];
+    if (bucket.length >= limit) continue;
+    bucket.push({
+      content: p.content,
+      createdAt: p.createdAt,
+      author: p.authorId ? { id: p.authorId, name: authorMap.get(p.authorId) ?? null } : null
+    });
+    map.set(p.scopeId, bucket);
+  }
+  return map;
+}
+
 /**
  * Returns the standard task include object for consistent response shapes.
  * All scalar fields (incl. responseActionType, requiresDirectorApproval) are
@@ -370,11 +409,14 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
       include: taskInclude()
     });
 
-    const lastActivityMap = await getLastActivityMap(tasks.map(t => t.id));
+    const taskIds = tasks.map(t => t.id);
+    const lastActivityMap = await getLastActivityMap(taskIds);
+    const recentActivitiesMap = await getRecentActivitiesMap(taskIds);
 
     const result = tasks.map(t => ({
       ...enrichTask(t, req.user!),
-      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt
+      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt,
+      recentActivities: recentActivitiesMap.get(t.id) ?? []
     }));
 
     res.json(result);
@@ -402,7 +444,15 @@ export const getMyTasks = async (req: Request, res: Response): Promise<void> => 
       include: taskInclude()
     });
 
-    const result = tasks.map(t => enrichTask(t, req.user!));
+    const taskIds = tasks.map(t => t.id);
+    const lastActivityMap = await getLastActivityMap(taskIds);
+    const recentActivitiesMap = await getRecentActivitiesMap(taskIds);
+
+    const result = tasks.map(t => ({
+      ...enrichTask(t, req.user!),
+      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt,
+      recentActivities: recentActivitiesMap.get(t.id) ?? []
+    }));
 
     res.json(result);
   } catch (error) {
@@ -432,7 +482,15 @@ export const getUnassignedTasks = async (req: Request, res: Response): Promise<v
       include: taskInclude()
     });
 
-    const result = tasks.map(t => enrichTask(t, req.user!));
+    const taskIds = tasks.map(t => t.id);
+    const lastActivityMap = await getLastActivityMap(taskIds);
+    const recentActivitiesMap = await getRecentActivitiesMap(taskIds);
+
+    const result = tasks.map(t => ({
+      ...enrichTask(t, req.user!),
+      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt,
+      recentActivities: recentActivitiesMap.get(t.id) ?? []
+    }));
 
     res.json(result);
   } catch (error) {
