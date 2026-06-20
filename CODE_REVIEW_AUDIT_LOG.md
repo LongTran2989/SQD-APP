@@ -13,6 +13,20 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-20 — Personnel Analytics Tab Filter/Sort Review
+
+**Branch reviewed:** `claude/gallant-thompson-y1gn85`.
+**Scope:** Diff `043eb73...HEAD` covering `backend/src/controllers/workload.controller.ts`, `backend/src/__tests__/workload.test.ts`, `frontend/src/api/workloadApi.ts`, `frontend/src/app/dashboard/analytics/PersonnelTab.tsx` — the personnel name-filter + column-sort feature, plus the carryover Hours Logged/CAPA/Overdue-Rejected/Active-lists refinements from the prior session.
+**Tests after fixes:** Backend `tsc --noEmit` clean. `npm run test -- workload.test.ts` → 19/19 passing. Full backend suite → 536/537 passing (1 pre-existing unrelated `templateSet.test.ts` failure, confirmed present before this session's changes). Frontend `tsc --noEmit` clean; ESLint shows only the same 2 pre-existing unrelated `react-hooks/set-state-in-effect` errors (line numbers shifted, not new).
+**Method:** Medium effort — manual line-by-line and cross-file review across correctness, codebase-convention/reuse, and test-fragility angles, deduped to high-confidence findings.
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| H-1 | High (accessibility) | `PersonnelTab.tsx` `SortableTh` | `onClick` was placed directly on a bare `<th>` — not focusable or keyboard-activatable, failing WCAG keyboard-only navigation. The codebase's own convention (`app/dashboard/tasks/page.tsx`) wraps sortable header labels in a `<button>`. | ✅ Fixed — header label now wrapped in a `<button type="button" onClick={...}>` inside the `<th>`, matching the existing convention |
+| M-1 | Medium (test fragility) | `workload.test.ts` "Personnel Detail" describe block | Relied only on `beforeAll`/`afterAll` cleanup; exact-match (`toEqual`) assertions on row counts/lists were order-dependent and fragile to future test insertions in the same block. | ✅ Fixed — added a `beforeEach` that deletes `timeEntry`/`task`/`workPackageAssignment`/`workPackage` rows before every test in the block |
+
+---
+
 ## Session: 2026-06-19 — PR #37 "Generalized Auto-Generate Work Packages + Template Sets + WP Blueprints" Review
 
 **Branch reviewed:** `claude/determined-shannon-efxjwm` (PR #37 → `TEST_P1`). Fixes implemented on `claude/pr37-security-performance-review-2dlqmo` (fast-forwarded to the PR tip, then fixes committed on top).
