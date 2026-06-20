@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronRight, Users } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, ChevronUp, Users } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -237,6 +237,83 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
   );
 }
 
+// ─── Sorting ────────────────────────────────────────────────────────────────
+
+type SortKey =
+  | 'name'
+  | 'activeTasks'
+  | 'estimatedHours'
+  | 'wpsManaged'
+  | 'openCapas'
+  | 'activeRcas'
+  | 'upcomingDeadlines'
+  | 'hoursLogged'
+  | 'taskEfficiency'
+  | 'rejectionRate'
+  | 'overdueRejectedCount'
+  | 'findingsReported';
+
+function sortValue(p: PersonnelRow, key: SortKey): number | string {
+  switch (key) {
+    case 'name':
+      return p.name.toLowerCase();
+    case 'activeTasks':
+      return p.workload.activeTasks;
+    case 'estimatedHours':
+      return p.workload.estimatedHours;
+    case 'wpsManaged':
+      return p.workload.wpsManaged;
+    case 'openCapas':
+      return p.workload.openCapas;
+    case 'activeRcas':
+      return p.workload.activeRcas;
+    case 'upcomingDeadlines':
+      return p.workload.upcomingDeadlines;
+    case 'hoursLogged':
+      return p.performance.hoursLogged;
+    case 'taskEfficiency':
+      return p.performance.taskEfficiency ?? -Infinity;
+    case 'rejectionRate':
+      return p.performance.rejectionRate ?? -Infinity;
+    case 'overdueRejectedCount':
+      return p.performance.overdueRejectedCount;
+    case 'findingsReported':
+      return p.performance.findingsReported;
+  }
+}
+
+function SortableTh({
+  label,
+  sortKeyName,
+  align = 'right',
+  activeSortKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  sortKeyName: SortKey;
+  align?: 'left' | 'right' | 'center';
+  activeSortKey: SortKey;
+  sortDir: 'asc' | 'desc';
+  onSort: (key: SortKey) => void;
+}) {
+  const active = activeSortKey === sortKeyName;
+  return (
+    <th
+      className={`px-5 py-3 cursor-pointer select-none hover:text-slate-600 ${
+        align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'
+      }`}
+      onClick={() => onSort(sortKeyName)}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+        {label}
+        {active &&
+          (sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
+      </span>
+    </th>
+  );
+}
+
 // ─── Tab ────────────────────────────────────────────────────────────────────
 
 export default function PersonnelTab() {
@@ -252,6 +329,18 @@ export default function PersonnelTab() {
   const [to, setTo] = useState('');
   const [divisionId, setDivisionId] = useState<string>('');
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
+  const [nameQuery, setNameQuery] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('activeTasks');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'name' ? 'asc' : 'desc');
+    }
+  };
 
   useEffect(() => {
     if (canFilterDivision) {
@@ -284,10 +373,17 @@ export default function PersonnelTab() {
     fetchPersonnel();
   }, [fetchPersonnel]);
 
-  const sorted = useMemo(
-    () => (rows ? [...rows].sort((a, b) => b.workload.activeTasks - a.workload.activeTasks) : []),
-    [rows]
-  );
+  const sorted = useMemo(() => {
+    if (!rows) return [];
+    const q = nameQuery.trim().toLowerCase();
+    const filtered = q ? rows.filter((p) => p.name.toLowerCase().includes(q)) : rows;
+    return [...filtered].sort((a, b) => {
+      const av = sortValue(a, sortKey);
+      const bv = sortValue(b, sortKey);
+      const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [rows, nameQuery, sortKey, sortDir]);
 
   const columnCount = SHOW_CAPA_RCA ? 13 : 11;
 
@@ -314,6 +410,18 @@ export default function PersonnelTab() {
     <div className="space-y-6">
       {/* Filters */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-wrap items-end gap-4">
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+            Personnel
+          </label>
+          <input
+            type="text"
+            value={nameQuery}
+            onChange={(e) => setNameQuery(e.target.value)}
+            placeholder="Search by name…"
+            className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm w-48"
+          />
+        </div>
         <div>
           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
             From
@@ -355,13 +463,14 @@ export default function PersonnelTab() {
             </select>
           </div>
         )}
-        {(from || to || divisionId) && (
+        {(from || to || divisionId || nameQuery) && (
           <button
             type="button"
             onClick={() => {
               setFrom('');
               setTo('');
               setDivisionId('');
+              setNameQuery('');
             }}
             className="text-sm text-blue-600 hover:underline"
           >
@@ -381,18 +490,22 @@ export default function PersonnelTab() {
             <thead>
               <tr className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-50">
                 <th className="px-5 py-3 w-8" />
-                <th className="px-5 py-3">Name</th>
-                <th className="px-5 py-3 text-right">Active Tasks</th>
-                <th className="px-5 py-3 text-right">Est. Hours</th>
-                <th className="px-5 py-3 text-right">WPs</th>
-                {SHOW_CAPA_RCA && <th className="px-5 py-3 text-right">Open CAPAs</th>}
-                {SHOW_CAPA_RCA && <th className="px-5 py-3 text-right">Active RCAs</th>}
-                <th className="px-5 py-3 text-right">Deadlines</th>
-                <th className="px-5 py-3 text-right">Hours Logged</th>
-                <th className="px-5 py-3 text-center">Efficiency</th>
-                <th className="px-5 py-3 text-right">Rejection Rate</th>
-                <th className="px-5 py-3 text-right">Overdue/Rejected</th>
-                <th className="px-5 py-3 text-right">Findings Reported</th>
+                <SortableTh label="Name" sortKeyName="name" align="left" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Active Tasks" sortKeyName="activeTasks" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Est. Hours" sortKeyName="estimatedHours" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="WPs" sortKeyName="wpsManaged" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                {SHOW_CAPA_RCA && (
+                  <SortableTh label="Open CAPAs" sortKeyName="openCapas" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                )}
+                {SHOW_CAPA_RCA && (
+                  <SortableTh label="Active RCAs" sortKeyName="activeRcas" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                )}
+                <SortableTh label="Deadlines" sortKeyName="upcomingDeadlines" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Hours Logged" sortKeyName="hoursLogged" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Efficiency" sortKeyName="taskEfficiency" align="center" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Rejection Rate" sortKeyName="rejectionRate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Overdue/Rejected" sortKeyName="overdueRejectedCount" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Findings Reported" sortKeyName="findingsReported" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
