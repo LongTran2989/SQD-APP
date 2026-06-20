@@ -300,16 +300,19 @@ function SortableTh({
   const active = activeSortKey === sortKeyName;
   return (
     <th
-      className={`px-5 py-3 cursor-pointer select-none hover:text-slate-600 ${
-        align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'
-      }`}
-      onClick={() => onSort(sortKeyName)}
+      className={`px-5 py-3 ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'}`}
     >
-      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKeyName)}
+        className={`inline-flex items-center gap-1 hover:text-slate-600 transition-colors ${
+          align === 'right' ? 'flex-row-reverse' : ''
+        }`}
+      >
         {label}
         {active &&
           (sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-      </span>
+      </button>
     </th>
   );
 }

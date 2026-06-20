@@ -289,6 +289,13 @@ describe('Personnel Detail (GET /api/workload/personnel/:userId)', () => {
     templateId = tpl.id;
   });
 
+  beforeEach(async () => {
+    await prisma.timeEntry.deleteMany({});
+    await prisma.task.deleteMany({});
+    await prisma.workPackageAssignment.deleteMany({});
+    await prisma.workPackage.deleteMany({});
+  });
+
   afterAll(async () => {
     await prisma.timeEntry.deleteMany({});
     await prisma.task.deleteMany({});
