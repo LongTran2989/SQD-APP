@@ -52,7 +52,7 @@ function ReportImage({ attachment }: { attachment: Attachment }) {
       ) : (
         <div className="h-40 flex items-center justify-center text-slate-300 text-sm">Loading…</div>
       )}
-      <figcaption className="px-3 py-2 text-sm text-slate-600 border-t border-slate-100">
+      <figcaption className="px-3 py-2 text-sm text-slate-600 border-t border-slate-100 break-words">
         {attachment.caption || attachment.fileName}
       </figcaption>
     </figure>
