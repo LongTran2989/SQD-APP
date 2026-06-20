@@ -170,6 +170,7 @@ export interface TaskEnriched extends Task {
   // backend is the authority (privilege-aware); the client must not recompute it.
   isReviewer: boolean;
   lastActivityAt?: string;
+  recentActivities?: { content: string; createdAt: string; author: { id: number; name: string | null } | null }[];
   template: { id: number; templateId: string; title: string; allowsFindings?: boolean } | null;
   issuer: { id: number; name: string } | null;
   assignedToUser: { id: number; name: string; role?: string } | null;
