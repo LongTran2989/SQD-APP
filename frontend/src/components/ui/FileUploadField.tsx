@@ -9,9 +9,14 @@ import {
   uploadAttachment,
   deleteAttachment,
   downloadAttachment,
+  fetchAttachmentBlobUrl,
+  updateAttachmentCaption,
   getUploadConfig,
 } from '../../api/attachmentApi';
 import { apiErrorMessage } from '../../api/errorMessage';
+import ImageLightbox from './ImageLightbox';
+
+const CAPTION_MAX_LENGTH = 300;
 
 interface FileUploadFieldProps {
   entityType: AttachmentEntityType;
@@ -22,6 +27,8 @@ interface FileUploadFieldProps {
   disabled?: boolean;
   /** Notifies the parent of the current attachment id list (e.g. to store in TaskData). */
   onChange?: (attachmentIds: number[]) => void;
+  /** Shows an inline caption input under each image (report_block galleries only). */
+  captionable?: boolean;
 }
 
 // Rounding matches the backend formatBytes (attachmentService.ts) so the limit
@@ -38,6 +45,7 @@ export default function FileUploadField({
   fieldId,
   disabled = false,
   onChange,
+  captionable = false,
 }: FileUploadFieldProps) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [config, setConfig] = useState<FileUploadConfig | null>(null);
@@ -126,6 +134,16 @@ export default function FileUploadField({
     }
   }
 
+  async function handleCaptionSave(id: number, caption: string) {
+    const trimmed = caption.trim();
+    try {
+      const updated = await updateAttachmentCaption(id, trimmed === '' ? null : trimmed);
+      setAttachments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Could not save caption'));
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-400">
@@ -140,36 +158,16 @@ export default function FileUploadField({
       {attachments.length > 0 && (
         <ul className="space-y-2">
           {attachments.map((att) => (
-            <li
+            <AttachmentRow
               key={att.id}
-              className="flex items-center gap-3 px-3 py-2 bg-white border border-slate-200 rounded-lg"
-            >
-              <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm text-slate-700 truncate">{att.fileName}</p>
-                <p className="text-xs text-slate-400">{formatBytes(att.fileSize)}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleDownload(att)}
-                disabled={busyId === att.id}
-                title="Download"
-                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-50"
-              >
-                {busyId === att.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              </button>
-              {!disabled && (
-                <button
-                  type="button"
-                  onClick={() => handleDelete(att.id)}
-                  disabled={busyId === att.id}
-                  title="Remove"
-                  className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-            </li>
+              attachment={att}
+              disabled={disabled}
+              captionable={captionable}
+              busy={busyId === att.id}
+              onDownload={() => handleDownload(att)}
+              onDelete={() => handleDelete(att.id)}
+              onCaptionSave={(caption) => handleCaptionSave(att.id, caption)}
+            />
           ))}
         </ul>
       )}
@@ -217,5 +215,114 @@ export default function FileUploadField({
         <p className="text-sm text-slate-400">No files attached.</p>
       )}
     </div>
+  );
+}
+
+interface AttachmentRowProps {
+  attachment: Attachment;
+  disabled: boolean;
+  captionable: boolean;
+  busy: boolean;
+  onDownload: () => void;
+  onDelete: () => void;
+  onCaptionSave: (caption: string) => void;
+}
+
+function AttachmentRow({
+  attachment,
+  disabled,
+  captionable,
+  busy,
+  onDownload,
+  onDelete,
+  onCaptionSave,
+}: AttachmentRowProps) {
+  const isImage = attachment.fileType.startsWith('image/');
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isImage) return;
+    let active = true;
+    let url: string | null = null;
+    fetchAttachmentBlobUrl(attachment.id).then((u) => {
+      if (!active) {
+        window.URL.revokeObjectURL(u);
+        return;
+      }
+      url = u;
+      setThumbUrl(u);
+    });
+    return () => {
+      active = false;
+      if (url) window.URL.revokeObjectURL(url);
+    };
+  }, [isImage, attachment.id]);
+
+  return (
+    <li className="flex items-start gap-3 px-3 py-2 bg-white border border-slate-200 rounded-lg">
+      {isImage && thumbUrl ? (
+        <button
+          type="button"
+          onClick={() => setLightboxOpen(true)}
+          className="w-10 h-10 flex-shrink-0 rounded-md overflow-hidden border border-slate-200"
+          title="View image"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- blob: URL thumbnail, not eligible for next/image */}
+          <img src={thumbUrl} alt={attachment.fileName} className="w-full h-full object-cover" />
+        </button>
+      ) : (
+        <FileText className="w-4 h-4 mt-1 text-slate-400 flex-shrink-0" />
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm text-slate-700 truncate">{attachment.fileName}</p>
+        <p className="text-xs text-slate-400">{formatBytes(attachment.fileSize)}</p>
+        {captionable && isImage && (
+          <input
+            key={attachment.caption ?? ''}
+            type="text"
+            defaultValue={attachment.caption ?? ''}
+            placeholder="Add a caption…"
+            maxLength={CAPTION_MAX_LENGTH}
+            disabled={disabled}
+            onBlur={(e) => {
+              if (e.target.value !== (attachment.caption ?? '')) onCaptionSave(e.target.value);
+            }}
+            className="mt-1 w-full text-xs px-2 py-1 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+          />
+        )}
+        {!captionable && attachment.caption && (
+          <p className="text-xs text-slate-500 italic truncate">{attachment.caption}</p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onDownload}
+        disabled={busy}
+        title="Download"
+        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-50"
+      >
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+      </button>
+      {!disabled && (
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy}
+          title="Remove"
+          className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      )}
+      {lightboxOpen && thumbUrl && (
+        <ImageLightbox
+          src={thumbUrl}
+          alt={attachment.fileName}
+          caption={attachment.caption}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
+    </li>
   );
 }

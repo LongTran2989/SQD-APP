@@ -980,7 +980,8 @@ model Attachment {
   fileType   String // MIME type, validated against FILE_UPLOAD_CONFIG
   fileSize   Int // bytes
   bucket     String // logical storage root: sqd-tasks | sqd-findings | sqd-templates
-  storageKey String @unique // path within the storage backend (driver-agnostic)
+  storageKey String  @unique // path within the storage backend (driver-agnostic)
+  caption    String? // user-editable label, distinct from fileName (report_block galleries)
 
   // Polymorphic owner. entityType ∈ TASK | FINDING | TEMPLATE | WP; entityId is
   // the owning record id (String to mirror AuditLog.entityId). fieldId scopes a

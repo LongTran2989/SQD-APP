@@ -77,7 +77,8 @@ export type FormFieldType =
   | 'checkbox_single'
   | 'date'
   | 'file_upload'
-  | 'rich_text';
+  | 'rich_text'
+  | 'report_block';
 
 export interface FormField {
   fieldId: string;
@@ -473,6 +474,7 @@ export interface Attachment {
   entityId: string;
   fieldId: string | null;
   uploadedById: number;
+  caption?: string | null;
   createdAt: string;
 }
 
