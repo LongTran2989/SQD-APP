@@ -225,6 +225,27 @@ describe('Personnel Workload (GET /api/workload/personnel)', () => {
     const row = rowFor(res.body.personnel, staffId);
     expect(row.performance.findingsClosed).toBe(1);
   });
+
+  it('W16: overdueRejectedCount combines rejected tasks, overdue tasks, and overdue WPs', async () => {
+    const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await prisma.task.create({ data: { taskId: 'WL-000040', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'Rejected', schemaSnapshot: [], targetDivisionId: divisionId, completedAt: new Date() } });
+    await prisma.task.create({ data: { taskId: 'WL-000041', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'Assigned', schemaSnapshot: [], targetDivisionId: divisionId, deadline: past } });
+    const wpOverdue = await prisma.workPackage.create({ data: { wpId: 'WL-WP-0010', name: 'Overdue WP', type: 'AUDIT', divisionId, timeframeFrom: new Date(Date.now() - 10 * 86400000), timeframeTo: past, creatorId: staffId, status: 'Open' } });
+    await prisma.workPackageAssignment.create({ data: { wpId: wpOverdue.id, userId: staffId } });
+
+    const res = await get(managerToken);
+    const row = rowFor(res.body.personnel, staffId);
+    expect(row.performance.overdueRejectedCount).toBe(3);
+  });
+
+  it('W17: overdueRejectedCount excludes a task whose deadline is past `now` but outside the selected range', async () => {
+    const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await prisma.task.create({ data: { taskId: 'WL-000042', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'Assigned', schemaSnapshot: [], targetDivisionId: divisionId, deadline: past } });
+
+    const res = await get(managerToken, '?from=2099-01-01&to=2099-12-31');
+    const row = rowFor(res.body.personnel, staffId);
+    expect(row.performance.overdueRejectedCount).toBe(0);
+  });
 });
 
 // ─── Detail endpoint ───────────────────────────────────────────────────────────
@@ -234,6 +255,7 @@ describe('Personnel Detail (GET /api/workload/personnel/:userId)', () => {
   let manager2Token: string;
   let staffId: number;
   let divisionId: number;
+  let templateId: number;
 
   beforeAll(async () => {
     const managerRole = await prisma.role.upsert({ where: { name: 'Manager' }, update: {}, create: { name: 'Manager' } });
@@ -250,9 +272,29 @@ describe('Personnel Detail (GET /api/workload/personnel/:userId)', () => {
 
     managerToken = makeToken(manager.id, 'Manager', divisionId);
     manager2Token = makeToken(manager2.id, 'Manager', div2.id);
+
+    const tpl = await prisma.template.create({
+      data: {
+        templateId: 'WLD-T-001',
+        title: 'Workload Detail Test Template',
+        formSchema: [{ id: '1', type: 'radio', label: 'Pass/Fail', options: ['Pass', 'Fail'] }],
+        status: 'Published',
+        publishedAt: new Date(),
+        ownerId: manager.id,
+        divisionId,
+        requiresApproval: true,
+        estimatedHours: 2,
+      },
+    });
+    templateId = tpl.id;
   });
 
   afterAll(async () => {
+    await prisma.timeEntry.deleteMany({});
+    await prisma.task.deleteMany({});
+    await prisma.workPackageAssignment.deleteMany({});
+    await prisma.workPackage.deleteMany({});
+    await prisma.template.deleteMany({ where: { templateId: { startsWith: 'WLD-T-' } } });
     await prisma.user.deleteMany({ where: { email: { in: ['wld_manager@sqd.com', 'wld_manager2@sqd.com', 'wld_staff@sqd.com'] } } });
     await prisma.$disconnect();
     await pool.end();
@@ -272,5 +314,37 @@ describe('Personnel Detail (GET /api/workload/personnel/:userId)', () => {
   it('W15: unknown user id → 404', async () => {
     const res = await request(app).get('/api/workload/personnel/999999').set('Authorization', `Bearer ${managerToken}`);
     expect(res.status).toBe(404);
+  });
+
+  it('W18: activeTasks lists all non-final tasks regardless of deadline; activeWps excludes Closed/Inactive', async () => {
+    const far = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+    await prisma.task.create({ data: { taskId: 'WLD-000001', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'Assigned', schemaSnapshot: [], targetDivisionId: divisionId, deadline: far } });
+    await prisma.task.create({ data: { taskId: 'WLD-000002', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'Closed', schemaSnapshot: [], targetDivisionId: divisionId, completedAt: new Date() } });
+
+    const wpOpen = await prisma.workPackage.create({ data: { wpId: 'WLD-WP-0001', name: 'Open WP', type: 'AUDIT', divisionId, timeframeFrom: new Date(), timeframeTo: far, creatorId: staffId, status: 'Open' } });
+    const wpClosed = await prisma.workPackage.create({ data: { wpId: 'WLD-WP-0002', name: 'Closed WP', type: 'AUDIT', divisionId, timeframeFrom: new Date(), timeframeTo: far, creatorId: staffId, status: 'Closed' } });
+    await prisma.workPackageAssignment.create({ data: { wpId: wpOpen.id, userId: staffId } });
+    await prisma.workPackageAssignment.create({ data: { wpId: wpClosed.id, userId: staffId } });
+
+    const res = await request(app).get(`/api/workload/personnel/${staffId}`).set('Authorization', `Bearer ${managerToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.activeTasks.map((t: any) => t.taskId)).toEqual(['WLD-000001']);
+    expect(res.body.activeWps.map((w: any) => w.wpId)).toEqual(['WLD-WP-0001']);
+  });
+
+  it('W19: hoursLoggedByMonth respects ?from/?to instead of always defaulting to the last 12 months', async () => {
+    const task = await prisma.task.create({ data: { taskId: 'WLD-000010', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'In Progress', schemaSnapshot: [], targetDivisionId: divisionId } });
+    await prisma.timeEntry.create({ data: { taskId: task.id, loggedByUserId: staffId, sessionHours: 4, sessionNotes: 'n', collaboratorEntries: [], loggedAt: D('2020-01-15') } });
+    await prisma.timeEntry.create({ data: { taskId: task.id, loggedByUserId: staffId, sessionHours: 1, sessionNotes: 'n', collaboratorEntries: [], loggedAt: D('2026-06-10') } });
+
+    // Default (no range): last 12 months only — the 2020 entry should be excluded.
+    const noRange = await request(app).get(`/api/workload/personnel/${staffId}`).set('Authorization', `Bearer ${managerToken}`);
+    expect(noRange.body.hoursLoggedByMonth.find((m: any) => m.month === '2020-01')).toBeUndefined();
+
+    // Explicit range covering the 2020 entry — it should now appear.
+    const withRange = await request(app)
+      .get(`/api/workload/personnel/${staffId}?from=2020-01-01&to=2020-01-31`)
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(withRange.body.hoursLoggedByMonth).toEqual([{ month: '2020-01', hours: 4 }]);
   });
 });

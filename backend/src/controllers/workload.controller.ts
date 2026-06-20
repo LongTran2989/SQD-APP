@@ -33,6 +33,21 @@ function parseDateRange(fromRaw: unknown, toRaw: unknown): { gte?: Date; lte?: D
   return filter.gte !== undefined || filter.lte !== undefined || filter.lt !== undefined ? filter : undefined;
 }
 
+// Intersects "deadline/timeframeTo already passed `now`" with an optional
+// caller-supplied date range, so "Overdue" stays correct even when the range's
+// own upper bound would otherwise be later than `now`.
+function pastDueFilter(now: Date, range?: { gte?: Date; lte?: Date; lt?: Date }): { gte?: Date; lt?: Date; lte?: Date } {
+  const filter: { gte?: Date; lt?: Date; lte?: Date } = { lt: now };
+  if (!range) return filter;
+  if (range.gte) filter.gte = range.gte;
+  if (range.lt !== undefined && range.lt < now) filter.lt = range.lt;
+  if (range.lte !== undefined && range.lte < now) {
+    delete filter.lt;
+    filter.lte = range.lte;
+  }
+  return filter;
+}
+
 // Resolve the caller's visible scope: Managers are always pinned to their own
 // division; Director/Admin may optionally narrow with ?divisionId. Mirrors the
 // scoping rule in analytics.controller.
@@ -182,6 +197,34 @@ export const getPersonnelWorkload = async (req: Request, res: Response): Promise
       _count: { _all: true },
     });
 
+    // Overdue tasks: non-final, deadline already passed. Counted alongside
+    // Rejected tasks and Overdue WPs as a single combined "Overdue/Rejected" figure.
+    const overdueTasksRaw = await prisma.task.groupBy({
+      by: ['assignedToUserId'],
+      where: {
+        deletedAt: null,
+        assignedToUserId: { in: userIds },
+        status: { notIn: FINAL_TASK_STATUSES },
+        deadline: pastDueFilter(now, dateRange),
+      },
+      _count: { _all: true },
+    });
+
+    // Overdue WPs (simple approximation — timeframeTo passed, not Closed/Inactive;
+    // does not re-check for remaining incomplete tasks like computeWpStatus does).
+    const overdueWpsRaw = await prisma.workPackageAssignment.groupBy({
+      by: ['userId'],
+      where: {
+        userId: { in: userIds },
+        wp: {
+          deletedAt: null,
+          status: { notIn: ['Closed', 'Inactive'] },
+          timeframeTo: pastDueFilter(now, dateRange),
+        },
+      },
+      _count: { _all: true },
+    });
+
     // ── Maps for O(1) lookup while assembling rows ──
 
     const activeTaskCountMap = new Map(activeTasksRaw.map((r) => [r.assignedToUserId as number, r._count._all]));
@@ -197,6 +240,8 @@ export const getPersonnelWorkload = async (req: Request, res: Response): Promise
     const findingsReportedMap = new Map(findingsReportedRaw.map((r) => [r.reportedByUserId, r._count._all]));
     const findingsClosedMap = new Map(findingsClosedRaw.map((r) => [r.closedByUserId as number, r._count._all]));
     const capasVerifiedMap = new Map(capasVerifiedRaw.map((r) => [r.verifiedByUserId as number, r._count._all]));
+    const overdueTaskCountMap = new Map(overdueTasksRaw.map((r) => [r.assignedToUserId as number, r._count._all]));
+    const overdueWpCountMap = new Map(overdueWpsRaw.map((r) => [r.userId, r._count._all]));
 
     const personnel = users.map((u) => {
       const finalTaskCount = finalTaskCountMap.get(u.id) ?? 0;
@@ -223,6 +268,8 @@ export const getPersonnelWorkload = async (req: Request, res: Response): Promise
           proactivityRatio: finalTaskCount > 0 ? round2(findingsReported / finalTaskCount) : null,
           findingsClosed: findingsClosedMap.get(u.id) ?? 0,
           capasVerified: capasVerifiedMap.get(u.id) ?? 0,
+          overdueRejectedCount:
+            rejectedCount + (overdueTaskCountMap.get(u.id) ?? 0) + (overdueWpCountMap.get(u.id) ?? 0),
         },
       };
     });
@@ -274,7 +321,12 @@ export const getPersonnelDetail = async (req: Request, res: Response): Promise<v
     const now = new Date();
     const deadlineHorizon = new Date(now.getTime() + deadlineWindowDays * MS_PER_DAY);
 
-    const [upcomingTasks, openCapas, activeRcas, timeEntries, finalTasksForEfficiency] = await Promise.all([
+    // Hours-logged trend follows the same From/To range as the rest of
+    // Performance; with no range selected it falls back to the last 12 months.
+    const dateRange = parseDateRange(req.query.from, req.query.to);
+    const loggedAtFilter = dateRange ?? { gte: new Date(now.getTime() - 365 * MS_PER_DAY) };
+
+    const [upcomingTasks, activeTasks, activeWps, openCapas, activeRcas, timeEntries, finalTasksForEfficiency] = await Promise.all([
       prisma.task.findMany({
         where: {
           deletedAt: null,
@@ -285,6 +337,21 @@ export const getPersonnelDetail = async (req: Request, res: Response): Promise<v
         select: { id: true, taskId: true, title: true, deadline: true, status: true, template: { select: { title: true } } },
         orderBy: { deadline: 'asc' },
       }),
+      // All active (non-final) tasks the user is currently working on, not just
+      // those nearing their deadline.
+      prisma.task.findMany({
+        where: { deletedAt: null, assignedToUserId: userId, status: { notIn: FINAL_TASK_STATUSES } },
+        select: { id: true, taskId: true, title: true, deadline: true, status: true, template: { select: { title: true } } },
+        orderBy: { deadline: 'asc' },
+      }),
+      // Currently-active WPs the user is assigned to (matches the WPs Managed metric scope).
+      prisma.workPackageAssignment.findMany({
+        where: { userId, wp: { deletedAt: null, status: { notIn: ['Closed', 'Inactive'] } } },
+        select: { wp: { select: { id: true, wpId: true, name: true, type: true, status: true, timeframeTo: true } } },
+        orderBy: { wp: { timeframeTo: 'asc' } },
+      }),
+      // CAPAs/RCAs panels are currently hidden in the UI (kept here so they can
+      // be re-deployed without backend changes).
       prisma.capaAction.findMany({
         where: { ownerUserId: userId, deletedAt: null, status: { in: ['Open', 'In Progress'] } },
         select: { id: true, description: true, type: true, status: true, deadline: true, finding: { select: { id: true, description: true } } },
@@ -294,12 +361,11 @@ export const getPersonnelDetail = async (req: Request, res: Response): Promise<v
         where: { conductedByUserId: userId, status: 'Draft' },
         select: { id: true, method: true, finding: { select: { id: true, description: true } } },
       }),
-      // Last 12 months of time entries — used for the monthly hours-logged trend.
       prisma.timeEntry.findMany({
         where: {
           loggedByUserId: userId,
           task: { deletedAt: null },
-          loggedAt: { gte: new Date(now.getTime() - 365 * MS_PER_DAY) },
+          loggedAt: loggedAtFilter,
         },
         select: { sessionHours: true, loggedAt: true },
       }),
@@ -337,6 +403,21 @@ export const getPersonnelDetail = async (req: Request, res: Response): Promise<v
         title: t.title ?? t.template.title,
         deadline: t.deadline,
         status: t.status,
+      })),
+      activeTasks: activeTasks.map((t) => ({
+        id: t.id,
+        taskId: t.taskId,
+        title: t.title ?? t.template.title,
+        deadline: t.deadline,
+        status: t.status,
+      })),
+      activeWps: activeWps.map(({ wp }) => ({
+        id: wp.id,
+        wpId: wp.wpId,
+        name: wp.name,
+        type: wp.type,
+        status: wp.status,
+        timeframeTo: wp.timeframeTo,
       })),
       openCapas: openCapas.map((c) => ({
         id: c.id,

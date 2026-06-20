@@ -22,6 +22,10 @@ import {
 import { getDivisions } from '../../../api/taskApi';
 import { useAuthStore } from '../../../store/authStore';
 
+// Open CAPAs / Active RCAs columns and detail panels are hidden for now but
+// kept fully wired so they can be re-enabled by flipping this flag.
+const SHOW_CAPA_RCA = false;
+
 // ─── Display helpers ────────────────────────────────────────────────────────
 
 function formatHours(h: number): string {
@@ -51,7 +55,7 @@ function EfficiencyBadge({ ratio }: { ratio: number | null }) {
 
 // ─── Detail panel (expanded row) ───────────────────────────────────────────
 
-function PersonnelDetailPanel({ userId }: { userId: number }) {
+function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: string; to: string }) {
   const [detail, setDetail] = useState<PersonnelDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,14 +63,14 @@ function PersonnelDetailPanel({ userId }: { userId: number }) {
   const fetchDetail = useCallback(async () => {
     setLoading(true);
     try {
-      const d = await getPersonnelDetail(userId);
+      const d = await getPersonnelDetail(userId, { from: from || undefined, to: to || undefined });
       setDetail(d);
     } catch {
       setError('Failed to load detail.');
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, from, to]);
 
   useEffect(() => {
     fetchDetail();
@@ -120,7 +124,9 @@ function PersonnelDetailPanel({ userId }: { userId: number }) {
 
       {/* Hours logged trend */}
       <div className="bg-white rounded-xl border border-slate-100 p-4 lg:col-span-2">
-        <h3 className="text-sm font-semibold text-slate-600 mb-2">Hours Logged (last 12 months)</h3>
+        <h3 className="text-sm font-semibold text-slate-600 mb-2">
+          Hours Logged {from || to ? '(selected range)' : '(last 12 months)'}
+        </h3>
         {detail.hoursLoggedByMonth.length === 0 ? (
           <p className="text-sm text-slate-400 py-8 text-center">No time entries yet.</p>
         ) : (
@@ -156,37 +162,77 @@ function PersonnelDetailPanel({ userId }: { userId: number }) {
         )}
       </div>
 
-      {/* Open CAPAs */}
+      {/* Active tasks */}
       <div className="bg-white rounded-xl border border-slate-100 p-4">
-        <h3 className="text-sm font-semibold text-slate-600 mb-2">Open CAPAs</h3>
-        {detail.openCapas.length === 0 ? (
+        <h3 className="text-sm font-semibold text-slate-600 mb-2">Active Tasks ({detail.activeTasks.length})</h3>
+        {detail.activeTasks.length === 0 ? (
           <p className="text-sm text-slate-400">None.</p>
         ) : (
-          <ul className="space-y-2 text-sm">
-            {detail.openCapas.map((c) => (
-              <li key={c.id} className="text-slate-700 truncate" title={c.description}>
-                {c.description}
+          <ul className="space-y-2 text-sm max-h-40 overflow-y-auto">
+            {detail.activeTasks.map((t) => (
+              <li key={t.id} className="flex justify-between gap-2">
+                <span className="text-slate-700 truncate">{t.title}</span>
+                <span className="text-slate-400 whitespace-nowrap">
+                  {t.deadline ? new Date(t.deadline).toLocaleDateString() : '—'}
+                </span>
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      {/* Active RCAs */}
+      {/* Work packages assigned */}
       <div className="bg-white rounded-xl border border-slate-100 p-4">
-        <h3 className="text-sm font-semibold text-slate-600 mb-2">Active RCAs</h3>
-        {detail.activeRcas.length === 0 ? (
+        <h3 className="text-sm font-semibold text-slate-600 mb-2">Work Packages Assigned ({detail.activeWps.length})</h3>
+        {detail.activeWps.length === 0 ? (
           <p className="text-sm text-slate-400">None.</p>
         ) : (
-          <ul className="space-y-2 text-sm">
-            {detail.activeRcas.map((r) => (
-              <li key={r.id} className="text-slate-700 truncate" title={r.findingDescription}>
-                {r.findingDescription}
+          <ul className="space-y-2 text-sm max-h-40 overflow-y-auto">
+            {detail.activeWps.map((w) => (
+              <li key={w.id} className="flex justify-between gap-2">
+                <span className="text-slate-700 truncate">{w.name}</span>
+                <span className="text-slate-400 whitespace-nowrap">{w.status}</span>
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      {/* Open CAPAs */}
+      {SHOW_CAPA_RCA && (
+        <div className="bg-white rounded-xl border border-slate-100 p-4">
+          <h3 className="text-sm font-semibold text-slate-600 mb-2">Open CAPAs</h3>
+          {detail.openCapas.length === 0 ? (
+            <p className="text-sm text-slate-400">None.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {detail.openCapas.map((c) => (
+                <li key={c.id} className="text-slate-700 truncate" title={c.description}>
+                  {c.description}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Active RCAs */}
+      {SHOW_CAPA_RCA && (
+        <div className="bg-white rounded-xl border border-slate-100 p-4">
+          <h3 className="text-sm font-semibold text-slate-600 mb-2">Active RCAs</h3>
+          {detail.activeRcas.length === 0 ? (
+            <p className="text-sm text-slate-400">None.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {detail.activeRcas.map((r) => (
+                <li key={r.id} className="text-slate-700 truncate" title={r.findingDescription}>
+                  {r.findingDescription}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -242,6 +288,8 @@ export default function PersonnelTab() {
     () => (rows ? [...rows].sort((a, b) => b.workload.activeTasks - a.workload.activeTasks) : []),
     [rows]
   );
+
+  const columnCount = SHOW_CAPA_RCA ? 13 : 11;
 
   if (loading) {
     return (
@@ -337,19 +385,20 @@ export default function PersonnelTab() {
                 <th className="px-5 py-3 text-right">Active Tasks</th>
                 <th className="px-5 py-3 text-right">Est. Hours</th>
                 <th className="px-5 py-3 text-right">WPs</th>
-                <th className="px-5 py-3 text-right">Open CAPAs</th>
-                <th className="px-5 py-3 text-right">Active RCAs</th>
+                {SHOW_CAPA_RCA && <th className="px-5 py-3 text-right">Open CAPAs</th>}
+                {SHOW_CAPA_RCA && <th className="px-5 py-3 text-right">Active RCAs</th>}
                 <th className="px-5 py-3 text-right">Deadlines</th>
                 <th className="px-5 py-3 text-right">Hours Logged</th>
                 <th className="px-5 py-3 text-center">Efficiency</th>
                 <th className="px-5 py-3 text-right">Rejection Rate</th>
+                <th className="px-5 py-3 text-right">Overdue/Rejected</th>
                 <th className="px-5 py-3 text-right">Findings Reported</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-5 py-8 text-center text-slate-400">
+                  <td colSpan={columnCount} className="px-5 py-8 text-center text-slate-400">
                     No personnel in scope.
                   </td>
                 </tr>
@@ -369,8 +418,12 @@ export default function PersonnelTab() {
                         <td className="px-5 py-3 text-right text-slate-700">{p.workload.activeTasks}</td>
                         <td className="px-5 py-3 text-right text-slate-700">{formatHours(p.workload.estimatedHours)}</td>
                         <td className="px-5 py-3 text-right text-slate-700">{p.workload.wpsManaged}</td>
-                        <td className="px-5 py-3 text-right text-slate-700">{p.workload.openCapas}</td>
-                        <td className="px-5 py-3 text-right text-slate-700">{p.workload.activeRcas}</td>
+                        {SHOW_CAPA_RCA && (
+                          <td className="px-5 py-3 text-right text-slate-700">{p.workload.openCapas}</td>
+                        )}
+                        {SHOW_CAPA_RCA && (
+                          <td className="px-5 py-3 text-right text-slate-700">{p.workload.activeRcas}</td>
+                        )}
                         <td className="px-5 py-3 text-right">
                           {p.workload.upcomingDeadlines > 0 ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200">
@@ -385,12 +438,21 @@ export default function PersonnelTab() {
                           <EfficiencyBadge ratio={p.performance.taskEfficiency} />
                         </td>
                         <td className="px-5 py-3 text-right text-slate-700">{formatPct(p.performance.rejectionRate)}</td>
+                        <td className="px-5 py-3 text-right">
+                          {p.performance.overdueRejectedCount > 0 ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-600 border border-red-200">
+                              {p.performance.overdueRejectedCount}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">0</span>
+                          )}
+                        </td>
                         <td className="px-5 py-3 text-right text-slate-700">{p.performance.findingsReported}</td>
                       </tr>
                       {expanded && (
                         <tr>
-                          <td colSpan={12} className="p-0">
-                            <PersonnelDetailPanel userId={p.userId} />
+                          <td colSpan={columnCount} className="p-0">
+                            <PersonnelDetailPanel userId={p.userId} from={from} to={to} />
                           </td>
                         </tr>
                       )}

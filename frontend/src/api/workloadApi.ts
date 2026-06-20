@@ -19,6 +19,7 @@ export interface PersonnelPerformance {
   proactivityRatio: number | null;
   findingsClosed: number;
   capasVerified: number;
+  overdueRejectedCount: number;
 }
 
 export interface PersonnelRow {
@@ -52,6 +53,23 @@ export interface UpcomingDeadlineTask {
   status: string;
 }
 
+export interface ActiveTaskItem {
+  id: number;
+  taskId: string;
+  title: string;
+  deadline: string | null;
+  status: string;
+}
+
+export interface ActiveWpItem {
+  id: number;
+  wpId: string;
+  name: string;
+  type: string;
+  status: string;
+  timeframeTo: string;
+}
+
 export interface OpenCapaItem {
   id: number;
   description: string;
@@ -82,12 +100,14 @@ export interface PersonnelDetail {
   avgRating: number | null;
   hoursLoggedByMonth: MonthlyHours[];
   upcomingDeadlines: UpcomingDeadlineTask[];
+  activeTasks: ActiveTaskItem[];
+  activeWps: ActiveWpItem[];
   openCapas: OpenCapaItem[];
   activeRcas: ActiveRcaItem[];
 }
 
 export const getPersonnelDetail = (
   userId: number,
-  params?: { deadlineWindowDays?: number }
+  params?: { deadlineWindowDays?: number; from?: string; to?: string }
 ): Promise<PersonnelDetail> =>
   apiClient.get(`/workload/personnel/${userId}`, { params }).then((r) => r.data);
