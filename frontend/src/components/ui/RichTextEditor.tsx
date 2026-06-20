@@ -122,8 +122,20 @@ export default function RichTextEditor({
         </ToolbarButton>
       </div>
 
-      {/* Editor area */}
-      <div className="px-3 py-2 min-h-[100px] text-sm text-slate-800 bg-white [&_.ProseMirror]:outline-none [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5 [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-slate-400 [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0">
+      {/* Editor area. The ProseMirror node only grows to its content's height, so on
+          short content most of this min-h-[100px] box is empty padding outside the
+          contenteditable element. Without this handler, clicking that empty area does
+          nothing (the editor never gains focus and the click is lost) — so we forward
+          it to the editor, placing the cursor at the end. */}
+      <div
+        className="px-3 py-2 min-h-[100px] text-sm text-slate-800 bg-white cursor-text [&_.ProseMirror]:outline-none [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5 [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-slate-400 [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) {
+            e.preventDefault();
+            editor.chain().focus('end').run();
+          }
+        }}
+      >
         <EditorContent editor={editor} />
       </div>
     </div>
