@@ -33,7 +33,7 @@
   --border-subtle:        #f1f5f9;
 }
 
-@theme inline {
+@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
