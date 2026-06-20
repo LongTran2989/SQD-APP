@@ -60,6 +60,12 @@ export const uploadAttachment = (
 export const deleteAttachment = (id: number): Promise<{ message: string }> =>
   apiClient.delete(`/attachments/${id}`).then((r) => r.data);
 
+// Sets/clears (pass null or '') an attachment's caption. Backend enforces the
+// 300-char limit and the editor permission rule (assignee-on-editable-task or
+// attachment:delete_any) — see attachmentService.updateCaptionService.
+export const updateAttachmentCaption = (id: number, caption: string | null): Promise<Attachment> =>
+  apiClient.patch(`/attachments/${id}`, { caption }).then((r) => r.data);
+
 // Fetches the file as a blob (sends the auth cookie + acting-user header) and
 // triggers a browser download. Streamed via the backend — storage stays private.
 export const downloadAttachment = async (id: number, fileName: string): Promise<void> => {
@@ -77,3 +83,12 @@ export const downloadAttachment = async (id: number, fileName: string): Promise<
 // Direct URL (e.g. for opening in a new tab). Relies on the auth cookie.
 export const attachmentDownloadUrl = (id: number): string =>
   `${API_BASE_URL}/attachments/${id}/download`;
+
+// Auth is Bearer-token (apiClient interceptor), so a plain <img src> can't
+// authenticate against the download endpoint. Fetches the blob via apiClient
+// and returns an object URL for thumbnails/lightboxes; caller must revoke it
+// (URL.revokeObjectURL) on unmount/replacement.
+export const fetchAttachmentBlobUrl = async (id: number): Promise<string> => {
+  const res = await apiClient.get(`/attachments/${id}/download`, { responseType: 'blob' });
+  return window.URL.createObjectURL(res.data as Blob);
+};

@@ -27,6 +27,11 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 // separately in timebooking.controller and must not be conflated with this one.
 export const FINAL_TASK_STATUSES: string[] = ['Closed', 'Rejected', 'Terminated'];
 
+// Statuses in which the assigned user may save TaskData (saveTaskData) or edit
+// an attachment caption on their own task (attachmentService.updateCaptionService).
+// Single source of truth so the two checks can never drift.
+export const TASK_DATA_EDITABLE_STATUSES: string[] = ['Assigned', 'In Progress', 'Follow-up Required'];
+
 // Review decision verbs accepted by PUT /tasks/:id/review.
 export const REVIEW_ACTIONS = ['approve', 'reject', 'follow-up'] as const;
 export type ReviewAction = (typeof REVIEW_ACTIONS)[number];

@@ -4,7 +4,7 @@ import { checkAndTriggerPendingVerification } from '../services/findingService';
 import { createFeedPost } from '../services/feedService';
 import { createNotifications, notifyFeedWatchers } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
-import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS } from '../constants/taskStatus';
+import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS, TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
 
 import { prisma } from '../lib/prisma';
@@ -1066,7 +1066,7 @@ export const saveTaskData = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    if (!['Assigned', 'In Progress', 'Follow-up Required'].includes(task.status)) {
+    if (!TASK_DATA_EDITABLE_STATUSES.includes(task.status)) {
       res.status(400).json({ message: `Cannot save data on a task with status: ${task.status}` });
       return;
     }
@@ -1127,7 +1127,7 @@ export const submitTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    if (!['Assigned', 'In Progress', 'Follow-up Required'].includes(task.status)) {
+    if (!TASK_DATA_EDITABLE_STATUSES.includes(task.status)) {
       res.status(400).json({ message: `Task cannot be submitted from status: ${task.status}` });
       return;
     }

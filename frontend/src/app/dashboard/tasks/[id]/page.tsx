@@ -17,7 +17,7 @@ import TimeEntryPanel from '../../../../components/tasks/TimeEntryPanel';
 import RaiseFindingPanel from '../../../../components/findings/RaiseFindingPanel';
 import { SeverityBadge, FindingStatusBadge } from '../../../../components/findings/FindingBadges';
 import toast from 'react-hot-toast';
-import { ArrowLeft, AlertTriangle, Clock } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Clock, FileText } from 'lucide-react';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -249,6 +249,18 @@ export default function TaskDetailPage() {
             {task.template?.title ?? 'Task'}
           </h1>
         </div>
+
+        {/* View Report — once the task has saved form data, available at any status */}
+        {task.taskData?.data && Object.keys(task.taskData.data).length > 0 && (
+          <Link
+            href={`/tasks/${task.id}/report`}
+            target="_blank"
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-600 text-slate-600 text-sm font-semibold rounded-xl shadow-sm transition-colors flex-shrink-0"
+          >
+            <FileText className="w-4 h-4" />
+            View Report
+          </Link>
+        )}
 
         {/* Raise Finding — only when the template allows findings and the task is still actionable */}
         {task.template?.allowsFindings &&

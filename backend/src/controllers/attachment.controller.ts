@@ -7,6 +7,7 @@ import { getStorage, ObjectNotFoundError } from '../services/storage';
 import {
   createAttachmentService,
   deleteAttachmentService,
+  updateCaptionService,
   loadFileUploadConfig,
 } from '../services/attachmentService';
 import { isAttachmentEntityType } from '../constants/fileUpload';
@@ -17,6 +18,7 @@ const PUBLIC_SELECT = {
   fileName: true,
   fileType: true,
   fileSize: true,
+  caption: true,
   entityType: true,
   entityId: true,
   fieldId: true,
@@ -32,6 +34,7 @@ function toPublic(a: Attachment) {
     fileName: a.fileName,
     fileType: a.fileType,
     fileSize: a.fileSize,
+    caption: a.caption,
     entityType: a.entityType,
     entityId: a.entityId,
     fieldId: a.fieldId,
@@ -193,5 +196,30 @@ export const deleteAttachment = async (req: Request, res: Response): Promise<voi
     res.json({ message: 'Attachment deleted' });
   } catch (error) {
     fail(res, error, 'Error deleting attachment:');
+  }
+};
+
+// ─── PATCH /api/attachments/:id ─────────────────────────────────────────────────
+// Body: { caption: string | null }. See updateCaptionService for the permission rule.
+export const updateAttachment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role, permissions } = req.user!;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ message: 'Invalid attachment id' });
+      return;
+    }
+
+    const { caption } = req.body as { caption?: unknown };
+    if (caption !== null && typeof caption !== 'string') {
+      res.status(400).json({ message: 'caption must be a string or null' });
+      return;
+    }
+    const trimmed = caption === null ? null : caption.trim() || null;
+
+    const updated = await updateCaptionService({ userId, role, permissions }, id, trimmed);
+    res.json(toPublic(updated));
+  } catch (error) {
+    fail(res, error, 'Error updating attachment caption:');
   }
 };

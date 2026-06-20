@@ -5,6 +5,7 @@ import { HttpError } from '../utils/httpError';
 import { createFeedPost, FeedScope } from './feedService';
 import { getStorage } from './storage';
 import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
+import { TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
 import {
   FILE_UPLOAD_CONFIG_KEY,
   DEFAULT_FILE_UPLOAD_CONFIG,
@@ -19,6 +20,10 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 export const ATTACHMENT_UPLOADED = 'ATTACHMENT_UPLOADED';
 export const ATTACHMENT_DELETED = 'ATTACHMENT_DELETED';
+export const ATTACHMENT_CAPTION_UPDATED = 'ATTACHMENT_CAPTION_UPDATED';
+
+/** Caption is a short label, not a description field — kept well under TaskData's own limits. */
+export const ATTACHMENT_CAPTION_MAX_LENGTH = 300;
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -239,6 +244,77 @@ export async function deleteAttachmentService(
         scope,
         scopeId: Number(attachment.entityId),
         content: `🗑️ File removed: ${attachment.fileName}`,
+      });
+    }
+
+    return updated;
+  });
+}
+
+// ─── Caption update ────────────────────────────────────────────────────────────
+
+/**
+ * Updates an attachment's caption (a short, user-editable label distinct from
+ * the original fileName — used by report_block galleries). Allowed for:
+ *  - a holder of attachment:delete_any (no status restriction — mirrors the
+ *    existing delete-any override), or
+ *  - on a TASK attachment, the task's assigned user, but only while the task
+ *    is still in an editable status (TASK_DATA_EDITABLE_STATUSES — same gate
+ *    as saveTaskData, so caption edits can't outlive the form they describe), or
+ *  - on any other entity type, the original uploader (same rule as delete).
+ */
+export async function updateCaptionService(
+  actor: { userId: number } & PrivilegeActor,
+  id: number,
+  caption: string | null
+) {
+  if (caption !== null && caption.length > ATTACHMENT_CAPTION_MAX_LENGTH) {
+    throw new HttpError(400, `Caption must be ${ATTACHMENT_CAPTION_MAX_LENGTH} characters or fewer`);
+  }
+
+  const attachment = await prisma.attachment.findFirst({ where: { id, deletedAt: null } });
+  if (!attachment) throw new HttpError(404, 'Attachment not found');
+
+  const canEditAny = hasPrivilege(actor, 'attachment:delete_any');
+  if (!canEditAny) {
+    if (attachment.entityType === 'TASK') {
+      const task = await prisma.task.findFirst({
+        where: { id: Number(attachment.entityId), deletedAt: null },
+        select: { assignedToUserId: true, status: true },
+      });
+      const isEditableByAssignee =
+        !!task &&
+        task.assignedToUserId === actor.userId &&
+        TASK_DATA_EDITABLE_STATUSES.includes(task.status);
+      if (!isEditableByAssignee) {
+        throw new HttpError(403, 'You do not have permission to caption this attachment');
+      }
+    } else if (attachment.uploadedById !== actor.userId) {
+      throw new HttpError(403, 'You do not have permission to caption this attachment');
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.attachment.update({ where: { id }, data: { caption } });
+
+    await tx.auditLog.create({
+      data: {
+        actionType: ATTACHMENT_CAPTION_UPDATED,
+        entityType: attachment.entityType,
+        entityId: attachment.entityId,
+        performedByUserId: actor.userId,
+        comment: attachment.fileName,
+        details: { attachmentId: attachment.id, caption },
+      },
+    });
+
+    const scope = feedScopeFor(attachment.entityType as AttachmentEntityType);
+    if (scope) {
+      await createFeedPost(tx, {
+        type: 'SYSTEM_EVENT',
+        scope,
+        scopeId: Number(attachment.entityId),
+        content: `✏️ Caption updated for ${attachment.fileName}`,
       });
     }
 

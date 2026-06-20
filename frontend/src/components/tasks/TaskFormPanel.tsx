@@ -6,6 +6,7 @@ import { getDatasource } from '../../api/taskApi';
 import { Lock } from 'lucide-react';
 import RichTextEditor from '../ui/RichTextEditor';
 import FileUploadField from '../ui/FileUploadField';
+import ReportBlockField, { type ReportBlockValue } from './ReportBlockField';
 
 // ─── Statuses where the form is read-only ─────────────────────────────────────
 
@@ -270,6 +271,17 @@ function FieldRenderer({
           fieldId={field.fieldId}
           disabled={disabled}
           onChange={(ids) => onChange(ids)}
+        />
+      );
+
+    case 'report_block':
+      return (
+        <ReportBlockField
+          taskId={taskId}
+          fieldId={field.fieldId}
+          value={value as ReportBlockValue | undefined}
+          onChange={(v) => onChange(v)}
+          disabled={disabled}
         />
       );
 

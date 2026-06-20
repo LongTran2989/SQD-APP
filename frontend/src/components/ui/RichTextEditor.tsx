@@ -1,12 +1,21 @@
 'use client';
 
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, type JSONContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Bold, Italic, List, ListOrdered } from 'lucide-react';
 
+export type { JSONContent };
+
 interface RichTextEditorProps {
-  value: string;
+  // HTML mode (default): value/onChange carry the editor content as an HTML string.
+  value?: string;
   onChange?: (html: string) => void;
+  // JSON mode (opt-in, used by report_block): set outputJson to seed from jsonValue
+  // and emit Tiptap/ProseMirror JSON via onChangeJson instead of HTML. value/onChange
+  // are ignored in this mode.
+  outputJson?: boolean;
+  jsonValue?: JSONContent;
+  onChangeJson?: (json: JSONContent) => void;
   disabled?: boolean;
 }
 
@@ -40,18 +49,30 @@ function ToolbarButton({
   );
 }
 
-export default function RichTextEditor({ value, onChange, disabled = false }: RichTextEditorProps) {
+export default function RichTextEditor({
+  value,
+  onChange,
+  outputJson = false,
+  jsonValue,
+  onChangeJson,
+  disabled = false,
+}: RichTextEditorProps) {
+  const initialContent = outputJson ? jsonValue || '' : value || '';
   const editor = useEditor({
     extensions: [StarterKit],
-    content: value || '',
+    content: initialContent,
     editable: !disabled,
     onUpdate: ({ editor }) => {
-      onChange?.(editor.getHTML());
+      if (outputJson) {
+        onChangeJson?.(editor.getJSON());
+      } else {
+        onChange?.(editor.getHTML());
+      }
     },
-    // Keep content in sync when value prop changes externally (e.g. initial load)
+    // Keep content in sync when the seed prop changes externally (e.g. initial load)
     onCreate: ({ editor }) => {
-      if (value && editor.isEmpty) {
-        editor.commands.setContent(value, { emitUpdate: false });
+      if (initialContent && editor.isEmpty) {
+        editor.commands.setContent(initialContent, { emitUpdate: false });
       }
     },
   });
