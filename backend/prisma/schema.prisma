@@ -581,6 +581,10 @@ model FindingResponseAction {
   createdByUserId Int
   createdByUser   User @relation("FindingResponseActionCreatedBy", fields: [createdByUserId], references: [id])
 
+  // NOTE: currently UNUSED — these rows are append-only (only ever created). No
+  // code soft-deletes a FindingResponseAction or filters reads on deletedAt. If
+  // you add a delete path, also add `where: { deletedAt: null }` to every read
+  // (Rule 2). Kept for forward-compat; safe to drop in a future schema cleanup.
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

@@ -8,8 +8,8 @@
 SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (QC) web application. It enables administrators and inspectors to create dynamic audit templates, assign tasks, conduct inspections, record findings, and track work packages.
 
 **Stack:**
-- **Frontend**: Next.js 15 (App Router), React, Tailwind CSS v4, Zustand (Auth state), Lucide Icons
-- **Backend**: Node.js, Express, TypeScript, Prisma ORM, PostgreSQL
+- **Frontend**: Next.js 16 (App Router), React 19, Tailwind CSS v4, Zustand (Auth state), Lucide Icons
+- **Backend**: Node.js, Express 5, TypeScript, Prisma ORM v6 (`@prisma/adapter-pg`), PostgreSQL
 - **Testing**: Jest + Supertest (Backend integration)
 
 ---
@@ -17,6 +17,8 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 ## 2. CURRENT IMPLEMENTATION STATUS
 
 ### Completed
+- **Doc/Code consistency audit + `Department` soft-delete fix** (2026-06-21 — branch `claude/adoring-faraday-cwqbne`)
+  > Audited `CLAUDE.md`/`CLAUDE_HANDOVER.md`/`BUSINESS_WORKFLOW.md` against the code and fixed stale claims: Next.js 15→**16**, Prisma v7→**v6**, the "Phase 6 (Findings)" status line, "DB-driven privileges = future Phase 7" (actually shipped), missing `Senior Advisor` role (6 roles, not 5), Task "10-status"→**9**, and contradictory test counts (423 vs 150). **Rule 2 reframed to be schema-driven** (any model with a `deletedAt` field) instead of a hardcoded 4-name list — and that reframe surfaced a real bug: **`Department` soft-delete leak (D-1, Low)** — 5 reads in `datasource`/`wp`/`wpBlueprint`/`finding` controllers didn't filter `deletedAt: null`, so retired departments leaked into the picker datasource and could be referenced by new WPs/blueprints/finding response actions → **fixed** (added the filter; `findUnique`→`findFirst` where a non-unique filter was required). Also confirmed `AuditLog` is append-only (no `deletedAt`; earlier concern was a false alarm) and flagged `FindingResponseAction.deletedAt` as vestigial (schema-commented, deferred). Full detail in `CODE_REVIEW_AUDIT_LOG.md` (2026-06-21 session). Backend `tsc --noEmit` clean for all edited files. **Jest suite NOT runnable in this environment — global `beforeAll` DB setup times out for every suite incl. untouched `auth.test.ts` (environmental) → run `cd backend && npm test` locally to confirm green before merge.**
 - **Generalized Auto-Generate Work Packages — P1–P6** (✅ **COMPLETE through P6**, 2026-06-17→2026-06-18 — branch `claude/determined-shannon-efxjwm`, NOT yet merged to `main`)
   > **499 backend tests passing (baseline 453 → 469 after P1–P3 → 499 after P6, +30 net new across the whole workstream). Backend `tsc --noEmit` clean. Frontend `tsc`/lint/`next build` clean (lint delta: zero new in P4, +1 in P5, +1 in P6 — both the same pre-existing `useEffect(fetchX, [fetchX])` list-page pattern, not a regression).**
   >
@@ -153,7 +155,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 
   **Design decisions:**
   - Query-param tab routing (not sub-routes) keeps the Settings sidebar item always-active and avoids new route segments.
-  - `LucideIcon` type (not `React.ReactNode`) for tab icons because Next.js 15 uses automatic JSX transform — importing the React namespace solely for its types is unnecessary.
+  - `LucideIcon` type (not `React.ReactNode`) for tab icons because Next.js 16 uses automatic JSX transform — importing the React namespace solely for its types is unnecessary.
   - Phone validation: digits only, max 12 — enforced identically on both backend (`/^\d{1,12}$/`) and frontend (live strip + same regex on submit).
 
 - **Task Slice Code Review, Security Review & Architectural Improvements** (✅ **COMPLETE**, 2026-06-14 — branch `claude/exciting-rubin-hqkxma`)
@@ -215,7 +217,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 - **Phase 5.0** — Database Schema Migration + Infrastructure (COMPLETED 2026-05-23)
   - All schema additions from Section 6 applied via `prisma db push` (dev + test DBs)
   - New models: `WorkPackage`, `WorkPackageAssignment`, `TaskActivity`, `TimeBooking`, `WpType`, `PrivilegeConfig`, `Attachment`
-  - `Task` model expanded with `taskId`, `issuerId`, `wpId`, `schemaSnapshot`, `rating`, `deadline`, and full 10-status set
+  - `Task` model expanded with `taskId`, `issuerId`, `wpId`, `schemaSnapshot`, `rating`, `deadline`, and the full task-status set (currently 9 — authority: `backend/src/constants/taskStatus.ts` `TASK_STATUSES`)
   - `AuditLog.entityId` migrated from `Int` → `String`
   - Soft delete (`deletedAt`) added to `User`, `Task`, `Finding`, `WorkPackage`
   - `Finding` expanded with Stage 2 analytical fields
@@ -1223,7 +1225,7 @@ All changes needed before Phase 5 development begins:
 | `Task` | ADD field | `rating Int?` — score 1–5; Director rates Manager tasks; Manager rates same-Division user tasks |
 | `Task` | ADD field | `estimatedHours Float?` |
 | `Task` | ADD field | `assignmentType String @default("INDIVIDUAL")` |
-| `Task` | EXPAND | `status` values to full 10-status set |
+| `Task` | EXPAND | `status` values to full task-status set (currently 9 — see `constants/taskStatus.ts`) |
 | `Finding` | ADD field | `fieldId String?` |
 | `Finding` | ADD field | `dueDate DateTime?` |
 | `Finding` | ADD field | `closedByUserId Int?` |
@@ -1521,6 +1523,7 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 53. **`launchBlueprint` validates for `Invalid Date`, not just ordering:** `timeframeFrom`/`timeframeTo` are parsed with `new Date(...)`; a malformed string produces `NaN` time values, and `NaN >= NaN` is `false`, so the pre-existing ordering check alone would silently let bad dates through. A `Number.isNaN(...)` guard now runs first and returns 400.
 
 54. **`WpBlueprint`/`TemplateSet` index additions (migration `20260619000000_add_autogen_indexes`):** `WpBlueprint` gained `@@index([isActive, recurrenceType, nextRunAt])` (covers the nightly recurrence cron's candidate query — see gotcha #42 for why recurrence is still P7-only) and `@@index([divisionId, isActive])`; `TemplateSet` gained `@@index([divisionId, isActive])`; `WorkPackage` gained `@@index([blueprintId])`. Hand-written (not `prisma migrate dev`-generated) because no `DATABASE_URL` was reachable in the review session's environment — verify the migration applies cleanly against `sqd_qa_db`/`sqd_qa_test_db` on first deploy.
+55. **Soft-delete is broader than the four "headline" models — filter `deletedAt: null` on EVERY read of any model that has the field (2026-06-21 audit):** Models with a real `deletedAt` field are `User`, `Task`, `Finding`, `WorkPackage`, `Attachment`, `CapaAction`, `Department` (the schema is the source of truth; Rule 2 in `CLAUDE.md` is now phrased this way). `Department` had a leak — picker/validation reads in `datasource.controller.ts`, `wp.controller.ts`, `wpBlueprint.controller.ts`, and `finding.controller.ts` didn't filter, so soft-deleted departments leaked into pickers and could be referenced by new records (fixed; `findUnique`→`findFirst` where a non-unique filter was needed). `AuditLog` has **no** `deletedAt` (append-only — do **not** add one). `FindingResponseAction.deletedAt` exists but is currently **unused/vestigial** (never written or filtered; schema-commented) — if you ever add a delete path for it, add `deletedAt: null` to every read first.
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 

@@ -235,7 +235,7 @@ async function validateResponseActionEntry(
   if (deptIds.length === 0 || deptIds.length !== rawIds.length) {
     throw new HttpError(400, `responseActionType '${entry.responseActionType}' requires an array of positive integer department IDs`);
   }
-  const deptCount = await client.department.count({ where: { id: { in: deptIds } } });
+  const deptCount = await client.department.count({ where: { id: { in: deptIds }, deletedAt: null } });
   if (deptCount !== deptIds.length) {
     throw new HttpError(400, 'One or more targetDepartmentIds not found');
   }
@@ -308,7 +308,7 @@ export async function createFindingService(
   }
 
   // Department must exist.
-  const department = await client.department.findUnique({ where: { id: departmentId }, select: { id: true } });
+  const department = await client.department.findFirst({ where: { id: departmentId, deletedAt: null }, select: { id: true } });
   if (!department) throw new HttpError(400, 'Department not found');
 
   // Optional aircraft registration must reference an existing registration.

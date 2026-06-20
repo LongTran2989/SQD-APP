@@ -6,13 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A full-stack aviation maintenance Quality Assurance (QA) and Quality Control (QC) web application for managing dynamic audit templates, task assignment, inspections, findings, and work packages.
 
-**Status:** Phase 6 (Findings System) — ACTIVE DEVELOPMENT (Phase 5 fully complete)
+**Status:** Core platform live through Phase 7 (Global Privilege Management). Shipped workstreams include Findings, Escalation / Unified Feed, Time Booking, Analytics, CAPA/RCA, and Auto-Generate Work Packages (P1–P6). See `CLAUDE_HANDOVER.md` §2 for the authoritative, up-to-date status.
 
 ---
 
-## NEXT.JS 15 WARNING
+## NEXT.JS 16 WARNING
 
-This project uses **Next.js 15** which has breaking changes from prior versions. APIs, conventions, and file structure may differ from training data. Before writing any frontend code, read the relevant guide in `frontend/node_modules/next/dist/docs/`. Heed deprecation notices.
+This project uses **Next.js 16** (with React 19) which has breaking changes from prior versions. APIs, conventions, and file structure may differ from training data. Before writing any frontend code, read the relevant guide in `frontend/node_modules/next/dist/docs/`. Heed deprecation notices.
 
 ---
 
@@ -21,7 +21,7 @@ This project uses **Next.js 15** which has breaking changes from prior versions.
 Violating any of these rules silently breaks data integrity, compliance, or RBAC. No exceptions.
 
 1. **Plan before coding.** List every file you will change and what you will do. For DB migrations, describe exactly what changes and confirm it is reversible. Wait for explicit approval before proceeding.
-2. **Soft delete filter — MANDATORY.** `User`, `Task`, `Finding`, `WorkPackage` are NEVER physically deleted. Every Prisma query on these models MUST include `where: { deletedAt: null }`. No exceptions — every controller, every endpoint.
+2. **Soft delete filter — MANDATORY.** Any model with a `deletedAt` field is NEVER physically deleted, and every read MUST include `where: { deletedAt: null }` — every controller, every endpoint, no exceptions. The schema is the source of truth for which models these are (currently `User`, `Task`, `Finding`, `WorkPackage`, `Attachment`, `CapaAction`, `Department`). When you add a `deletedAt` to a model, you take on this obligation for ALL of its reads — including pickers/datasources and existence-validation lookups, not just list endpoints.
 3. **Dual write — MANDATORY.** Every status change or significant event writes to BOTH `AuditLog` (compliance) AND `TaskActivity` (`SYSTEM_EVENT`). Never one without the other.
 4. **Draft encapsulation.** On Template publish, ALWAYS set `draftSchema: null`. Never mutate `formSchema` of a Published template — edits go to `draftSchema` only.
 5. **Schema snapshot.** Every Task stores `schemaSnapshot` (copy of `formSchema`) at creation time. Never render a Task form from the live Template `formSchema`.
@@ -64,9 +64,9 @@ Read these before touching code — they supersede this file:
 
 ## TECHNOLOGY STACK
 
-**Frontend:** Next.js 15 (App Router, React 19), Tailwind CSS v4, Zustand (auth state), Axios, TypeScript 5 strict, ESLint 9
+**Frontend:** Next.js 16 (App Router, React 19), Tailwind CSS v4, Zustand (auth state), Axios, TypeScript 5 strict, ESLint 9
 
-**Backend:** Express.js 5, Node.js, TypeScript 6 strict (ES2020/commonjs), Prisma ORM v7 + `@prisma/adapter-pg`, Jest 30 + Supertest
+**Backend:** Express.js 5, Node.js, TypeScript 6 strict (ES2020/commonjs), Prisma ORM v6 + `@prisma/adapter-pg`, Jest 30 + Supertest
 
 **Database:** PostgreSQL — `sqd_qa_db` (dev), `sqd_qa_test_db` (tests)
 
@@ -77,13 +77,14 @@ Read these before touching code — they supersede this file:
 - JWT tokens (`JWT_SECRET` env var), bcrypt password hashing, session tracking via `activeSessionId` UUID
 - Test mode: `ENFORCE_SINGLE_SESSION=false` in `.env.test`
 
-**Role hierarchy (highest → lowest):** Director → Admin → Manager → Group Leader → Staff
+**Roles (see `constants/privileges.ts` `ROLE_NAMES` for the authoritative list):** Director, Admin, Manager, Group Leader, Staff, Senior Advisor
 - Director: global access, assign to anyone, review globally
 - Manager: division-scoped; assign/review within division
 - Group Leader: create/assign tasks in assigned WPs (division-scoped)
 - Staff: perform assigned tasks; self-assign unassigned tasks
+- Senior Advisor: senior oversight role (seeded in the BOD division) with global dashboard visibility alongside Director/Admin; exact grants in `constants/privileges.ts`
 
-Privilege rules hardcoded in Phase 5; database-driven in Phase 7 via `PrivilegeConfig` model.
+Privileges are **database-driven (implemented, "Phase 7")** via the `PrivilegeConfig` model: `hasPrivilege` (`utils/privilegeAccess.ts`) resolves a live per-role `permissions` map and falls back per-key to `DEFAULT_PRIVILEGES` (`constants/privileges.ts`), which encodes the original hardcoded behaviour. Relationship grants, division-scope checks, and feed transparency remain hardcoded by design.
 
 ---
 
@@ -97,7 +98,7 @@ Privilege rules hardcoded in Phase 5; database-driven in Phase 7 via `PrivilegeC
 
 **Status Machines:**
 - Template: Draft → Published → Archived
-- Task: 10-status lifecycle (see `CLAUDE_HANDOVER.md`)
+- Task: 9-status lifecycle — Unassigned, Assigned, In Progress, In Review, Follow-up Required, Closed, Rejected, Terminated, Inactive (authority: `constants/taskStatus.ts` `TASK_STATUSES`)
 - Finding: Open → In Progress → Pending Verification → Closed
 - WorkPackage: Open → In Progress → Overdue / Closed / Inactive
 
@@ -114,7 +115,7 @@ npm run test
 npm run test -- auth.test.ts
 ```
 
-Always targets `sqd_qa_test_db` (Rule 8). Database wiped in `beforeEach`. All 423 tests must pass before and after every change (count as of 2026-06-14; verify the actual count with `npm test` before starting).
+Always targets `sqd_qa_test_db` (Rule 8). Database wiped in `beforeEach`. The full suite must pass before and after every change (last recorded baseline ≈499, `CLAUDE_HANDOVER.md` rev 17, 2026-06-18 — always verify the actual current count with `npm test` before starting; the number grows as features land).
 
 ---
 
@@ -170,6 +171,6 @@ All other findings from reviews on this branch are fixed. New findings from futu
 1. Re-read **NON-NEGOTIABLE RULES** above.
 2. Read `CLAUDE_HANDOVER.md` Sections 1, 2, 3, 6, and 10.
 3. Plan every file change, get approval before touching code (Rule 1).
-4. Run `cd backend && npm run test` — confirm 150 pass as baseline.
+4. Run `cd backend && npm run test` — confirm the full suite passes as your baseline (≈499 per `CLAUDE_HANDOVER.md` rev 17; verify the actual count).
 5. After user confirms completion, update `CLAUDE_HANDOVER.md` (Rule 12).
 6. After an accepted code/security review, update `CODE_REVIEW_AUDIT_LOG.md` (Rule 13).

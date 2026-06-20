@@ -13,6 +13,24 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-21 — Doc/Code Consistency Audit + Soft-Delete Filter Investigation
+
+**Branch reviewed:** `claude/adoring-faraday-cwqbne` (working tree).
+**Scope:** Manual audit. (1) Doc-vs-code consistency check of `CLAUDE.md`, `CLAUDE_HANDOVER.md`, `BUSINESS_WORKFLOW.md` against schema, constants, `package.json`, and installed `node_modules`. (2) Follow-up investigation of two soft-delete questions raised during that audit: Rule 2's model coverage, and whether `AuditLog` is soft-deletable. Code touched: `backend/src/controllers/{datasource,wp,wpBlueprint,finding}.controller.ts` + `backend/prisma/schema.prisma` (comment-only).
+**Tests after fixes:** Backend `tsc --noEmit` clean for all four edited controllers (the only errors are pre-existing `exactOptionalPropertyTypes` issues in `notification.test.ts`, confirmed present before this session and untouched). **Jest suite could NOT be run in this environment — the global `beforeAll` DB setup (`$queryRaw` table-wipe) times out at 5s for every suite, including files this session never touched (`auth.test.ts` reproduces it identically) → environmental, not a regression. User must run `cd backend && npm test` locally to confirm green before merge.** Schema edit is comment-only → no migration / `prisma generate` needed.
+**Method:** Two Explore passes mapping every model's `deletedAt` field + soft-delete writes + read-filter coverage across schema and controllers → direct read of each suspect call site → user triage (fix / note-only).
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| D-1 | Low (correctness / soft-delete leak, Rule 2) | `datasource.controller.ts:16`, `wp.controller.ts:57`, `wpBlueprint.controller.ts:101`, `finding.controller.ts:238` & `:311` | `Department` is soft-deletable (`referenceData.controller.ts:76` sets `deletedAt`) and `listDepartments` filters correctly, but 5 reads did NOT filter `deletedAt: null` — soft-deleted departments leaked into the picker datasource and could be referenced by new WPs, blueprints, and finding response actions. | ✅ Fixed — added `deletedAt: null`; the 3 `findUnique` lookups converted to `findFirst` (a non-unique filter is invalid on `findUnique`). Same nullable return type, no caller change. |
+| D-2 | Info (false alarm) | `AuditLog` (`schema.prisma`) | An earlier note suspected `AuditLog` carried a `deletedAt` (immutability concern). Investigation: the model has NO `deletedAt` field; it is never `.update()`/`.delete()`'d in production — the only deletes are test-cleanup `deleteMany` in `__tests__/`. `AuditLog` is genuinely append-only. | ✔ Accepted-as-is — no action; earlier flag was a buggy-`awk` misread, corrected. |
+| D-3 | Low (dead field) | `FindingResponseAction.deletedAt` (`schema.prisma`) | Field exists but is fully vestigial: rows are only ever `create`d — never soft-deleted, never physically deleted, and no read filters on it. Implies soft-delete semantics that aren't wired up. | ⏭ Deferred — left in place with an explanatory schema comment (append-only today; if a delete path is ever added, add `deletedAt: null` to every read per Rule 2). Safe to drop in a future schema cleanup; removing now needs a migration for no current benefit. |
+| DOC-1 | N/A (doc accuracy) | `CLAUDE.md`, `CLAUDE_HANDOVER.md`, `BUSINESS_WORKFLOW.md` | Stale/incorrect claims: Next.js 15→actually **16**; Prisma v7→actually **v6**; top-line status stuck at "Phase 6 (Findings)" while Phase 7 (Privileges) + many workstreams shipped; DB-driven privileges framed as future though implemented; role list missing `Senior Advisor` (6 roles, not 5); Task "10-status" → actually **9**; contradictory test counts (423 vs 150). | ✅ Fixed — versions/status/roles/status-count corrected; **Rule 2 reframed to be schema-driven** ("any model with a `deletedAt` field… currently User, Task, Finding, WorkPackage, Attachment, CapaAction, Department") instead of a hardcoded 4-name list — this reframe is what surfaced D-1. |
+
+**Notes / still open:** `Task`/`Finding`/`WorkPackage` have NO delete handler yet — their `deletedAt` + read-filtering is forward-looking/defensive (correct). `CapaAction` soft-delete is fully consistent (all 13 reads filter, incl. `workload.controller.ts:355`). The single remaining open item is D-3 (vestigial field, deferred). Nothing production-blocking.
+
+---
+
 ## Session: 2026-06-20 — Personnel Analytics Tab Filter/Sort Review
 
 **Branch reviewed:** `claude/gallant-thompson-y1gn85`.

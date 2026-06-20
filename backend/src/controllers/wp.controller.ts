@@ -54,7 +54,7 @@ async function resolveWpTypeFields(
   if (type === 'AUDIT') {
     let deptId: number | null = null;
     if (input.targetDepartmentId != null) {
-      const dept = await prisma.department.findUnique({ where: { id: Number(input.targetDepartmentId) } });
+      const dept = await prisma.department.findFirst({ where: { id: Number(input.targetDepartmentId), deletedAt: null } });
       if (!dept) {
         res.status(400).json({ message: 'targetDepartmentId references a non-existent department' });
         return null;
