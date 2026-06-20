@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BarChart2, Star, AlertTriangle, Clock, ClipboardList } from 'lucide-react';
+import { BarChart2, Star, AlertTriangle, Clock, ClipboardList, Users } from 'lucide-react';
 import {
   getTimeBookingAnalytics,
   TimeBookingAnalytics,
 } from '../../../api/taskApi';
 import FindingsTab from './FindingsTab';
+import PersonnelTab from './PersonnelTab';
 
 // ─── Display helpers ────────────────────────────────────────────────────────
 
@@ -233,11 +234,12 @@ function TimeBookingTab() {
 
 // ─── Page (tab shell) ───────────────────────────────────────────────────────
 
-type TabKey = 'time' | 'findings';
+type TabKey = 'time' | 'findings' | 'personnel';
 
 const TABS: { key: TabKey; label: string; icon: typeof Clock }[] = [
   { key: 'time', label: 'Time Efficiency', icon: Clock },
   { key: 'findings', label: 'Findings', icon: ClipboardList },
+  { key: 'personnel', label: 'Personnel', icon: Users },
 ];
 
 export default function AnalyticsPage() {
@@ -279,7 +281,9 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Active tab */}
-      {tab === 'time' ? <TimeBookingTab /> : <FindingsTab />}
+      {tab === 'time' && <TimeBookingTab />}
+      {tab === 'findings' && <FindingsTab />}
+      {tab === 'personnel' && <PersonnelTab />}
     </div>
   );
 }
