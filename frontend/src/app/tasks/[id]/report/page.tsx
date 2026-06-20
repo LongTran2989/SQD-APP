@@ -187,10 +187,10 @@ export default function TaskReportPage() {
 
       {/* Fields */}
       <div className="space-y-8">
-        {schema.map((field) => {
+        {schema.map((field, idx) => {
           const value = formData[field.fieldId];
           return (
-            <section key={field.fieldId} className="break-inside-avoid">
+            <section key={field.fieldId ?? `field-${idx}`} className="break-inside-avoid">
               <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-2">{field.label}</h2>
 
               {field.type === 'rich_text' && (
