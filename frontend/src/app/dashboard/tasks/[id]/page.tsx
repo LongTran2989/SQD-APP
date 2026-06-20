@@ -254,7 +254,6 @@ export default function TaskDetailPage() {
         {task.taskData?.data && Object.keys(task.taskData.data).length > 0 && (
           <Link
             href={`/tasks/${task.id}/report`}
-            target="_blank"
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-600 text-slate-600 text-sm font-semibold rounded-xl shadow-sm transition-colors flex-shrink-0"
           >
             <FileText className="w-4 h-4" />
