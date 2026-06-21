@@ -576,10 +576,13 @@ describe('Findings Backend (Phase 6)', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   describe('Close', () => {
+    // Uses an Observation severity so the finding closes without the graded
+    // closed-loop gate (RCA + verified corrective CAPA), which applies only to
+    // Level 1 / Level 2 per the default FINDING_WORKFLOW_CONFIG.
     async function makePendingVerification(): Promise<number> {
       const r = await raiseFinding(staffToken);
       const findingId = r.body.id;
-      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Observation' });
       const gen = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: autoCloseTemplateId, title: 'CAR' }] });
       const followUpId = gen.body.createdTasks[0].id;
       await prisma.task.update({ where: { id: followUpId }, data: { assignedToUserId: staffId, status: 'Assigned' } });
@@ -589,26 +592,32 @@ describe('Findings Backend (Phase 6)', () => {
 
     it('F60: cannot close when not Pending Verification → 400', async () => {
       const r = await raiseFinding(staffToken);
-      const res = await request(app).put(`/api/findings/${r.body.id}/close`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${r.body.id}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'Closing out' });
+      expect(res.status).toBe(400);
+    });
+
+    it('F60b: cannot close without a closure note → 400', async () => {
+      const findingId = await makePendingVerification();
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(400);
     });
 
     it('F61: Manager can close a Pending Verification finding directly (no Stage 2 gate)', async () => {
       const findingId = await makePendingVerification();
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'Verified and closed' });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');
     });
 
     it('F62: Staff cannot close → 403', async () => {
       const findingId = await makePendingVerification();
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${staffToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${staffToken}`).send({ closureNote: 'x' });
       expect(res.status).toBe(403);
     });
 
     it('F63: Manager closes → status Closed, closedBy set', async () => {
       const findingId = await makePendingVerification();
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'Closed after verification' });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');
       expect(res.body.closedByUserId).toBe(managerId);

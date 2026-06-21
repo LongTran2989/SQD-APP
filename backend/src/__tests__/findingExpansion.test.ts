@@ -157,10 +157,17 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
       .send({ taskId: sourceTaskId, eventType: 'Procedural Breach', departmentId, description: 'Issue', ...overrides });
 
   // Drive a finding to Pending Verification with one Closed follow-up task.
-  async function makePendingVerification(reporterToken = staffToken): Promise<{ findingId: number; followUpId: number }> {
+  // Severity defaults to 'Observation' so the graded closed-loop presence-gate
+  // (RCA + verified corrective CAPA, required for Level 1/Level 2) does not
+  // interfere with tests that exercise other mechanics. Pass a severity to test
+  // the graded gates explicitly.
+  async function makePendingVerification(
+    reporterToken = staffToken,
+    severity = 'Observation'
+  ): Promise<{ findingId: number; followUpId: number }> {
     const r = await raiseFinding(reporterToken);
     const findingId = r.body.id;
-    await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+    await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity });
     const gen = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: autoCloseTemplateId, title: 'CAR' }] });
     const followUpId = gen.body.createdTasks[0].id;
     await prisma.task.update({ where: { id: followUpId }, data: { assignedToUserId: staffId, status: 'Assigned' } });
@@ -336,7 +343,7 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
     it('C09: close is BLOCKED while a corrective CAPA is unverified → 400', async () => {
       const { findingId } = await makePendingVerification();
       await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'closing' });
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch(/corrective/i);
     });
@@ -345,8 +352,8 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
       const { findingId, followUpId } = await makePendingVerification();
       const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
       await request(app).post(`/api/findings/${findingId}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EFFECTIVENESS', taskId: followUpId });
-      await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`);
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`).send({ effectivenessNote: 'Effective on re-check' });
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'corrective verified, closing' });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');
     });
@@ -354,14 +361,47 @@ describe('Findings Expansion (RCA / CAPA / Taxonomy / Trend)', () => {
     it('C11: close is BLOCKED while an RCA is still Draft → 400', async () => {
       const { findingId } = await makePendingVerification();
       await request(app).put(`/api/findings/${findingId}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'OTHER' });
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'closing' });
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch(/rca|complete/i);
     });
 
-    it('C12: REGRESSION — legacy finding with no RCA/CAPA still closes', async () => {
+    it('C12: an Observation with no RCA/CAPA closes (graded gate does not apply)', async () => {
+      const { findingId } = await makePendingVerification();
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'Observation closed' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Closed');
+    });
+
+    it('C12a: close is BLOCKED without a closure note → 400', async () => {
       const { findingId } = await makePendingVerification();
       const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/closure note/i);
+    });
+
+    it('C12b: a Level 1 finding with no RCA is BLOCKED from closing → 400', async () => {
+      const { findingId } = await makePendingVerification(staffToken, 'Level 1');
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'closing' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/root cause|rca/i);
+    });
+
+    it('C12c: a Level 1 finding with a Complete RCA but no corrective CAPA is BLOCKED → 400', async () => {
+      const { findingId } = await makePendingVerification(staffToken, 'Level 1');
+      await request(app).put(`/api/findings/${findingId}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'OTHER', status: 'Complete', causeCodeId: causeA });
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'closing' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/corrective/i);
+    });
+
+    it('C12d: a Level 1 finding closes once RCA Complete + corrective CAPA verified', async () => {
+      const { findingId, followUpId } = await makePendingVerification(staffToken, 'Level 1');
+      await request(app).put(`/api/findings/${findingId}/rca`).set('Authorization', `Bearer ${managerToken}`).send({ method: 'OTHER', status: 'Complete', causeCodeId: causeA });
+      const capa = await request(app).post(`/api/findings/${findingId}/capa`).set('Authorization', `Bearer ${managerToken}`).send({ type: 'CORRECTIVE', description: 'fix' });
+      await request(app).post(`/api/findings/${findingId}/capa/${capa.body.id}/links`).set('Authorization', `Bearer ${managerToken}`).send({ role: 'EFFECTIVENESS', taskId: followUpId });
+      await request(app).put(`/api/findings/${findingId}/capa/${capa.body.id}/verify`).set('Authorization', `Bearer ${managerToken}`).send({ effectivenessNote: 'Effective' });
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'Full closed loop complete' });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');
     });

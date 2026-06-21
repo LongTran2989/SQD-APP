@@ -43,6 +43,7 @@ export default function FindingDetailPage() {
   const [showGenerate, setShowGenerate] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [closureNote, setClosureNote] = useState('');
 
   const load = useCallback(async () => {
     if (!findingId) return;
@@ -64,9 +65,13 @@ export default function FindingDetailPage() {
   }, [load]);
 
   const handleClose = async () => {
+    if (!closureNote.trim()) {
+      toast.error('A closure note is required');
+      return;
+    }
     setClosing(true);
     try {
-      await closeFinding(findingId);
+      await closeFinding(findingId, closureNote.trim());
       toast.success('Finding closed');
       router.push('/dashboard/findings');
     } catch (err: unknown) {
@@ -301,16 +306,27 @@ export default function FindingDetailPage() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-sm text-slate-500 mb-6">
+            <p className="text-sm text-slate-500 mb-4">
               This signs off Finding #{finding.id} as resolved. This action records a compliance audit entry.
             </p>
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
+              Closure note <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={closureNote}
+              onChange={(e) => setClosureNote(e.target.value)}
+              maxLength={2000}
+              rows={4}
+              placeholder="Summarise the resolution and objective evidence supporting closure…"
+              className="w-full mb-6 px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500/40 resize-y"
+            />
             <div className="flex items-center justify-end gap-2">
               <button onClick={() => setShowCloseConfirm(false)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 font-medium">
                 Cancel
               </button>
               <button
                 onClick={handleClose}
-                disabled={closing}
+                disabled={closing || !closureNote.trim()}
                 className="inline-flex items-center gap-2 px-5 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
               >
                 {closing ? 'Closing…' : 'Confirm Close'}

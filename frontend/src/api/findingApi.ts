@@ -90,8 +90,8 @@ export const generateFollowUpTasks = (
 
 // ─── Close + workflow escapes ────────────────────────────────────────────────
 
-export const closeFinding = (id: number): Promise<Finding> =>
-  apiClient.put(`/findings/${id}/close`).then((r) => r.data);
+export const closeFinding = (id: number, closureNote: string): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/close`, { closureNote }).then((r) => r.data);
 
 export const advanceFinding = (id: number): Promise<Finding> =>
   apiClient.put(`/findings/${id}/advance`).then((r) => r.data);

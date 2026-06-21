@@ -23,6 +23,7 @@ import * as path from 'path';
 import 'dotenv/config';
 import { seedPrivileges } from '../src/seeds/seed-privileges';
 import { FILE_UPLOAD_CONFIG_KEY, DEFAULT_FILE_UPLOAD_CONFIG } from '../src/constants/fileUpload';
+import { FINDING_WORKFLOW_CONFIG_KEY, DEFAULT_FINDING_WORKFLOW_CONFIG } from '../src/constants/findingWorkflowConfig';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -127,6 +128,18 @@ async function main() {
       key:         FILE_UPLOAD_CONFIG_KEY,
       value:       JSON.stringify(DEFAULT_FILE_UPLOAD_CONFIG),
       description: 'Allowed file types and size limits for uploads (per-category + total per record).',
+    },
+  });
+  // Admin-configurable finding-workflow policy (closure gate + SLA per severity).
+  // Seeded from src/constants/findingWorkflowConfig.ts. Idempotent — `update: {}`
+  // never clobbers an Admin's customised value.
+  await prisma.systemSetting.upsert({
+    where:  { key: FINDING_WORKFLOW_CONFIG_KEY },
+    update: {},
+    create: {
+      key:         FINDING_WORKFLOW_CONFIG_KEY,
+      value:       JSON.stringify(DEFAULT_FINDING_WORKFLOW_CONFIG),
+      description: 'Per-severity finding closure-gate requirements (RCA / corrective CAPA) and SLA due-date policy.',
     },
   });
   console.log('✅ System settings seeded');

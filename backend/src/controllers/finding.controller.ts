@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { logFindingAuditAndActivity, evaluateCloseGate } from '../services/findingService';
+import { logFindingAuditAndActivity, evaluateCloseGate, getFindingWorkflowConfig } from '../services/findingService';
+import { slaForSeverity } from '../constants/findingWorkflowConfig';
 import { computeTrendForSignature } from '../services/trendService';
 import { buildFindingScope, assertManagerDivisionScope, isFindingReviewer } from '../utils/findingAccess';
 import { hasPrivilege } from '../utils/privilegeAccess';
@@ -616,9 +617,22 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
     // Whether this review actually changes the finding's taxonomy (for audit).
     const taxonomyChanged = ataChapterId !== undefined || (tagIds !== null && tagIds.length > 0);
 
+    // Classification-driven due date (SLA). When the chosen severity makes a due
+    // date mandatory, reject a review that omits one — unless a per-severity
+    // default timescale is configured, in which case we auto-fill it.
+    const workflowConfig = await getFindingWorkflowConfig(prisma);
+    const sla = slaForSeverity(workflowConfig, severity);
+    let parsedDueDate = dueDate ? new Date(dueDate) : null;
+    if (!parsedDueDate && sla.days != null) {
+      parsedDueDate = new Date(Date.now() + sla.days * 24 * 60 * 60 * 1000);
+    }
+    if (sla.mandatory && !parsedDueDate) {
+      res.status(400).json({ message: `A due date is required when reviewing a ${severity} finding` });
+      return;
+    }
+
     const reviewerName = await getUserName(userId);
     const newStatus = 'In Progress';
-    const parsedDueDate = dueDate ? new Date(dueDate) : null;
 
     const updated = await prisma.$transaction(async (tx) => {
       // Replace hazard tags only when the caller explicitly provided the field.
@@ -970,8 +984,21 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
   try {
     const id = parseInt(req.params.id as string, 10);
     const { userId, role } = req.user!;
+    const { closureNote } = req.body ?? {};
 
     if (!requireReviewerRole(res, req.user!, 'close findings')) return;
+
+    // Closure sign-off: an auditable close-out rationale is mandatory and bounded
+    // (2000 chars, per the 2026-06-09 free-text hardening convention).
+    if (!closureNote || typeof closureNote !== 'string' || !closureNote.trim()) {
+      res.status(400).json({ message: 'A closure note is required to close a finding' });
+      return;
+    }
+    if (closureNote.length > 2000) {
+      res.status(400).json({ message: 'Closure note must be 2000 characters or fewer' });
+      return;
+    }
+    const trimmedClosureNote = closureNote.trim();
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
@@ -1013,13 +1040,14 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
         'CLOSED',
         userId,
         `Finding #${finding.id} closed by ${actorName}`,
-        { findingId: finding.id, fromStatus: finding.status, toStatus: 'Closed' }
+        { findingId: finding.id, fromStatus: finding.status, toStatus: 'Closed', closureNote: trimmedClosureNote },
+        trimmedClosureNote
       );
 
       await logFindingActivity(
         finding.id,
-        `Finding closed by ${actorName}`,
-        { findingId: finding.id },
+        `Finding closed by ${actorName}: ${trimmedClosureNote}`,
+        { findingId: finding.id, closureNote: trimmedClosureNote },
         tx
       );
 
