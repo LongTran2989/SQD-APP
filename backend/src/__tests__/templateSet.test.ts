@@ -112,14 +112,14 @@ describe('Template Set Backend', () => {
       expect(res.body.message).toMatch(/Published/);
     });
 
-    it('rejects a template from another division (400)', async () => {
+    it('allows a template owned by another division (templates are global)', async () => {
       const foreign = await publishTemplate(otherDivisionId);
       const res = await request(app)
         .post('/api/template-sets')
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ name: 'X', divisionId, items: [{ templateId: foreign.id }] });
-      expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/another division/);
+      expect(res.status).toBe(201);
+      expect(res.body.items[0].templateId).toBe(foreign.id);
     });
 
     it('rejects duplicate orderIndex (400)', async () => {
