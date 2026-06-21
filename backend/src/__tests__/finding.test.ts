@@ -439,6 +439,63 @@ describe('Findings Backend (Phase 6)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
+  // Group 4b — Director-editable review due date (PUT /:id/due-date)
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('Update due date (Director)', () => {
+    let findingId: number;
+    const future = (days: number) => new Date(Date.now() + days * 86400000).toISOString();
+    beforeEach(async () => {
+      const r = await raiseFinding(staffToken);
+      findingId = r.body.id;
+      // Review so it carries an initial SLA due date (status → In Progress).
+      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1', dueDate: future(7) });
+    });
+
+    it('DD01: Director changes the due date with a reason → 200 + DUE_DATE_UPDATED audit', async () => {
+      const newDue = future(30);
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: newDue, reason: 'Extended after scope review' });
+      expect(res.status).toBe(200);
+      expect(new Date(res.body.dueDate).toISOString().slice(0, 10)).toBe(new Date(newDue).toISOString().slice(0, 10));
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(findingId), actionType: 'DUE_DATE_UPDATED' } });
+      expect(audit).not.toBeNull();
+      expect((audit!.details as any).reason).toBe('Extended after scope review');
+    });
+
+    it('DD02: a Manager cannot change the due date → 403', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${managerToken}`).send({ dueDate: future(30), reason: 'x' });
+      expect(res.status).toBe(403);
+    });
+
+    it('DD03: missing reason → 400', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: future(30) });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/reason/i);
+    });
+
+    it('DD04: malformed dueDate → 400', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: 'not-a-date', reason: 'x' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/dueDate/i);
+    });
+
+    it('DD05: cannot change the due date of a Closed finding → 400', async () => {
+      await prisma.finding.update({ where: { id: findingId }, data: { status: 'Closed' } });
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: future(30), reason: 'x' });
+      expect(res.status).toBe(400);
+    });
+
+    it('DD06: extending a breached due date into the future clears the overdue flag on read', async () => {
+      await prisma.finding.update({ where: { id: findingId }, data: { dueDate: new Date(Date.now() - 86400000) } });
+      let g = await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(g.body.dueDateBreached).toBe(true);
+      await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: future(14), reason: 'Granting extension' });
+      g = await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(g.body.dueDateBreached).toBe(false);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
   // Group 5 — Generate follow-up tasks
   // ────────────────────────────────────────────────────────────────────────
 

@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
 import { FindingDetail } from '../../../../types';
-import { getFindingById, closeFinding } from '../../../../api/findingApi';
+import { getFindingById, closeFinding, updateFindingDueDate } from '../../../../api/findingApi';
 import { SeverityBadge, FindingStatusBadge, ResponseActionBadge } from '../../../../components/findings/FindingBadges';
 import ReviewPanel from '../../../../components/findings/ReviewPanel';
 import GenerateFollowUpModal from '../../../../components/findings/GenerateFollowUpModal';
@@ -19,7 +19,7 @@ import FileUploadField from '../../../../components/ui/FileUploadField';
 import EditDetailsModal from '../../../../components/findings/EditDetailsModal';
 import TaskQuickViewPanel from '../../../../components/findings/TaskQuickViewPanel';
 import toast from 'react-hot-toast';
-import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X, Pencil, Copy } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X, Pencil, Copy, CalendarClock } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,10 @@ export default function FindingDetailPage() {
   const [closureNote, setClosureNote] = useState('');
   const [showEditDetails, setShowEditDetails] = useState(false);
   const [quickViewTaskId, setQuickViewTaskId] = useState<number | null>(null);
+  const [showEditDueDate, setShowEditDueDate] = useState(false);
+  const [dueDateDraft, setDueDateDraft] = useState('');
+  const [dueDateReason, setDueDateReason] = useState('');
+  const [savingDueDate, setSavingDueDate] = useState(false);
 
   const load = useCallback(async () => {
     if (!findingId) return;
@@ -67,6 +71,30 @@ export default function FindingDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleSaveDueDate = async () => {
+    if (!dueDateDraft) {
+      toast.error('Pick a due date');
+      return;
+    }
+    if (!dueDateReason.trim()) {
+      toast.error('A reason is required');
+      return;
+    }
+    setSavingDueDate(true);
+    try {
+      await updateFindingDueDate(findingId, { dueDate: dueDateDraft, reason: dueDateReason.trim() });
+      toast.success('Due date updated');
+      setShowEditDueDate(false);
+      setDueDateReason('');
+      await load();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg || 'Failed to update due date');
+    } finally {
+      setSavingDueDate(false);
+    }
+  };
 
   const handleClose = async () => {
     if (!closureNote.trim()) {
@@ -124,6 +152,8 @@ export default function FindingDetailPage() {
   // Optional context (ATA / hazard / aircraft / refs) can be enriched post-raise
   // by anyone working the finding while it is not Closed/Dismissed — feeds trends.
   const canEditDetails = (isReporter || isFollowUpAssignee || isMgrDir) && !['Closed', 'Dismissed'].includes(finding.status);
+  // Only a Director may change the review/SLA due date after it is set.
+  const canEditDueDate = user.role === 'Director' && !['Closed', 'Dismissed'].includes(finding.status);
   // Dismissed-as-duplicate: surface where the work is actually being managed.
   const duplicateOf = finding.status === 'Dismissed'
     ? finding.linksFrom.find((l) => l.linkType === 'DUPLICATE')?.relatedFinding
@@ -196,11 +226,24 @@ export default function FindingDetailPage() {
                 <FindingStatusBadge status={finding.status} />
                 <SeverityBadge severity={finding.severity} />
               </div>
-              <div className="text-sm">
+              <div className="text-sm flex items-center gap-1.5">
                 <span className="text-slate-400">Due: </span>
                 <span className={finding.dueDateBreached ? 'text-red-600 font-semibold' : 'text-slate-700'}>
                   {formatDate(finding.dueDate)}
                 </span>
+                {canEditDueDate && (
+                  <button
+                    onClick={() => {
+                      setDueDateDraft(finding.dueDate ? new Date(finding.dueDate).toISOString().slice(0, 10) : '');
+                      setDueDateReason('');
+                      setShowEditDueDate(true);
+                    }}
+                    className="p-1 text-slate-400 hover:text-blue-600 rounded transition-colors"
+                    title="Change due date (Director only)"
+                  >
+                    <CalendarClock className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
             {finding.sourceTask && (
@@ -378,6 +421,59 @@ export default function FindingDetailPage() {
       {/* Follow-up task quick-view drawer */}
       {quickViewTaskId != null && (
         <TaskQuickViewPanel taskId={quickViewTaskId} onClose={() => setQuickViewTaskId(null)} />
+      )}
+
+      {/* Director: change review due date */}
+      {showEditDueDate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <CalendarClock className="w-4 h-4 text-blue-500" />
+                Change due date
+              </h3>
+              <button onClick={() => setShowEditDueDate(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-500 mb-4">
+              Adjust the review deadline for Finding #{finding.id}. The change is recorded in the compliance audit trail.
+            </p>
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
+              New due date <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              value={dueDateDraft}
+              onChange={(e) => setDueDateDraft(e.target.value)}
+              max="9999-12-31"
+              className="w-full mb-4 px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            />
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
+              Reason <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={dueDateReason}
+              onChange={(e) => setDueDateReason(e.target.value)}
+              maxLength={2000}
+              rows={3}
+              placeholder="Why is the deadline being changed?"
+              className="w-full mb-6 px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-y"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={() => setShowEditDueDate(false)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 font-medium">
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveDueDate}
+                disabled={savingDueDate || !dueDateDraft || !dueDateReason.trim()}
+                className="inline-flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+              >
+                {savingDueDate ? 'Saving…' : 'Save due date'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Close confirm modal */}

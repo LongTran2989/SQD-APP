@@ -1643,3 +1643,90 @@ export const updateFindingDetails = async (req: Request, res: Response): Promise
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+// ─── PUT /api/findings/:id/due-date ───────────────────────────────────────────
+// Director-only: change a finding's review/SLA due date after it has been set,
+// with a mandatory reason. Dual-writes a DUE_DATE_UPDATED event. The "overdue"
+// status is derived on read (computeDueDateBreached) from the new date, so a
+// future date clears the badge automatically — no stored flag to reset. The
+// append-only DUE_DATE_BREACHED audit row is intentionally left untouched.
+export const updateFindingDueDate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+    const { dueDate, reason } = req.body ?? {};
+
+    // Director-only by design — narrower than the finding-reviewer set.
+    if (role !== 'Director') {
+      res.status(403).json({ message: 'Only a Director may change a finding due date' });
+      return;
+    }
+
+    if (!dueDate) {
+      res.status(400).json({ message: 'dueDate is required' });
+      return;
+    }
+    const parsedDueDate = new Date(dueDate);
+    if (isNaN(parsedDueDate.getTime())) {
+      res.status(400).json({ message: 'Invalid dueDate' });
+      return;
+    }
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!trimmedReason) {
+      res.status(400).json({ message: 'A reason is required to change the due date' });
+      return;
+    }
+    if (trimmedReason.length > 2000) {
+      res.status(400).json({ message: 'Reason must be 2000 characters or fewer' });
+      return;
+    }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: { id: true, status: true, sourceTaskId: true, dueDate: true },
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status === 'Closed' || finding.status === 'Dismissed') {
+      res.status(400).json({ message: 'Cannot change the due date of a Closed or Dismissed finding' });
+      return;
+    }
+
+    const directorName = await getUserName(userId);
+    const prevDueStr = finding.dueDate ? finding.dueDate.toISOString().slice(0, 10) : 'none';
+    const newDueStr = parsedDueDate.toISOString().slice(0, 10);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id },
+        data: { dueDate: parsedDueDate },
+      });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.DUE_DATE_UPDATED,
+        userId,
+        `Due date changed from ${prevDueStr} to ${newDueStr} by ${directorName} — ${trimmedReason}`,
+        {
+          findingId: finding.id,
+          previousDueDate: finding.dueDate?.toISOString() ?? null,
+          dueDate: parsedDueDate.toISOString(),
+          reason: trimmedReason,
+        }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
+    console.error('Error updating finding due date:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};

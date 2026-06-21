@@ -176,6 +176,14 @@ export const updateFindingDetails = (
 ): Promise<Finding> =>
   apiClient.put(`/findings/${id}/details`, payload).then((r) => r.data);
 
+// Director-only: change a finding's review/SLA due date after it is set, with a
+// mandatory reason. The change is audited (DUE_DATE_UPDATED).
+export const updateFindingDueDate = (
+  id: number,
+  payload: { dueDate: string; reason: string }
+): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/due-date`, payload).then((r) => r.data);
+
 // ─── RCA (Root Cause Analysis) ────────────────────────────────────────────────
 
 export const getRca = (id: number): Promise<RcaInvestigation | null> =>

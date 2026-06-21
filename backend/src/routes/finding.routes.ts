@@ -14,7 +14,8 @@ import {
   updateSeverity,
   dismissFinding,
   updateTaxonomy,
-  updateFindingDetails
+  updateFindingDetails,
+  updateFindingDueDate
 } from '../controllers/finding.controller';
 import { getRca, upsertRca, saveWhySteps, saveFactors } from '../controllers/rca.controller';
 import { listCapa, createCapa, updateCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink } from '../controllers/capa.controller';
@@ -49,6 +50,7 @@ router.put('/:id/severity', updateSeverity);
 router.put('/:id/dismiss', dismissFinding);
 router.put('/:id/taxonomy', updateTaxonomy);
 router.put('/:id/details', updateFindingDetails);
+router.put('/:id/due-date', updateFindingDueDate);
 
 // ─── Closure ─────────────────────────────────────────────────────────
 router.put('/:id/close', closeFinding);
