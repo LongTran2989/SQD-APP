@@ -59,7 +59,7 @@ const prisma = new PrismaClient({ adapter });
 // ──────────────────────────────────────────────────────────────────────────────
 // Config
 // ──────────────────────────────────────────────────────────────────────────────
-const EXCEL_PATH = path.join(__dirname, '..', 'sample_templates.xlsx');
+const EXCEL_PATH = path.join(__dirname, '..', 'seed_data.xlsx');
 const DEFAULT_DIVISION_CODE = 'QA'; // Fallback if Division column is empty
 
 const COL = {
