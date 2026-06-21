@@ -7,7 +7,8 @@ import { ArrowLeft, Printer, AlertTriangle } from 'lucide-react';
 import { TaskEnriched, FormField, Attachment } from '../../../../types';
 import { getTaskById } from '../../../../api/taskApi';
 import { listAttachments, fetchAttachmentBlobUrl } from '../../../../api/attachmentApi';
-import RichTextEditor from '../../../../components/ui/RichTextEditor';
+import RichTextEditor, { type JSONContent } from '../../../../components/ui/RichTextEditor';
+import { collectReferencedAttachmentIds } from '../../../../components/ui/ImageRefNode';
 import type { ReportBlockValue } from '../../../../components/tasks/ReportBlockField';
 
 function formatPlainValue(value: unknown): string {
@@ -52,14 +53,26 @@ function ReportImage({ attachment }: { attachment: Attachment }) {
       ) : (
         <div className="h-40 flex items-center justify-center text-slate-300 text-sm">Loading…</div>
       )}
-      <figcaption className="px-3 py-2 text-sm text-slate-600 border-t border-slate-100">
+      <figcaption className="px-3 py-2 text-sm text-slate-600 border-t border-slate-100 break-words">
         {attachment.caption || attachment.fileName}
       </figcaption>
     </figure>
   );
 }
 
-function ReportImageGallery({ taskId, fieldId }: { taskId: number; fieldId: string }) {
+// Renders a report_block field for print: images cited inline via an imageRef
+// node render as full figures at their point of reference; anything uploaded
+// but never cited still appears, in a trailing gallery, so nothing silently
+// drops out of the printed report.
+function ReportBlockPrint({
+  taskId,
+  fieldId,
+  content,
+}: {
+  taskId: number;
+  fieldId: string;
+  content: JSONContent | null | undefined;
+}) {
   const [images, setImages] = useState<Attachment[] | null>(null);
 
   useEffect(() => {
@@ -72,14 +85,23 @@ function ReportImageGallery({ taskId, fieldId }: { taskId: number; fieldId: stri
     };
   }, [taskId, fieldId]);
 
-  if (images === null) return <p className="text-sm text-slate-400">Loading images…</p>;
-  if (images.length === 0) return <p className="text-sm text-slate-400">No images attached.</p>;
+  if (images === null) return <p className="text-sm text-slate-400">Loading…</p>;
+
+  const referencedIds = collectReferencedAttachmentIds(content);
+  const leftover = images.filter((img) => !referencedIds.has(img.id));
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:grid-cols-1">
-      {images.map((img) => (
-        <ReportImage key={img.id} attachment={img} />
-      ))}
+    <div className="space-y-4">
+      <div className="prose prose-sm max-w-none">
+        <RichTextEditor outputJson jsonValue={content ?? undefined} disabled attachments={images} imageMode="figure" />
+      </div>
+      {leftover.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:grid-cols-1">
+          {leftover.map((img) => (
+            <ReportImage key={img.id} attachment={img} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -200,16 +222,11 @@ export default function TaskReportPage() {
               )}
 
               {field.type === 'report_block' && (
-                <div className="space-y-4">
-                  <div className="prose prose-sm max-w-none">
-                    <RichTextEditor
-                      outputJson
-                      jsonValue={(value as ReportBlockValue | undefined)?.content ?? undefined}
-                      disabled
-                    />
-                  </div>
-                  <ReportImageGallery taskId={task.id} fieldId={field.fieldId} />
-                </div>
+                <ReportBlockPrint
+                  taskId={task.id}
+                  fieldId={field.fieldId}
+                  content={(value as ReportBlockValue | undefined)?.content}
+                />
               )}
 
               {field.type === 'file_upload' && <ReportFileList taskId={task.id} fieldId={field.fieldId} />}

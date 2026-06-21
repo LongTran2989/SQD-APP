@@ -51,5 +51,6 @@ This document outlines the high-level business logic and application workflow fo
 - **Staff:** Can self-assign `Unassigned` tasks. Can create Tasks within WPs they are assigned to, and assign those Tasks to any user in the same Division.
 - **Group Leaders / Managers:** Have action rights scoped to their Division. Managers can assign tasks and WPs across their entire division.
 - **Directors:** Have global action rights across all departments and divisions. They can assign tasks to anyone system-wide and act as reviewers globally.
-- **Global Privilege Config:** Granular privilege toggles are configured by Admins to modify standard roles (Phase 7).
+- **Senior Advisor:** A senior oversight role (seeded in the BOD division) with global dashboard/data visibility alongside Director/Admin. The full role list is `ROLE_NAMES` in `backend/src/constants/privileges.ts`; exact grants live in `DEFAULT_PRIVILEGES`.
+- **Global Privilege Config:** Granular privilege toggles are configured by Admins to modify standard roles. This is **implemented** ("Phase 7") via the `PrivilegeConfig` model — toggles override the per-role defaults, which encode the original hardcoded behaviour.
 - **Feeds & Escalation:** Reading any feed is open to all (transparency). Posting follows the scope rules in Section 4a. Flagging a comment is open to all; **actioning** an escalation is limited to Directors/Admins (any) and Managers (own-division WP/Division flags + all Org flags).

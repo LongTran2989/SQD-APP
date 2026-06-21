@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Paperclip, Download, Trash2, Loader2, UploadCloud, FileText } from 'lucide-react';
+import { Paperclip, Download, Trash2, Loader2, UploadCloud, FileText, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Attachment, AttachmentEntityType, FileUploadConfig } from '../../types';
 import {
@@ -29,6 +29,11 @@ interface FileUploadFieldProps {
   onChange?: (attachmentIds: number[]) => void;
   /** Shows an inline caption input under each image (report_block galleries only). */
   captionable?: boolean;
+  /** Mirrors the live attachment list (metadata, not just ids) for a sibling
+   * component (e.g. report_block's inline image picker). Purely informational —
+   * unlike onChange, safe to fire on the initial read since it never touches
+   * saved TaskData. */
+  onAttachmentsChange?: (attachments: Attachment[]) => void;
 }
 
 // Rounding matches the backend formatBytes (attachmentService.ts) so the limit
@@ -46,6 +51,7 @@ export default function FileUploadField({
   disabled = false,
   onChange,
   captionable = false,
+  onAttachmentsChange,
 }: FileUploadFieldProps) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [config, setConfig] = useState<FileUploadConfig | null>(null);
@@ -59,6 +65,10 @@ export default function FileUploadField({
     (list: Attachment[]) => onChange?.(list.map((a) => a.id)),
     [onChange]
   );
+
+  useEffect(() => {
+    onAttachmentsChange?.(attachments);
+  }, [attachments, onAttachmentsChange]);
 
   useEffect(() => {
     let active = true;
@@ -141,6 +151,7 @@ export default function FileUploadField({
       setAttachments((prev) => prev.map((a) => (a.id === id ? updated : a)));
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Could not save caption'));
+      throw err;
     }
   }
 
@@ -225,7 +236,7 @@ interface AttachmentRowProps {
   busy: boolean;
   onDownload: () => void;
   onDelete: () => void;
-  onCaptionSave: (caption: string) => void;
+  onCaptionSave: (caption: string) => Promise<void>;
 }
 
 function AttachmentRow({
@@ -278,17 +289,11 @@ function AttachmentRow({
         <p className="text-sm text-slate-700 truncate">{attachment.fileName}</p>
         <p className="text-xs text-slate-400">{formatBytes(attachment.fileSize)}</p>
         {captionable && isImage && (
-          <input
+          <CaptionInput
             key={attachment.caption ?? ''}
-            type="text"
-            defaultValue={attachment.caption ?? ''}
-            placeholder="Add a caption…"
-            maxLength={CAPTION_MAX_LENGTH}
+            caption={attachment.caption ?? ''}
             disabled={disabled}
-            onBlur={(e) => {
-              if (e.target.value !== (attachment.caption ?? '')) onCaptionSave(e.target.value);
-            }}
-            className="mt-1 w-full text-xs px-2 py-1 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+            onSave={onCaptionSave}
           />
         )}
         {!captionable && attachment.caption && (
@@ -324,5 +329,64 @@ function AttachmentRow({
         />
       )}
     </li>
+  );
+}
+
+function CaptionInput({
+  caption,
+  disabled,
+  onSave,
+}: {
+  caption: string;
+  disabled: boolean;
+  onSave: (caption: string) => Promise<void>;
+}) {
+  // Remounts (resetting draft state to the server-confirmed value) whenever
+  // `caption` changes externally, i.e. right after a successful save.
+  const [value, setValue] = useState(caption);
+  const [saving, setSaving] = useState(false);
+  const dirty = value !== caption;
+
+  async function handleSave() {
+    if (!dirty || saving) return;
+    setSaving(true);
+    try {
+      await onSave(value);
+    } catch {
+      // error toast already shown by the caller; keep the draft so the user can retry
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-1">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            handleSave();
+          }
+        }}
+        placeholder="Add a caption…"
+        maxLength={CAPTION_MAX_LENGTH}
+        disabled={disabled || saving}
+        className="w-full text-xs px-2 py-1 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+      />
+      {dirty && (
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          title="Save caption"
+          className="flex-shrink-0 p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+        </button>
+      )}
+    </div>
   );
 }
