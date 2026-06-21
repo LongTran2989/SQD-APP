@@ -233,6 +233,15 @@ export default function TaskDetailPage() {
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div className="flex-1 min-w-0">
+          {task.parentFinding && (
+            <Link
+              href={`/dashboard/findings/${task.parentFinding.id}`}
+              className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 hover:text-amber-700 mb-1"
+            >
+              <ArrowLeft className="w-3 h-3" />
+              Back to Finding #{task.parentFinding.id}
+            </Link>
+          )}
           <div className="flex items-center flex-wrap gap-2 mb-1">
             <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-bold font-mono text-sm border border-slate-200">
               {task.taskId}

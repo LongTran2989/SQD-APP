@@ -5,6 +5,7 @@ import {
   FindingsListResponse,
   FindingListItem,
   FindingSeverity,
+  FindingStatus,
   RcaInvestigation,
   RcaMethod,
   RcaStatus,
@@ -54,10 +55,36 @@ export interface RaiseFindingPayload {
   fieldId?: string;
   ataChapterId?: number;
   hazardTagIds?: number[];
+  // When set, the new finding is parked as a DUPLICATE of this existing finding
+  // (recorded against the task, but no separate investigation).
+  duplicateOfFindingId?: number;
 }
 
 export const raiseFinding = (payload: RaiseFindingPayload): Promise<Finding> =>
   apiClient.post('/findings', payload).then((r) => r.data);
+
+// ─── Raise-time duplicate detection ───────────────────────────────────────────
+
+export interface DuplicateCandidate {
+  id: number;
+  description: string;
+  status: FindingStatus;
+  severity: FindingSeverity | null;
+  eventType: string;
+  createdAt: string;
+}
+
+export interface DuplicateCandidateParams {
+  departmentId: number;
+  taskId?: number;
+  targetDivisionId?: number;
+  ataChapterId?: number;
+  eventType?: string;
+  excludeId?: number;
+}
+
+export const getDuplicateCandidates = (params: DuplicateCandidateParams): Promise<DuplicateCandidate[]> =>
+  apiClient.get('/findings/duplicate-candidates', { params }).then((r) => r.data);
 
 // ─── Review ───────────────────────────────────────────────────────────────────
 
@@ -131,6 +158,23 @@ export const updateFindingTaxonomy = (
   payload: { ataChapterId?: number | null; hazardTagIds?: number[] }
 ): Promise<Finding> =>
   apiClient.put(`/findings/${id}/taxonomy`, payload).then((r) => r.data);
+
+// Enrich a finding's optional context post-raise (ATA, hazard tags, aircraft,
+// regulatory ref, field ref) — feeds monitoring + trend analysis. Editable by
+// the reporter, a follow-up assignee, or a reviewer while not Closed/Dismissed.
+export interface UpdateFindingDetailsPayload {
+  ataChapterId?: number | null;
+  hazardTagIds?: number[];
+  aircraftRegistrationCode?: string | null;
+  regulatoryReference?: string | null;
+  fieldId?: string | null;
+}
+
+export const updateFindingDetails = (
+  id: number,
+  payload: UpdateFindingDetailsPayload
+): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/details`, payload).then((r) => r.data);
 
 // ─── RCA (Root Cause Analysis) ────────────────────────────────────────────────
 

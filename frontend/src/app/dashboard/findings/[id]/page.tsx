@@ -16,8 +16,10 @@ import TrendBanner from '../../../../components/findings/TrendBanner';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
 import FindingActivityFeed from '../../../../components/findings/FindingActivityFeed';
 import FileUploadField from '../../../../components/ui/FileUploadField';
+import EditDetailsModal from '../../../../components/findings/EditDetailsModal';
+import TaskQuickViewPanel from '../../../../components/findings/TaskQuickViewPanel';
 import toast from 'react-hot-toast';
-import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X, Pencil, Copy } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +46,8 @@ export default function FindingDetailPage() {
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [closing, setClosing] = useState(false);
   const [closureNote, setClosureNote] = useState('');
+  const [showEditDetails, setShowEditDetails] = useState(false);
+  const [quickViewTaskId, setQuickViewTaskId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!findingId) return;
@@ -117,6 +121,13 @@ export default function FindingDetailPage() {
   // Expansion sections become available once the finding has been reviewed.
   const analysisVisible = finding.status !== 'Open';
   const analysisEditable = finding.status !== 'Closed' && (isReporter || isFollowUpAssignee || isMgrDir);
+  // Optional context (ATA / hazard / aircraft / refs) can be enriched post-raise
+  // by anyone working the finding while it is not Closed/Dismissed — feeds trends.
+  const canEditDetails = (isReporter || isFollowUpAssignee || isMgrDir) && !['Closed', 'Dismissed'].includes(finding.status);
+  // Dismissed-as-duplicate: surface where the work is actually being managed.
+  const duplicateOf = finding.status === 'Dismissed'
+    ? finding.linksFrom.find((l) => l.linkType === 'DUPLICATE')?.relatedFinding
+    : undefined;
 
   // Status-driven "what to do next" guidance — keeps users oriented across the
   // multi-step loop (review → analyse → verify → close).
@@ -158,6 +169,20 @@ export default function FindingDetailPage() {
             </div>
           )}
 
+          {/* Duplicate notice — this finding is managed on its canonical */}
+          {duplicateOf && (
+            <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+              <Copy className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+              <p className="text-sm text-amber-900">
+                <span className="font-semibold">Duplicate:</span> this finding is managed on{' '}
+                <Link href={`/dashboard/findings/${duplicateOf.id}`} className="font-mono font-semibold text-amber-700 hover:underline">
+                  Finding #{duplicateOf.id}
+                </Link>
+                . No separate investigation is required here.
+              </p>
+            </div>
+          )}
+
           {/* Trend banner — recurrent-pattern alert */}
           <TrendBanner trend={finding.trend} />
 
@@ -191,9 +216,20 @@ export default function FindingDetailPage() {
             )}
           </div>
 
-          {/* Section 2 — Stage 1 fields (read-only) */}
+          {/* Section 2 — Stage 1 fields (read-only; optional context editable) */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-            <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-4">Details</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Details</h3>
+              {canEditDetails && (
+                <button
+                  onClick={() => setShowEditDetails(true)}
+                  className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit details
+                </button>
+              )}
+            </div>
             <dl className="space-y-3 text-sm">
               <Field label="Event Type" value={finding.eventType} />
               <Field label="Department" value={finding.department?.name ?? null} />
@@ -240,10 +276,11 @@ export default function FindingDetailPage() {
             ) : (
               <div className="space-y-2">
                 {finding.followUpTasks.map((t) => (
-                  <Link
+                  <button
                     key={t.id}
-                    href={`/dashboard/tasks/${t.id}`}
-                    className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors"
+                    type="button"
+                    onClick={() => setQuickViewTaskId(t.id)}
+                    className="w-full text-left flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors"
                   >
                     <div className="flex flex-col gap-1 min-w-0">
                       <div className="flex items-center gap-3">
@@ -272,7 +309,7 @@ export default function FindingDetailPage() {
                       <span className="text-xs text-slate-400">{t.assignedToUser?.name ?? 'Unassigned'}</span>
                       <TaskStatusBadge status={t.status} size="sm" />
                     </div>
-                  </Link>
+                  </button>
                 ))}
               </div>
             )}
@@ -323,6 +360,23 @@ export default function FindingDetailPage() {
             load();
           }}
         />
+      )}
+
+      {/* Edit details modal */}
+      {showEditDetails && (
+        <EditDetailsModal
+          finding={finding}
+          onClose={() => setShowEditDetails(false)}
+          onSaved={() => {
+            setShowEditDetails(false);
+            load();
+          }}
+        />
+      )}
+
+      {/* Follow-up task quick-view drawer */}
+      {quickViewTaskId != null && (
+        <TaskQuickViewPanel taskId={quickViewTaskId} onClose={() => setQuickViewTaskId(null)} />
       )}
 
       {/* Close confirm modal */}
