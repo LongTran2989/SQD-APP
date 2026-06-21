@@ -56,6 +56,10 @@ async function generateWpId(divisionCode: string, tx: Prisma.TransactionClient):
   return `${divisionCode}-WP-${String(nextSeq).padStart(6, '0')}`;
 }
 
+// Findings still in flight — eligible as duplicate-merge canonicals and surfaced
+// as raise-time duplicate candidates (Closed / Dismissed are terminal).
+const FINDING_ACTIVE_STATUSES = ['Open', 'In Progress', 'Pending Verification'];
+
 function computeDueDateBreached(finding: { dueDate: Date | null; status: string }): boolean {
   if (!finding.dueDate) return false;
   if (finding.status === 'Closed') return false;
@@ -67,7 +71,7 @@ function computeDueDateBreached(finding: { dueDate: Date | null; status: string 
  * observed on a read. Returns whether the finding is currently breached.
  */
 async function ensureDueDateBreachLogged(
-  finding: { id: number; dueDate: Date | null; status: string },
+  finding: { id: number; dueDate: Date | null; status: string; targetDivisionId: number | null; description: string },
   performedByUserId: number
 ): Promise<boolean> {
   const breached = computeDueDateBreached(finding);
@@ -88,7 +92,7 @@ async function ensureDueDateBreachLogged(
       });
       // Proactively alert reviewers the first time the breach is observed, so an
       // overdue finding is not dependent on someone happening to read it again.
-      await notifyFindingOverdue(finding.id, performedByUserId);
+      await notifyFindingOverdue(finding, performedByUserId);
     }
   } catch (err) {
     console.error(`[ensureDueDateBreachLogged] failed for finding=${finding.id}:`, err);
@@ -100,29 +104,31 @@ async function ensureDueDateBreachLogged(
  * Best-effort overdue alert to the finding's reviewers (finding:review holders in
  * the target division + Director/Admin). Fired once, gated by the same one-time
  * guard as the DUE_DATE_BREACHED audit row. Never throws.
+ *
+ * Takes the already-loaded finding row (id + targetDivisionId + description) from
+ * the caller's soft-delete-filtered read — it does NOT re-query, so it can never
+ * resurrect a soft-deleted finding and adds no per-finding round-trip.
  */
-async function notifyFindingOverdue(findingId: number, performedByUserId: number): Promise<void> {
+async function notifyFindingOverdue(
+  finding: { id: number; targetDivisionId: number | null; description: string },
+  performedByUserId: number
+): Promise<void> {
   try {
-    const f = await prisma.finding.findUnique({
-      where: { id: findingId },
-      select: { id: true, targetDivisionId: true, description: true }
-    });
-    if (!f) return;
-    const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', f.targetDivisionId);
+    const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', finding.targetDivisionId);
     await createNotifications(
       prisma,
       reviewerIds.map((uid) => ({
         userId: uid,
         type: 'FINDING_OVERDUE' as const,
         title: 'Finding overdue',
-        body: `Finding #${f.id} has passed its due date: ${f.description.slice(0, 120)}`,
+        body: `Finding #${finding.id} has passed its due date: ${finding.description.slice(0, 120)}`,
         linkScope: 'FINDING' as const,
-        linkId: f.id,
+        linkId: finding.id,
       })),
       [performedByUserId]
     );
   } catch (err) {
-    console.error(`[notifyFindingOverdue] failed for finding=${findingId}:`, err);
+    console.error(`[notifyFindingOverdue] failed for finding=${finding.id}:`, err);
   }
 }
 
@@ -133,7 +139,7 @@ async function notifyFindingOverdue(findingId: number, performedByUserId: number
  * up to 2 per finding), and returns the Set of currently-breached finding ids.
  */
 async function ensureDueDateBreachesLogged(
-  findings: { id: number; dueDate: Date | null; status: string }[],
+  findings: { id: number; dueDate: Date | null; status: string; targetDivisionId: number | null; description: string }[],
   performedByUserId: number
 ): Promise<Set<number>> {
   const breached = findings.filter(computeDueDateBreached);
@@ -163,7 +169,7 @@ async function ensureDueDateBreachesLogged(
       });
       // Proactively alert reviewers for each finding whose breach was first seen now.
       for (const f of toLog) {
-        await notifyFindingOverdue(f.id, performedByUserId);
+        await notifyFindingOverdue(f, performedByUserId);
       }
     }
   } catch (err) {
@@ -271,6 +277,10 @@ export interface CreateFindingParams {
   regulatoryReference?: string | null;
   ataChapterId?: number | null;
   hazardTagIds?: number[];
+  // When set, the new finding is recorded against the source task but immediately
+  // parked as a DUPLICATE of this existing (active, same-division) finding —
+  // closed-loop work happens on the canonical, not here.
+  duplicateOfFindingId?: number | null;
 }
 
 /**
@@ -285,7 +295,7 @@ export async function createFindingService(
   actor: { userId: number },
   params: CreateFindingParams
 ) {
-  const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds } = params;
+  const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds, duplicateOfFindingId } = params;
 
   if (!eventType || !departmentId || !description) {
     throw new HttpError(400, 'eventType, departmentId, and description are required');
@@ -369,34 +379,90 @@ export async function createFindingService(
     { findingId: created.id, eventType, sourceTaskId: taskId ?? null }
   );
 
+  // Raise-time duplicate merge: record this finding against the task but park it
+  // as a DUPLICATE of an existing active finding in the same division, so the
+  // canonical carries the RCA/CAPA/closure work and this one demands none.
+  if (duplicateOfFindingId != null) {
+    const canonical = await client.finding.findUnique({
+      where: { id: duplicateOfFindingId, deletedAt: null },
+      select: { id: true, status: true, targetDivisionId: true },
+    });
+    if (!canonical) throw new HttpError(404, 'The finding to mark as a duplicate of was not found');
+    if (canonical.targetDivisionId !== resolvedDivisionId) {
+      throw new HttpError(400, 'Can only mark as a duplicate of a finding in the same division');
+    }
+    if (!FINDING_ACTIVE_STATUSES.includes(canonical.status)) {
+      throw new HttpError(400, 'Can only mark as a duplicate of an active (open) finding');
+    }
+
+    await client.findingLink.create({
+      data: {
+        fromFindingId: created.id,
+        relatedFindingId: canonical.id,
+        linkType: 'DUPLICATE',
+        note: 'Marked as duplicate at raise time',
+        createdByUserId: actor.userId,
+      },
+    });
+    const dismissed = await client.finding.update({
+      where: { id: created.id },
+      data: { status: 'Dismissed' },
+    });
+
+    await logFindingAuditAndActivity(
+      client,
+      created.id,
+      taskId ?? null,
+      FINDING_EXPANSION_ACTIONS.FINDING_LINKED,
+      actor.userId,
+      `Finding #${created.id} linked to Finding #${canonical.id} (DUPLICATE)`,
+      { findingId: created.id, relatedFindingId: canonical.id, linkType: 'DUPLICATE' }
+    );
+    await logFindingAuditAndActivity(
+      client,
+      created.id,
+      taskId ?? null,
+      FINDING_EXPANSION_ACTIONS.DISMISSED,
+      actor.userId,
+      `Finding #${created.id} dismissed: duplicate of Finding #${canonical.id} — managed there`,
+      { findingId: created.id, reason: `Duplicate of #${canonical.id}`, duplicateOfFindingId: canonical.id }
+    );
+
+    return dismissed;
+  }
+
   return created;
 }
 
 export const createFinding = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req.user!;
-    const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds } = req.body;
+    const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds, duplicateOfFindingId } = req.body;
 
     const finding = await prisma.$transaction((tx) =>
-      createFindingService(tx, { userId }, { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds })
+      createFindingService(tx, { userId }, { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds, duplicateOfFindingId })
     );
 
     // Notify the finding reviewers (finding:review holders in the target
     // division + Director/Admin cross-division), post-commit and best-effort.
-    // The reporter (actor) is excluded — they just raised it.
-    const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', finding.targetDivisionId);
-    await createNotifications(
-      prisma,
-      reviewerIds.map((uid) => ({
-        userId: uid,
-        type: 'FINDING_CREATED' as const,
-        title: 'New finding raised',
-        body: `Finding #${finding.id}: ${finding.description.slice(0, 120)}`,
-        linkScope: 'FINDING' as const,
-        linkId: finding.id,
-      })),
-      [userId]
-    );
+    // The reporter (actor) is excluded — they just raised it. Skipped on the
+    // duplicate path: the finding is already parked as managed elsewhere, so
+    // there is no new investigation to alert reviewers about.
+    if (duplicateOfFindingId == null) {
+      const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', finding.targetDivisionId);
+      await createNotifications(
+        prisma,
+        reviewerIds.map((uid) => ({
+          userId: uid,
+          type: 'FINDING_CREATED' as const,
+          title: 'New finding raised',
+          body: `Finding #${finding.id}: ${finding.description.slice(0, 120)}`,
+          linkScope: 'FINDING' as const,
+          linkId: finding.id,
+        })),
+        [userId]
+      );
+    }
 
     res.status(201).json(finding);
   } catch (error) {
@@ -405,6 +471,75 @@ export const createFinding = async (req: Request, res: Response): Promise<void> 
       return;
     }
     console.error('Error creating finding:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/findings/duplicate-candidates ──────────────────────────────────
+
+/**
+ * Raise-time duplicate detection. Returns active findings in the same division +
+ * department that the raiser might be about to duplicate, so they can link to an
+ * existing one instead of opening a redundant investigation. Auth-only (open
+ * visibility, consistent with getFindingLinks).
+ */
+export const getDuplicateCandidates = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const departmentId = parseInt(req.query.departmentId as string, 10);
+    if (!departmentId || isNaN(departmentId)) {
+      res.status(400).json({ message: 'departmentId is required' });
+      return;
+    }
+
+    // Division scope: derive from the source task when raising from a task,
+    // otherwise the explicit target division (standalone raise).
+    let divisionId: number | null = null;
+    const taskIdRaw = req.query.taskId as string | undefined;
+    if (taskIdRaw) {
+      const taskId = parseInt(taskIdRaw, 10);
+      if (taskId && !isNaN(taskId)) {
+        const task = await prisma.task.findUnique({
+          where: { id: taskId, deletedAt: null },
+          select: { targetDivisionId: true },
+        });
+        divisionId = task?.targetDivisionId ?? null;
+      }
+    } else if (req.query.targetDivisionId) {
+      const d = parseInt(req.query.targetDivisionId as string, 10);
+      if (d && !isNaN(d)) divisionId = d;
+    }
+    // Without a division we cannot scope candidates — return nothing rather than
+    // leaking cross-division findings.
+    if (divisionId == null) {
+      res.json([]);
+      return;
+    }
+
+    const excludeId = req.query.excludeId ? parseInt(req.query.excludeId as string, 10) : null;
+
+    const candidates = await prisma.finding.findMany({
+      where: {
+        deletedAt: null,
+        targetDivisionId: divisionId,
+        departmentId,
+        status: { in: FINDING_ACTIVE_STATUSES },
+        ...(excludeId && !isNaN(excludeId) ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 8,
+      select: {
+        id: true,
+        description: true,
+        status: true,
+        severity: true,
+        eventType: true,
+        createdAt: true,
+      },
+    });
+
+    res.json(candidates);
+  } catch (error) {
+    console.error('Error fetching duplicate candidates:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -626,6 +761,12 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
     const workflowConfig = await getFindingWorkflowConfig(prisma);
     const sla = slaForSeverity(workflowConfig, severity);
     let parsedDueDate = dueDate ? new Date(dueDate) : null;
+    // A malformed date string yields a truthy "Invalid Date" that would slip past
+    // the SLA checks below and then throw at .toISOString() — reject it as a 400.
+    if (parsedDueDate && isNaN(parsedDueDate.getTime())) {
+      res.status(400).json({ message: 'Invalid dueDate' });
+      return;
+    }
     if (!parsedDueDate && sla.days != null) {
       parsedDueDate = new Date(Date.now() + sla.days * 24 * 60 * 60 * 1000);
     }
@@ -1397,6 +1538,108 @@ export const updateTaxonomy = async (req: Request, res: Response): Promise<void>
       return;
     }
     console.error('Error updating taxonomy:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/findings/:id/details ────────────────────────────────────────────
+
+/**
+ * Enrich a finding's optional context AFTER it was raised — ATA chapter, hazard
+ * tags, aircraft registration, regulatory reference, field reference. These feed
+ * monitoring + the trend engine (Department + ATA + Cause Code + Hazard Tags).
+ *
+ * Editable by anyone working the finding — the reporter, a follow-up assignee, or
+ * a reviewer (same-division Manager / Director) — while it is not Closed/Dismissed.
+ * Severity and status are NOT touched here; those stay reviewer-only via review /
+ * updateSeverity. Partial update: a field changes only when its key is present.
+ */
+export const updateFindingDetails = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId } = req.user!;
+    const { ataChapterId, hazardTagIds, aircraftRegistrationCode, regulatoryReference, fieldId } = req.body ?? {};
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        sourceTaskId: true,
+        reportedByUserId: true,
+        followUpTasks: { where: { deletedAt: null }, select: { assignedToUserId: true } },
+      },
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status === 'Closed' || finding.status === 'Dismissed') {
+      res.status(400).json({ message: 'Cannot update details on a Closed or Dismissed finding' });
+      return;
+    }
+
+    // Auth: reporter OR follow-up assignee OR reviewer (same-division Mgr / Director).
+    const isReporter = finding.reportedByUserId === userId;
+    const isAssignee = finding.followUpTasks.some((t) => t.assignedToUserId === userId);
+    const isReviewer = isFindingReviewer(req.user!) && (await assertManagerDivisionScope(prisma, req.user!, id));
+    if (!isReporter && !isAssignee && !isReviewer) {
+      res.status(403).json({ message: 'You do not have access to update this finding' });
+      return;
+    }
+
+    // Validate taxonomy (ATA + hazard tags) and the optional aircraft registration.
+    const tagIds = await validateTaxonomyFields(prisma, ataChapterId, hazardTagIds);
+    if (aircraftRegistrationCode) {
+      const reg = await prisma.aircraftRegistration.findUnique({
+        where: { registration: aircraftRegistrationCode },
+        select: { registration: true },
+      });
+      if (!reg) {
+        res.status(400).json({ message: `Unknown aircraft registration: ${aircraftRegistrationCode}` });
+        return;
+      }
+    }
+
+    // Scalar FKs set directly (matching createFindingService) via the unchecked
+    // update input. Only keys present in the body are touched.
+    const data: Prisma.FindingUncheckedUpdateInput = {};
+    if (ataChapterId !== undefined) data.ataChapterId = ataChapterId ?? null;
+    if (aircraftRegistrationCode !== undefined) data.aircraftRegistrationCode = aircraftRegistrationCode || null;
+    if (regulatoryReference !== undefined) data.regulatoryReference = regulatoryReference || null;
+    if (fieldId !== undefined) data.fieldId = fieldId || null;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (tagIds !== null) {
+        await replaceHazardTags(tx, id, tagIds);
+      }
+      const result = await tx.finding.update({ where: { id }, data });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.DETAILS_UPDATED,
+        userId,
+        `Details updated on Finding #${id}`,
+        {
+          findingId: finding.id,
+          ...(ataChapterId !== undefined ? { ataChapterId } : {}),
+          ...(tagIds !== null ? { hazardTagIds: tagIds } : {}),
+          ...(aircraftRegistrationCode !== undefined ? { aircraftRegistrationCode } : {}),
+          ...(regulatoryReference !== undefined ? { regulatoryReference } : {}),
+          ...(fieldId !== undefined ? { fieldId } : {}),
+        }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
+    console.error('Error updating finding details:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

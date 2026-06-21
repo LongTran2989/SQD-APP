@@ -187,6 +187,115 @@ describe('Findings Backend (Phase 6)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
+  // Group 1b — Raise-time duplicate detection + mark-as-duplicate
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('Duplicate handling', () => {
+    const candidates = (token: string, query: string) =>
+      request(app).get(`/api/findings/duplicate-candidates?${query}`).set('Authorization', `Bearer ${token}`);
+
+    it('DUP01: returns an active finding in the same division + department', async () => {
+      const c = await raiseFinding(staffToken);
+      const res = await candidates(staffToken, `departmentId=${departmentId}&taskId=${sourceTaskId}`);
+      expect(res.status).toBe(200);
+      expect(res.body.map((f: { id: number }) => f.id)).toContain(c.body.id);
+    });
+
+    it('DUP02: missing departmentId → 400', async () => {
+      const res = await candidates(staffToken, `taskId=${sourceTaskId}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('DUP03: excludes a different department, and excludes Dismissed findings', async () => {
+      const c = await raiseFinding(staffToken);
+      // Different department → not returned (here: no other dept seeded, so expect empty)
+      const other = await candidates(staffToken, `departmentId=${departmentId + 99999}&taskId=${sourceTaskId}`);
+      expect(other.body).toHaveLength(0);
+      // Dismiss the candidate → it drops out of the active-candidate list.
+      await request(app).put(`/api/findings/${c.body.id}/dismiss`).set('Authorization', `Bearer ${managerToken}`).send({ reason: 'not valid' });
+      const after = await candidates(staffToken, `departmentId=${departmentId}&taskId=${sourceTaskId}`);
+      expect(after.body.map((f: { id: number }) => f.id)).not.toContain(c.body.id);
+    });
+
+    it('DUP04: raise with duplicateOfFindingId → new finding Dismissed + DUPLICATE link + dual-write', async () => {
+      const canonical = await raiseFinding(staffToken);
+      const res = await raiseFinding(staffToken, { duplicateOfFindingId: canonical.body.id });
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('Dismissed');
+
+      const link = await prisma.findingLink.findFirst({
+        where: { fromFindingId: res.body.id, relatedFindingId: canonical.body.id, linkType: 'DUPLICATE' },
+      });
+      expect(link).not.toBeNull();
+
+      const dismissedAudit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(res.body.id), actionType: 'DISMISSED' } });
+      expect(dismissedAudit).not.toBeNull();
+      const linkedAudit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(res.body.id), actionType: 'FINDING_LINKED' } });
+      expect(linkedAudit).not.toBeNull();
+      // Finding timeline carries the events (FINDING-scope feed post).
+      const feed = await prisma.feedPost.findFirst({ where: { scope: 'FINDING', scopeId: res.body.id } });
+      expect(feed).not.toBeNull();
+    });
+
+    it('DUP05: duplicateOfFindingId not found → 404', async () => {
+      const res = await raiseFinding(staffToken, { duplicateOfFindingId: 999999 });
+      expect(res.status).toBe(404);
+    });
+
+    it('DUP06: duplicateOfFindingId in another division → 400', async () => {
+      const f2 = await prisma.finding.create({ data: { eventType: 'X', description: 'other div', departmentId, status: 'Open', targetDivisionId: division2Id, reportedByUserId: staffId } });
+      const res = await raiseFinding(staffToken, { duplicateOfFindingId: f2.id });
+      expect(res.status).toBe(400);
+    });
+
+    it('DUP07: duplicateOfFindingId that is not active (Closed) → 400', async () => {
+      const fc = await prisma.finding.create({ data: { eventType: 'X', description: 'closed canonical', departmentId, status: 'Closed', targetDivisionId: divisionId, reportedByUserId: staffId } });
+      const res = await raiseFinding(staffToken, { duplicateOfFindingId: fc.id });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 1c — Enrich finding details post-raise (PUT /:id/details)
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('Update finding details', () => {
+    it('DET01: reporter can enrich optional context → 200 + DETAILS_UPDATED audit', async () => {
+      const f = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${staffToken}`).send({ regulatoryReference: 'EASA Part-M', fieldId: 'FLD-1' });
+      expect(res.status).toBe(200);
+      expect(res.body.regulatoryReference).toBe('EASA Part-M');
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(f.body.id), actionType: 'DETAILS_UPDATED' } });
+      expect(audit).not.toBeNull();
+    });
+
+    it('DET02: a non-contributor (other-division manager) → 403', async () => {
+      const f = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${manager2Token}`).send({ regulatoryReference: 'x' });
+      expect(res.status).toBe(403);
+    });
+
+    it('DET03: a same-division reviewer (manager) can enrich → 200', async () => {
+      const f = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${managerToken}`).send({ fieldId: 'FLD-2' });
+      expect(res.status).toBe(200);
+    });
+
+    it('DET04: blocked on a Dismissed finding → 400', async () => {
+      const f = await raiseFinding(staffToken);
+      await request(app).put(`/api/findings/${f.body.id}/dismiss`).set('Authorization', `Bearer ${managerToken}`).send({ reason: 'dup' });
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${staffToken}`).send({ fieldId: 'x' });
+      expect(res.status).toBe(400);
+    });
+
+    it('DET05: unknown aircraft registration → 400', async () => {
+      const f = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${staffToken}`).send({ aircraftRegistrationCode: 'ZZ-NOPE' });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
   // Group 2 — List Findings (RBAC scoping)
   // ────────────────────────────────────────────────────────────────────────
 
@@ -283,6 +392,12 @@ describe('Findings Backend (Phase 6)', () => {
       const res = await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 2' });
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch(/already been reviewed/i);
+    });
+
+    it('F24b: a malformed dueDate string → 400 (not a 500 at toISOString)', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1', dueDate: 'not-a-date' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/dueDate/i);
     });
   });
 

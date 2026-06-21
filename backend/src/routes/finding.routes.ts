@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import {
   createFinding,
+  getDuplicateCandidates,
   listFindings,
   getFindingById,
   reviewFinding,
@@ -12,7 +13,8 @@ import {
   forcePendingVerification,
   updateSeverity,
   dismissFinding,
-  updateTaxonomy
+  updateTaxonomy,
+  updateFindingDetails
 } from '../controllers/finding.controller';
 import { getRca, upsertRca, saveWhySteps, saveFactors } from '../controllers/rca.controller';
 import { listCapa, createCapa, updateCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink } from '../controllers/capa.controller';
@@ -30,6 +32,9 @@ router.post('/', createFinding);
 // ─── Admin queries (must be before /:id to avoid Express treating "admin" as :id param)
 router.get('/admin/stuck', getStuckFindings);
 
+// ─── Raise-time duplicate detection (before /:id for the same reason) ──────────
+router.get('/duplicate-candidates', getDuplicateCandidates);
+
 // ─── Single finding ─────────────────────────────────────────────────
 router.get('/:id', getFindingById);
 
@@ -43,6 +48,7 @@ router.put('/:id/force-pending-verification', forcePendingVerification);
 router.put('/:id/severity', updateSeverity);
 router.put('/:id/dismiss', dismissFinding);
 router.put('/:id/taxonomy', updateTaxonomy);
+router.put('/:id/details', updateFindingDetails);
 
 // ─── Closure ─────────────────────────────────────────────────────────
 router.put('/:id/close', closeFinding);
