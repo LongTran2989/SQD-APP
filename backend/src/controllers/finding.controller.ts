@@ -87,11 +87,44 @@ async function ensureDueDateBreachLogged(
           details: { dueDate: finding.dueDate } as any
         }
       });
+      // Proactively alert reviewers the first time the breach is observed, so an
+      // overdue finding is not dependent on someone happening to read it again.
+      await notifyFindingOverdue(finding.id, performedByUserId);
     }
   } catch (err) {
     console.error(`[ensureDueDateBreachLogged] failed for finding=${finding.id}:`, err);
   }
   return true;
+}
+
+/**
+ * Best-effort overdue alert to the finding's reviewers (finding:review holders in
+ * the target division + Director/Admin). Fired once, gated by the same one-time
+ * guard as the DUE_DATE_BREACHED audit row. Never throws.
+ */
+async function notifyFindingOverdue(findingId: number, performedByUserId: number): Promise<void> {
+  try {
+    const f = await prisma.finding.findUnique({
+      where: { id: findingId },
+      select: { id: true, targetDivisionId: true, description: true }
+    });
+    if (!f) return;
+    const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', f.targetDivisionId);
+    await createNotifications(
+      prisma,
+      reviewerIds.map((uid) => ({
+        userId: uid,
+        type: 'FINDING_OVERDUE' as const,
+        title: 'Finding overdue',
+        body: `Finding #${f.id} has passed its due date: ${f.description.slice(0, 120)}`,
+        linkScope: 'FINDING' as const,
+        linkId: f.id,
+      })),
+      [performedByUserId]
+    );
+  } catch (err) {
+    console.error(`[notifyFindingOverdue] failed for finding=${findingId}:`, err);
+  }
 }
 
 /**
@@ -129,6 +162,10 @@ async function ensureDueDateBreachesLogged(
           details: { dueDate: f.dueDate } as any
         }))
       });
+      // Proactively alert reviewers for each finding whose breach was first seen now.
+      for (const f of toLog) {
+        await notifyFindingOverdue(f.id, performedByUserId);
+      }
     }
   } catch (err) {
     console.error('[ensureDueDateBreachesLogged] batch breach-log failed:', err);

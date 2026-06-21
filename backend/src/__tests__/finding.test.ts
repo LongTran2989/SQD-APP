@@ -307,6 +307,20 @@ describe('Findings Backend (Phase 6)', () => {
       const res = await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${directorToken}`);
       expect(res.body.dueDateBreached).toBe(false);
     });
+
+    it('F32: first observed breach notifies division reviewers once (idempotent)', async () => {
+      const r = await raiseFinding(staffToken);
+      const findingId = r.body.id;
+      await prisma.finding.update({ where: { id: findingId }, data: { dueDate: new Date(Date.now() - 86400000), status: 'In Progress' } });
+      // Observed by staff (not a reviewer) — the division Manager should be alerted.
+      await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${staffToken}`);
+      let notifs = await prisma.notification.findMany({ where: { userId: managerId, type: 'FINDING_OVERDUE', linkId: findingId } });
+      expect(notifs.length).toBe(1);
+      // A second read must not duplicate the alert (one-time guard).
+      await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${staffToken}`);
+      notifs = await prisma.notification.findMany({ where: { userId: managerId, type: 'FINDING_OVERDUE', linkId: findingId } });
+      expect(notifs.length).toBe(1);
+    });
   });
 
   // ────────────────────────────────────────────────────────────────────────

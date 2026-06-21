@@ -96,6 +96,28 @@ export const closeFinding = (id: number, closureNote: string): Promise<Finding> 
 export const advanceFinding = (id: number): Promise<Finding> =>
   apiClient.put(`/findings/${id}/advance`).then((r) => r.data);
 
+// ─── Admin: stuck findings (best-effort Pending-Verification trigger missed) ──
+
+export interface StuckFinding {
+  id: number;
+  description: string;
+  status: string;
+  severity: FindingSeverity | null;
+  dueDate: string | null;
+  reportedByUser?: { id: number; name: string } | null;
+  targetDivision?: { id: number; name: string; code: string } | null;
+  department?: { id: number; name: string } | null;
+  followUpTasks: { id: number; taskId: string | null; status: string }[];
+}
+
+// Admin/Director only — findings still "In Progress" whose follow-up tasks are
+// all final (the auto-advance hook did not fire). 403 for everyone else.
+export const getStuckFindings = (): Promise<StuckFinding[]> =>
+  apiClient.get('/findings/admin/stuck').then((r) => r.data);
+
+export const forcePendingVerification = (id: number): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/force-pending-verification`).then((r) => r.data);
+
 export const dismissFinding = (id: number, reason: string): Promise<Finding> =>
   apiClient.put(`/findings/${id}/dismiss`, { reason }).then((r) => r.data);
 
