@@ -35,12 +35,18 @@ export async function getFindingWorkflowConfig(
 }
 
 /**
- * Writes a Finding event to BOTH AuditLog (entityType 'Finding', system-wide
- * compliance) AND the source Task's feed (FeedPost, scope 'TASK', SYSTEM_EVENT).
+ * Writes a Finding event to ALL of its sinks atomically: AuditLog (entityType
+ * 'Finding', system-wide compliance), the Finding's own feed (FeedPost, scope
+ * 'FINDING' — the finding-detail timeline), AND the source Task's feed (scope
+ * 'TASK') when the finding has a source task.
  *
  * Accepts a Prisma client OR a transaction client so callers that mutate the
- * Finding inside a $transaction keep the dual write atomic. When `sourceTaskId`
- * is null (Finding with no linked source Task) the TaskActivity write is skipped.
+ * Finding inside a $transaction keep the writes atomic. The FINDING-scope event
+ * is always written (every audited event appears on the finding timeline); the
+ * TASK-scope event is skipped for standalone findings (no source task).
+ *
+ * This is the single dual-write helper for findings — there is no separate
+ * finding-feed helper, so the timeline can never drift from the audit log.
  */
 export async function logFindingAuditAndActivity(
   client: PrismaLike,
@@ -61,6 +67,17 @@ export async function logFindingAuditAndActivity(
       comment: auditComment ?? null,
       details: (details as Prisma.InputJsonValue) ?? Prisma.DbNull
     }
+  });
+
+  // The finding's own timeline — written for every audited event, including
+  // standalone findings (no source task) and the RCA/CAPA/Link events.
+  await createFeedPost(client, {
+    type: 'SYSTEM_EVENT',
+    scope: 'FINDING',
+    scopeId: findingId,
+    content: activityContent,
+    metadata: details,
+    authorId: null
   });
 
   if (sourceTaskId) {

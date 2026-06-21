@@ -326,7 +326,6 @@ model TaskData {
 model Finding {
   id          Int     @id @default(autoincrement())
   severity    String? // Observation, Level 1, Level 2
-  category    String? // Legacy classification (Safety, Documentation, Tools, etc.) — optional; eventType is the primary classifier
   description String
   status      String  @default("Open") // Open, In Progress, Pending Verification, Closed
 
@@ -336,16 +335,6 @@ model Finding {
   aircraftRegistrationCode String?
   aircraftRegistration AircraftRegistration? @relation(fields: [aircraftRegistrationCode], references: [registration])
   regulatoryReference  String?
-  // @deprecated superseded by structured RCA + CAPA
-  errorCode        String?
-  // @deprecated superseded by structured RCA + CAPA
-  rootCause        String?
-  // @deprecated
-  correctiveAction String?
-  // @deprecated
-  recurrence       Boolean?
-  // @deprecated
-  violatorIds      Json?
 
   sourceTaskId Int?
   sourceTask   Task? @relation("FindingSourceTask", fields: [sourceTaskId], references: [id])
@@ -583,11 +572,9 @@ model FindingResponseAction {
   createdByUserId Int
   createdByUser   User @relation("FindingResponseActionCreatedBy", fields: [createdByUserId], references: [id])
 
-  // NOTE: currently UNUSED — these rows are append-only (only ever created). No
-  // code soft-deletes a FindingResponseAction or filters reads on deletedAt. If
-  // you add a delete path, also add `where: { deletedAt: null }` to every read
-  // (Rule 2). Kept for forward-compat; safe to drop in a future schema cleanup.
-  deletedAt DateTime?
+  // Response actions are append-only (created with their follow-up task, never
+  // deleted). If a delete path is ever added, reintroduce a `deletedAt` here and
+  // add `where: { deletedAt: null }` to every read (Rule 2).
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 

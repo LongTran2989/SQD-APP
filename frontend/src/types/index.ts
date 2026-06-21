@@ -495,7 +495,6 @@ export type FindingStatus = 'Open' | 'In Progress' | 'Pending Verification' | 'C
 export interface Finding {
   id: number;
   severity: FindingSeverity | null;
-  category: string | null;
   description: string;
   status: FindingStatus;
   fieldId: string | null;
@@ -506,11 +505,6 @@ export interface Finding {
   // Populated relation (present on list/detail reads). Null when no aircraft set.
   aircraftRegistration: { registration: string; description: string | null; operatorCode: string | null } | null;
   regulatoryReference: string | null;
-  errorCode: string | null;
-  rootCause: string | null;
-  correctiveAction: string | null;
-  recurrence: boolean | null;
-  violatorIds: unknown | null;
   sourceTaskId: number | null;
   reportedByUserId: number;
   closedByUserId: number | null;

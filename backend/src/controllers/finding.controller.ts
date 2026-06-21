@@ -13,7 +13,6 @@ import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { FINDING_SEVERITIES as SEVERITIES, FINDING_STATUSES } from '../constants/findingTaxonomy';
 import { createNotifications, resolvePrivilegedUserIds } from '../services/notificationService';
-import { createFeedPost } from '../services/feedService';
 
 import { prisma } from '../lib/prisma';
 
@@ -176,31 +175,6 @@ async function ensureDueDateBreachesLogged(
 async function getUserName(userId: number): Promise<string> {
   const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
   return u?.name ?? `User ${userId}`;
-}
-
-/**
- * Writes a SYSTEM_EVENT to the per-finding feed (scope: 'FINDING'). Never throws
- * — errors are logged and swallowed so a feed write failure never rolls back the
- * parent operation. Mirrors logTaskActivity in task.controller.ts.
- */
-async function logFindingActivity(
-  findingId: number,
-  content: string,
-  metadata?: Record<string, unknown>,
-  client: PrismaLike = prisma
-): Promise<void> {
-  try {
-    await createFeedPost(client, {
-      type: 'SYSTEM_EVENT',
-      scope: 'FINDING',
-      scopeId: findingId,
-      content,
-      metadata,
-      authorId: null,
-    });
-  } catch (err) {
-    console.error(`[logFindingActivity] Failed to log SYSTEM_EVENT for findingId=${findingId}`, err);
-  }
 }
 
 /**
@@ -395,13 +369,6 @@ export async function createFindingService(
     { findingId: created.id, eventType, sourceTaskId: taskId ?? null }
   );
 
-  await logFindingActivity(
-    created.id,
-    `Finding raised by ${reporterName} — ${eventType}`,
-    { findingId: created.id, eventType },
-    client
-  );
-
   return created;
 }
 
@@ -551,7 +518,6 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
         linksFrom: { include: { relatedFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },
         linksTo: { include: { fromFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },
         responseActions: {
-          where: { deletedAt: null },
           orderBy: { createdAt: 'asc' },
           include: {
             task: { select: { id: true, taskId: true, status: true } },
@@ -721,13 +687,6 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
           { findingId: finding.id, ataChapterId: ataChapterId ?? null, hazardTagIds: tagIds }
         );
       }
-
-      await logFindingActivity(
-        finding.id,
-        `Finding reviewed by ${reviewerName} — severity: ${severity}`,
-        { findingId: finding.id, severity },
-        tx
-      );
 
       return result;
     });
@@ -1081,13 +1040,6 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
         trimmedClosureNote
       );
 
-      await logFindingActivity(
-        finding.id,
-        `Finding closed by ${actorName}: ${trimmedClosureNote}`,
-        { findingId: finding.id, closureNote: trimmedClosureNote },
-        tx
-      );
-
       return result;
     });
 
@@ -1148,12 +1100,6 @@ export const advanceFinding = async (req: Request, res: Response): Promise<void>
         userId,
         `Finding #${id} manually advanced — no follow-up tasks required`,
         { findingId: finding.id, fromStatus: 'In Progress', toStatus: 'Pending Verification' }
-      );
-      await logFindingActivity(
-        finding.id,
-        `Finding advanced to Pending Verification by ${actorName}`,
-        { findingId: finding.id },
-        tx
       );
       return result;
     });
@@ -1373,12 +1319,6 @@ export const dismissFinding = async (req: Request, res: Response): Promise<void>
         userId,
         `Finding #${id} dismissed: ${reason}`,
         { findingId: finding.id, reason }
-      );
-      await logFindingActivity(
-        finding.id,
-        `Finding dismissed by ${actorName}: ${reason.trim()}`,
-        { findingId: finding.id, reason },
-        tx
       );
       return result;
     });
