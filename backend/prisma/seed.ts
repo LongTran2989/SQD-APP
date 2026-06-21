@@ -785,6 +785,20 @@ async function main() {
   } catch (e) {
     console.warn('⚠️  Template seed encountered an error (non-fatal). Check output above.');
   }
+
+  // ── EXCEL TEMPLATE SETS & WP BLUEPRINTS ───────────────────────────────────
+  // Must run after seed-templates.ts — resolves TemplateRef/SetRef references
+  // against the templates that script just created.
+  console.log('');
+  console.log('── Excel Template Set & WP Blueprint Seed ────────────────');
+  try {
+    execSync(
+      `node node_modules/ts-node/dist/bin.js prisma/seed-blueprints.ts`,
+      { stdio: 'inherit', cwd: __dirname + '/..' }
+    );
+  } catch (e) {
+    console.warn('⚠️  Template set / WP blueprint seed encountered an error (non-fatal). Check output above.');
+  }
 }
 
 main()

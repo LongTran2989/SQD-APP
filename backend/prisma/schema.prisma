@@ -786,6 +786,7 @@ model TemplateSet {
   ownerId     Int
   owner       User     @relation("TemplateSetOwner", fields: [ownerId], references: [id])
   isActive    Boolean  @default(true)
+  externalRef String?  @unique // Excel SetRef for idempotent seed upsert
 
   items        TemplateSetItem[]
   workPackages WorkPackage[] // back-relation via WorkPackage.autoGenSetId
@@ -857,6 +858,7 @@ model WpBlueprint {
   ownerId  Int
   owner    User    @relation("WpBlueprintOwner", fields: [ownerId], references: [id])
   isActive Boolean @default(true)
+  externalRef String? @unique // Excel BlueprintRef for idempotent seed upsert
 
   instances WorkPackage[] // back-relation via WorkPackage.blueprintId
 
