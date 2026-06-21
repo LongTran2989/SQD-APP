@@ -17,7 +17,7 @@ import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
 import FindingActivityFeed from '../../../../components/findings/FindingActivityFeed';
 import FileUploadField from '../../../../components/ui/FileUploadField';
 import EditDetailsModal from '../../../../components/findings/EditDetailsModal';
-import TaskQuickViewPanel from '../../../../components/findings/TaskQuickViewPanel';
+import { useQuickView } from '../../../../components/quickview/QuickViewProvider';
 import toast from 'react-hot-toast';
 import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X, Pencil, Copy, CalendarClock } from 'lucide-react';
 
@@ -47,7 +47,7 @@ export default function FindingDetailPage() {
   const [closing, setClosing] = useState(false);
   const [closureNote, setClosureNote] = useState('');
   const [showEditDetails, setShowEditDetails] = useState(false);
-  const [quickViewTaskId, setQuickViewTaskId] = useState<number | null>(null);
+  const { openTask } = useQuickView();
   const [showEditDueDate, setShowEditDueDate] = useState(false);
   const [dueDateDraft, setDueDateDraft] = useState('');
   const [dueDateReason, setDueDateReason] = useState('');
@@ -250,7 +250,7 @@ export default function FindingDetailPage() {
               <div className="mt-3">
                 <button
                   type="button"
-                  onClick={() => setQuickViewTaskId(finding.sourceTask!.id)}
+                  onClick={() => openTask(finding.sourceTask!.id)}
                   className="inline-flex items-center gap-1.5 text-sm font-mono font-semibold text-blue-600 hover:text-blue-700"
                 >
                   <ClipboardList className="w-4 h-4" />
@@ -323,7 +323,7 @@ export default function FindingDetailPage() {
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => setQuickViewTaskId(t.id)}
+                    onClick={() => openTask(t.id)}
                     className="w-full text-left flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors"
                   >
                     <div className="flex flex-col gap-1 min-w-0">
@@ -416,11 +416,6 @@ export default function FindingDetailPage() {
             load();
           }}
         />
-      )}
-
-      {/* Follow-up task quick-view drawer */}
-      {quickViewTaskId != null && (
-        <TaskQuickViewPanel taskId={quickViewTaskId} onClose={() => setQuickViewTaskId(null)} />
       )}
 
       {/* Director: change review due date */}

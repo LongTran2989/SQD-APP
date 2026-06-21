@@ -12,7 +12,7 @@ import { CapaTypeBadge, CapaStatusBadge } from './FindingBadges';
 import toast from 'react-hot-toast';
 import { apiErrorMessage } from '../../api/errorMessage';
 import { ShieldCheck, Plus, Trash2, CheckCircle2, Ban, Link2 } from 'lucide-react';
-import Link from 'next/link';
+import { useQuickView } from '../quickview/QuickViewProvider';
 
 interface Props {
   finding: FindingDetail;
@@ -139,6 +139,7 @@ function CapaLinkedItemsList({
 }) {
   const [busy, setBusy] = useState(false);
   const [addingLink, setAddingLink] = useState(false);
+  const { openTask, openWp } = useQuickView();
 
   const doRemove = async (linkId: number) => {
     if (!window.confirm('Remove this linked item?')) return;
@@ -158,15 +159,15 @@ function CapaLinkedItemsList({
               {link.mandatory ? 'Mandatory' : 'Reference'}
             </span>
             {link.task && (
-              <Link href={`/dashboard/tasks/${link.task.id}`} className="text-blue-600 hover:underline">
+              <button type="button" onClick={() => openTask(link.task!.id)} className="text-blue-600 hover:underline">
                 {link.task.taskId}
-              </Link>
+              </button>
             )}
             {link.task && <span className="text-slate-300">({link.task.status})</span>}
             {link.wp && (
-              <Link href={`/dashboard/work-packages/${link.wp.id}`} className="text-blue-600 hover:underline">
+              <button type="button" onClick={() => openWp(link.wp!.id)} className="text-blue-600 hover:underline">
                 {link.wp.wpId}
-              </Link>
+              </button>
             )}
             {link.wp && <span className="text-slate-300">({link.wp.status})</span>}
           </span>

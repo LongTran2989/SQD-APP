@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
 import { WorkPackageDetail, WpStatus, TaskEnriched } from '../../../../types';
@@ -11,6 +11,7 @@ import WorkPackageStatusBadge from '../../../../components/work-packages/WorkPac
 import WorkPackageAssignmentPanel from '../../../../components/work-packages/WorkPackageAssignmentPanel';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
 import FeedPanel from '../../../../components/feed/FeedPanel';
+import { useQuickView } from '../../../../components/quickview/QuickViewProvider';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft,
@@ -112,7 +113,7 @@ const EDIT_ROLES = ['Manager', 'Director', 'Admin'];
 
 export default function WorkPackageDetailPage() {
   const params = useParams();
-  const router = useRouter();
+  const { openTask } = useQuickView();
   const { user } = useAuthStore();
 
   const wpId = Number(params.id);
@@ -422,7 +423,7 @@ export default function WorkPackageDetailPage() {
                       <tr
                         key={task.id}
                         className="hover:bg-slate-50/80 transition-colors cursor-pointer"
-                        onClick={() => router.push(`/dashboard/tasks/${task.id}`)}
+                        onClick={() => openTask(task.id)}
                       >
                         <td className="p-4 align-middle">
                           <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-bold font-mono border border-slate-200">

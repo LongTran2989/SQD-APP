@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { TaskEnriched } from '../../types';
 import { getTaskById } from '../../api/taskApi';
 import TaskStatusBadge from '../tasks/TaskStatusBadge';
-import { ResponseActionBadge } from './FindingBadges';
+import { ResponseActionBadge } from '../findings/FindingBadges';
 import { X, ExternalLink, AlertTriangle, ClipboardList } from 'lucide-react';
 
 interface Props {
@@ -18,9 +18,9 @@ function formatDate(d: string | null): string {
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-// Preview a follow-up task inline on the finding page — no navigation. Reuses
+// Preview a task inline anywhere it is referenced — no navigation. Reuses
 // getTaskById so the drawer shows live status/assignee/etc., with an explicit
-// "Open full task" link for the full page.
+// "Open full task" link for the full page. Mounted once by QuickViewProvider.
 export default function TaskQuickViewPanel({ taskId, onClose }: Props) {
   const [task, setTask] = useState<TaskEnriched | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,6 +96,7 @@ export default function TaskQuickViewPanel({ taskId, onClose }: Props) {
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 font-medium">Close</button>
           <Link
             href={`/dashboard/tasks/${taskId}`}
+            onClick={onClose}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors"
           >
             <ExternalLink className="w-4 h-4" /> Open full task
