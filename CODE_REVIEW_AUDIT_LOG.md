@@ -13,6 +13,24 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-21 — Finding Workflow Hardening (P1–P4) Code Review
+
+**Branch reviewed:** `claude/nice-darwin-nwyj81` (commits `6facc70`, `263eef1`, `6343051`, `b7847fb` — the severity-configurable closed loop, SLA due dates, proactive overdue alerts, stuck-finding surface, CAPA-link simplification, and schema/feed cleanup).
+**Scope:** High-effort `/code-review` of the P1–P4 diff (scoped to the 4 commits; the unrelated PR #47 files in `main...HEAD` were excluded). User triaged: apply #1, #2, #3, #5; keep #4.
+**Tests after fixes:** Backend 566/566 (was 553; +13 covering duplicate handling, detail enrichment, invalid dueDate). Frontend `tsc --noEmit` clean; new components ESLint-clean (the only residual `set-state-in-effect` warnings are the pre-existing project-wide pattern).
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| CR-1 | Medium (soft-delete leak, Rule 2) | `finding.controller.ts` `notifyFindingOverdue` | The overdue notifier re-queried the finding with `findUnique({ where: { id } })` — **no `deletedAt: null`** — so a soft-deleted finding could still fire reviewer notifications. | ✅ Fixed — re-query removed entirely; the notifier now takes the already-loaded `{ id, targetDivisionId, description }` from the soft-delete-filtered parent reads (`getFindingById` / `listFindings`). |
+| CR-2 | Low (robustness) | `finding.controller.ts` `reviewFinding` | A malformed `dueDate` string produced a truthy `Invalid Date` that bypassed the SLA auto-fill + mandatory checks, then threw `RangeError` at `.toISOString()` → 500. | ✅ Fixed — `isNaN(parsedDueDate.getTime())` → 400. Regression test F24b. |
+| CR-3 | Low (efficiency) | `finding.controller.ts` `ensureDueDateBreachesLogged` | The batch breach loop re-queried each finding inside `notifyFindingOverdue` despite already holding the rows. | ✅ Fixed — folded into CR-1: loaded rows passed through, per-finding round-trip removed. |
+| CR-4 | Info (behavior change) | `findingService.ts` `logFindingAuditAndActivity` | P4 moved the FINDING-scope feed write inside the business `$transaction` (previously a best-effort, swallowed call), so a feed-post failure now rolls back the operation. | ✔ Accepted-as-is — correct per Rule 3 (atomic dual-write); `createFeedPost` is a plain insert + best-effort NOTIFY, so it only fails on a real DB error, where rollback is the audit-safe outcome. This change is what fixed RCA/CAPA/Link events silently missing from the finding timeline. |
+| CR-5 | Low (type completeness) | `frontend/src/types/index.ts` `NotificationType` | The frontend union omitted `FINDING_OVERDUE` (added to the backend union in P2), leaving the types out of sync. | ✅ Fixed — added `'FINDING_OVERDUE'`. |
+
+**Follow-up work shipped in the same session (user-requested, not review findings):** raise-time duplicate detection (`GET /findings/duplicate-candidates`) + raiser mark-as-duplicate (`duplicateOfFindingId` parks the new finding as a `Dismissed` `DUPLICATE` of an active same-division canonical); post-raise detail enrichment (`PUT /findings/:id/details`, reporter/assignee/reviewer); follow-up-task quick-view drawer + history-independent "Back to Finding" link. Pending user confirmation before `CLAUDE_HANDOVER.md` feature-status update (Rule 12).
+
+---
+
 ## Session: 2026-06-21 — Doc/Code Consistency Audit + Soft-Delete Filter Investigation
 
 **Branch reviewed:** `claude/adoring-faraday-cwqbne` (working tree).
