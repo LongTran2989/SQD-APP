@@ -62,9 +62,11 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
         }).length;
       }
 
-      const openFindings = await prisma.finding.count({ where: { targetDivisionId: divisionId, status: 'Open', deletedAt: null } });
-      const pendingVerification = await prisma.finding.count({ where: { targetDivisionId: divisionId, status: 'Pending Verification', deletedAt: null } });
-      const inProgressFindings = await prisma.finding.count({ where: { targetDivisionId: divisionId, status: 'In Progress', deletedAt: null } });
+      // Findings are organisation-wide transparent (no division filter), matching
+      // the open Findings list/detail. Tasks + escalations above stay division-scoped.
+      const openFindings = await prisma.finding.count({ where: { status: 'Open', deletedAt: null } });
+      const pendingVerification = await prisma.finding.count({ where: { status: 'Pending Verification', deletedAt: null } });
+      const inProgressFindings = await prisma.finding.count({ where: { status: 'In Progress', deletedAt: null } });
       const findingsOverview = { open: openFindings, pendingVerification, inProgress: inProgressFindings };
 
       metrics = { divisionPendingTasks, escalations: escalationsCount, findingsOverview };
