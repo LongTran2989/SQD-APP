@@ -205,13 +205,14 @@ export default function FindingDetailPage() {
             </div>
             {finding.sourceTask && (
               <div className="mt-3">
-                <Link
-                  href={`/dashboard/tasks/${finding.sourceTask.id}`}
+                <button
+                  type="button"
+                  onClick={() => setQuickViewTaskId(finding.sourceTask!.id)}
                   className="inline-flex items-center gap-1.5 text-sm font-mono font-semibold text-blue-600 hover:text-blue-700"
                 >
                   <ClipboardList className="w-4 h-4" />
                   Source Task {finding.sourceTask.taskId}
-                </Link>
+                </button>
               </div>
             )}
           </div>
