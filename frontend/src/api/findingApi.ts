@@ -13,7 +13,6 @@ import {
   CapaAction,
   CapaType,
   CapaStatus,
-  CapaLinkRole,
   CapaTaskLink,
   FindingLinkType,
   FindingLinkRecord,
@@ -178,8 +177,8 @@ export const updateCapa = (
 ): Promise<CapaAction> =>
   apiClient.put(`/findings/${id}/capa/${capaId}`, payload).then((r) => r.data);
 
-export const verifyCapa = (id: number, capaId: number): Promise<CapaAction> =>
-  apiClient.put(`/findings/${id}/capa/${capaId}/verify`).then((r) => r.data);
+export const verifyCapa = (id: number, capaId: number, effectivenessNote: string): Promise<CapaAction> =>
+  apiClient.put(`/findings/${id}/capa/${capaId}/verify`, { effectivenessNote }).then((r) => r.data);
 
 export const waiveCapa = (id: number, capaId: number, waivedReason: string): Promise<CapaAction> =>
   apiClient.put(`/findings/${id}/capa/${capaId}/waive`, { waivedReason }).then((r) => r.data);
@@ -190,7 +189,7 @@ export const deleteCapa = (id: number, capaId: number): Promise<void> =>
 export const addCapaLink = (
   findingId: number,
   capaId: number,
-  payload: { role: CapaLinkRole; taskId?: number; wpId?: number }
+  payload: { mandatory: boolean; taskId?: number; wpId?: number }
 ): Promise<CapaTaskLink> =>
   apiClient.post(`/findings/${findingId}/capa/${capaId}/links`, payload).then((r) => r.data);
 

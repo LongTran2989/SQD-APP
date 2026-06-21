@@ -527,7 +527,6 @@ export type RcaMethod = 'MEDA' | 'FIVE_WHYS' | 'OTHER';
 export type RcaStatus = 'Draft' | 'Complete';
 export type CapaType = 'CORRECTIVE' | 'PREVENTIVE';
 export type CapaStatus = 'Open' | 'In Progress' | 'Completed' | 'Verified' | 'Waived';
-export type CapaLinkRole = 'EXECUTION' | 'EFFECTIVENESS' | 'SUPPORTING';
 export type FindingLinkType = 'DUPLICATE' | 'RELATED' | 'CAUSED_BY';
 export type ResponseActionType = 'CAR' | 'NCR' | 'QN' | 'QR' | 'IR' | 'Dissemination';
 
@@ -536,7 +535,7 @@ export interface CapaWpRef { id: number; wpId: string; name: string; status: str
 export interface CapaTaskLink {
   id: number;
   capaId: number;
-  role: CapaLinkRole;
+  mandatory: boolean;
   taskId: number | null;
   task?: { id: number; taskId: string; title: string | null; status: TaskStatus; } | null;
   wpId: number | null;

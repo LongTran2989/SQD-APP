@@ -6,12 +6,9 @@ import { CAPA_TYPES, CAPA_STATUSES, FINDING_EXPANSION_ACTIONS } from '../constan
 
 import { prisma } from '../lib/prisma';
 
-// A linked effectiveness Task must be in one of these states for its CAPA to be
-// verifiable — i.e. the verification work is genuinely done.
+// A linked mandatory Task must be in one of these states for its CAPA to be
+// verifiable — i.e. the corrective work is genuinely done.
 const EFFECTIVENESS_DONE_STATUSES = ['Closed'];
-
-// Roles a linked Task/WP can play relative to a CAPA item.
-const CAPA_LINK_ROLES = ['EXECUTION', 'EFFECTIVENESS', 'SUPPORTING'] as const;
 
 async function loadFindingForCapa(id: number) {
   return prisma.finding.findUnique({
@@ -204,11 +201,22 @@ export const verifyCapa = async (req: Request, res: Response): Promise<void> => 
     const id = parseInt(req.params.id as string, 10);
     const capaId = parseInt(req.params.capaId as string, 10);
     const { userId, role } = req.user!;
+    const { effectivenessNote } = req.body ?? {};
 
     if (!isFindingReviewer(req.user!)) {
       res.status(403).json({ message: 'Only a Manager or Director can verify CAPA effectiveness' });
       return;
     }
+    // The effectiveness determination is an explicit, bounded human sign-off.
+    if (!effectivenessNote || typeof effectivenessNote !== 'string' || !effectivenessNote.trim()) {
+      res.status(400).json({ message: 'An effectiveness note is required to verify a CAPA action' });
+      return;
+    }
+    if (effectivenessNote.length > 2000) {
+      res.status(400).json({ message: 'Effectiveness note must be 2000 characters or fewer' });
+      return;
+    }
+    const trimmedNote = effectivenessNote.trim();
     const finding = await loadFindingAndAssertCapaEdit(req, res, id, 'verify this CAPA action');
     if (!finding) return;
     const capa = await prisma.capaAction.findFirst({
@@ -226,19 +234,19 @@ export const verifyCapa = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'CAPA action not found' });
       return;
     }
-    // Effectiveness must be evidenced by completed verification tasks/WPs.
-    const effectivenessLinks = capa.linkedItems.filter((l) => l.role === 'EFFECTIVENESS');
-    if (effectivenessLinks.length === 0) {
-      res.status(400).json({ message: 'Link at least one effectiveness task or WP before verifying' });
+    // Effectiveness must be evidenced by completed mandatory tasks/WPs.
+    const mandatoryLinks = capa.linkedItems.filter((l) => l.mandatory);
+    if (mandatoryLinks.length === 0) {
+      res.status(400).json({ message: 'Link at least one mandatory task or WP before verifying' });
       return;
     }
-    const allDone = effectivenessLinks.every((l) => {
+    const allDone = mandatoryLinks.every((l) => {
       if (l.task) return EFFECTIVENESS_DONE_STATUSES.includes(l.task.status);
       if (l.wp) return l.wp.status === 'Closed';
       return false;
     });
     if (!allDone) {
-      res.status(400).json({ message: 'All linked effectiveness tasks/WPs must be Closed before verifying' });
+      res.status(400).json({ message: 'All mandatory linked tasks/WPs must be Closed before verifying' });
       return;
     }
 
@@ -253,8 +261,9 @@ export const verifyCapa = async (req: Request, res: Response): Promise<void> => 
         finding.sourceTaskId,
         FINDING_EXPANSION_ACTIONS.CAPA_VERIFIED,
         userId,
-        `CAPA action #${capaId} verified effective for Finding #${finding.id}`,
-        { findingId: finding.id, capaId }
+        `CAPA action #${capaId} verified effective for Finding #${finding.id}: ${trimmedNote}`,
+        { findingId: finding.id, capaId, effectivenessNote: trimmedNote },
+        trimmedNote
       );
       return result;
     });
@@ -366,7 +375,7 @@ export const addCapaLink = async (req: Request, res: Response): Promise<void> =>
     const id = parseInt(req.params.id as string, 10);
     const capaId = parseInt(req.params.capaId as string, 10);
     const { userId } = req.user!;
-    const { role, taskId, wpId } = req.body;
+    const { mandatory, taskId, wpId } = req.body;
 
     const finding = await loadFindingAndAssertCapaEdit(req, res, id, 'link items on this finding');
     if (!finding) return;
@@ -375,8 +384,10 @@ export const addCapaLink = async (req: Request, res: Response): Promise<void> =>
       res.status(404).json({ message: 'CAPA action not found' });
       return;
     }
-    if (!role || !CAPA_LINK_ROLES.includes(role)) {
-      res.status(400).json({ message: `role is required and must be one of: ${CAPA_LINK_ROLES.join(', ')}` });
+    // Default to mandatory (gates verification/closure) unless explicitly false.
+    const isMandatory = mandatory === undefined ? true : mandatory === true;
+    if (mandatory !== undefined && typeof mandatory !== 'boolean') {
+      res.status(400).json({ message: 'mandatory must be a boolean' });
       return;
     }
     // Exactly one of taskId / wpId must be supplied.
@@ -404,19 +415,20 @@ export const addCapaLink = async (req: Request, res: Response): Promise<void> =>
       const result = await tx.capaTaskLink.create({
         data: {
           capaId,
-          role,
+          mandatory: isMandatory,
           taskId: hasTask ? taskId : null,
           wpId: hasWp ? wpId : null,
         },
       });
+      const mandatoryLabel = isMandatory ? 'Mandatory' : 'Reference';
       await logFindingAuditAndActivity(
         tx,
         finding.id,
         finding.sourceTaskId,
         FINDING_EXPANSION_ACTIONS.CAPA_LINK_ADDED,
         userId,
-        `${role} ${hasTask ? `Task ${taskId}` : `WP ${wpId}`} linked to CAPA action #${capaId} on Finding #${finding.id}`,
-        { findingId: finding.id, capaId, linkId: result.id, role, taskId: result.taskId, wpId: result.wpId }
+        `${mandatoryLabel} ${hasTask ? `Task ${taskId}` : `WP ${wpId}`} linked to CAPA action #${capaId} on Finding #${finding.id}`,
+        { findingId: finding.id, capaId, linkId: result.id, mandatory: isMandatory, taskId: result.taskId, wpId: result.wpId }
       );
       return result;
     });

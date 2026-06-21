@@ -7,7 +7,7 @@ import { listAtaChapters, listHazardTags, listEventTypes } from '../../api/taxon
 import { apiErrorMessage } from '../../api/errorMessage';
 import { AtaChapter, HazardTag, EventType } from '../../types';
 import toast from 'react-hot-toast';
-import { X, AlertTriangle } from 'lucide-react';
+import { X, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
 import SearchableSelect from '../ui/SearchableSelect';
 
@@ -36,6 +36,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
   const [regulatoryReference, setRegulatoryReference] = useState('');
   const [description, setDescription] = useState('');
   const [fieldId, setFieldId] = useState('');
+  const [showOptional, setShowOptional] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -186,6 +187,19 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
             </select>
           </div>
 
+          {/* Optional fields collapsed by default to keep the required fields
+              (Event Type, Department, Description) front and centre. */}
+          <button
+            type="button"
+            onClick={() => setShowOptional((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 uppercase tracking-wide"
+          >
+            {showOptional ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            Additional details (optional)
+          </button>
+
+          {showOptional && (
+          <>
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
               ATA Chapter
@@ -276,6 +290,8 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+          </>
+          )}
 
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">

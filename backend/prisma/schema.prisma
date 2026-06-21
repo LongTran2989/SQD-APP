@@ -476,8 +476,10 @@ model CapaAction {
 }
 
 // Join table linking a CAPA item to one or more existing Tasks / Work Packages.
-// A CAPA may have many linked items; each link carries a role describing how the
-// task/WP relates to the action (EXECUTION | EFFECTIVENESS | SUPPORTING).
+// Each link is either mandatory (must be Closed before the CAPA can be verified
+// and the finding closed) or non-mandatory (reference-only). This replaces the
+// former EXECUTION / EFFECTIVENESS / SUPPORTING role taxonomy — effectiveness is
+// now an explicit human sign-off recorded at verify time, not an inferred role.
 model CapaTaskLink {
   id        Int          @id @default(autoincrement())
   capaId    Int
@@ -486,7 +488,7 @@ model CapaTaskLink {
   task      Task?        @relation("CapaLinkedTasks", fields: [taskId], references: [id])
   wpId      Int?
   wp        WorkPackage? @relation("CapaLinkedWPs", fields: [wpId], references: [id])
-  role      String // EXECUTION | EFFECTIVENESS | SUPPORTING
+  mandatory Boolean      @default(true)
   createdAt DateTime     @default(now())
 
   @@index([capaId])

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FindingDetail, CapaAction, CapaType, CapaLinkRole, CapaTaskLink, TaskEnriched, WorkPackageEnriched } from '../../types';
+import { FindingDetail, CapaAction, CapaType, CapaTaskLink, TaskEnriched, WorkPackageEnriched } from '../../types';
 import { createCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink, CapaPayload } from '../../api/findingApi';
 import { getTasks } from '../../api/taskApi';
 import { getWorkPackages } from '../../api/wpApi';
@@ -73,8 +73,10 @@ function CapaCard({ capa, findingId, isMgrDir, onChanged }: { capa: CapaAction; 
   const [busy, setBusy] = useState(false);
 
   const doVerify = async () => {
+    const note = window.prompt('Effectiveness sign-off — confirm the corrective action was effective and cite the evidence:');
+    if (!note || !note.trim()) return;
     setBusy(true);
-    try { await verifyCapa(findingId, capa.id); toast.success('CAPA verified'); onChanged(); }
+    try { await verifyCapa(findingId, capa.id, note.trim()); toast.success('CAPA verified'); onChanged(); }
     catch (err) { toast.error(apiErrorMessage(err, 'Failed to verify')); }
     finally { setBusy(false); }
   };
@@ -152,7 +154,9 @@ function CapaLinkedItemsList({
         <div key={link.id} className="flex items-center justify-between gap-2 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1">
             <Link2 className="w-3 h-3" />
-            <span className="font-medium text-slate-400 uppercase">{link.role}</span>
+            <span className={`font-medium uppercase ${link.mandatory ? 'text-amber-600' : 'text-slate-400'}`}>
+              {link.mandatory ? 'Mandatory' : 'Reference'}
+            </span>
             {link.task && (
               <Link href={`/dashboard/tasks/${link.task.id}`} className="text-blue-600 hover:underline">
                 {link.task.taskId}
@@ -192,7 +196,7 @@ function CapaLinkForm({
 }: {
   findingId: number; capaId: number; existingItems: CapaTaskLink[]; onCancel: () => void; onSaved: () => void;
 }) {
-  const [role, setRole] = useState<CapaLinkRole>('EXECUTION');
+  const [mandatory, setMandatory] = useState(true);
   const [refType, setRefType] = useState<'task' | 'wp'>('task');
   const [refId, setRefId] = useState('');
   const [saving, setSaving] = useState(false);
@@ -234,7 +238,7 @@ function CapaLinkForm({
     setSaving(true);
     try {
       await addCapaLink(findingId, capaId, {
-        role,
+        mandatory,
         taskId: refType === 'task' ? id : undefined,
         wpId: refType === 'wp' ? id : undefined,
       });
@@ -249,13 +253,12 @@ function CapaLinkForm({
 
   return (
     <div className="mt-2 space-y-2">
-      {/* Row 1: role, type, create shortcuts */}
+      {/* Row 1: mandatory flag, type, create shortcuts */}
       <div className="flex flex-wrap items-center gap-2">
-        <select value={role} onChange={(e) => setRole(e.target.value as CapaLinkRole)}
+        <select value={mandatory ? 'mandatory' : 'reference'} onChange={(e) => setMandatory(e.target.value === 'mandatory')}
           className="text-xs border border-slate-200 rounded px-2 py-1">
-          <option value="EXECUTION">Execution</option>
-          <option value="EFFECTIVENESS">Effectiveness</option>
-          <option value="SUPPORTING">Supporting</option>
+          <option value="mandatory">Mandatory</option>
+          <option value="reference">Reference</option>
         </select>
         <select value={refType} onChange={(e) => handleRefTypeChange(e.target.value as 'task' | 'wp')}
           className="text-xs border border-slate-200 rounded px-2 py-1">

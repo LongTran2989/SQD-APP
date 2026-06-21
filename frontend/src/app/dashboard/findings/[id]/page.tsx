@@ -118,6 +118,27 @@ export default function FindingDetailPage() {
   const analysisVisible = finding.status !== 'Open';
   const analysisEditable = finding.status !== 'Closed' && (isReporter || isFollowUpAssignee || isMgrDir);
 
+  // Status-driven "what to do next" guidance — keeps users oriented across the
+  // multi-step loop (review → analyse → verify → close).
+  const nextStep: string | null = (() => {
+    switch (finding.status) {
+      case 'Open':
+        return isMgrDir
+          ? 'Review this finding: set a severity and due date to start the corrective process.'
+          : 'Awaiting review by a Manager or Director, who will set the severity and due date.';
+      case 'In Progress':
+        return isMgrDir
+          ? 'Investigate: record the Root Cause Analysis and add corrective actions (CAPA). Generate follow-up tasks as needed — the finding advances automatically once every follow-up task is complete.'
+          : 'Investigate: record the Root Cause Analysis and complete your follow-up tasks. The finding advances automatically once all follow-up tasks are done.';
+      case 'Pending Verification':
+        return isMgrDir
+          ? 'Verify each corrective action is effective (sign-off required), then close the finding with a closure note.'
+          : 'Awaiting verification and closure by a Manager or Director.';
+      default:
+        return null;
+    }
+  })();
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Back link */}
@@ -129,6 +150,14 @@ export default function FindingDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ── Left column ── */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Next-step guidance — orients the actor in the multi-step loop */}
+          {nextStep && (
+            <div className="flex items-start gap-2.5 bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3">
+              <CheckCircle2 className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+              <p className="text-sm text-blue-900"><span className="font-semibold">Next step:</span> {nextStep}</p>
+            </div>
+          )}
+
           {/* Trend banner — recurrent-pattern alert */}
           <TrendBanner trend={finding.trend} />
 

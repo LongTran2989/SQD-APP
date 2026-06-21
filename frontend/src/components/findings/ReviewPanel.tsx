@@ -194,7 +194,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
               <p className="mt-1 text-xs text-slate-400">Pre-filled from the {severity} SLA — adjust if needed.</p>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div>
             <button
               type="button"
               onClick={handleSubmit}
@@ -203,13 +203,18 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
             >
               {submitting ? 'Submitting…' : 'Submit Review'}
             </button>
+          </div>
+          {/* Destructive, irreversible action — separated from the primary flow
+              and de-emphasised to avoid an accidental dismiss. */}
+          <div className="pt-3 mt-1 border-t border-slate-100">
             <button
               type="button"
               onClick={() => setShowDismissModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors"
+              className="text-xs font-medium text-red-600 hover:text-red-700 hover:underline"
             >
-              Dismiss
+              Dismiss this finding instead
             </button>
+            <p className="mt-0.5 text-xs text-slate-400">Use only for findings raised in error — this is permanent.</p>
           </div>
         </div>
       )}
