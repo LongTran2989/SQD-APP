@@ -5,7 +5,7 @@ import { Template, WorkPackageEnriched, ResponseActionType } from '../../types';
 import { generateFollowUpTasks, FollowUpTaskInput } from '../../api/findingApi';
 import { getWorkPackages } from '../../api/wpApi';
 import { getDatasource } from '../../api/taskApi';
-import { apiClient } from '../../api/client';
+import { getPublishedTemplates } from '../../api/templateApi';
 import toast from 'react-hot-toast';
 import { X, Plus, Trash2, ListPlus } from 'lucide-react';
 import { MULTI_DEPT_SINGLE_TASK_TYPES } from '../../constants/findingExpansion';
@@ -44,9 +44,11 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    apiClient
-      .get('/templates')
-      .then((r) => setTemplates((r.data as Template[]).filter((t) => t.status === 'Published')))
+    // getPublishedTemplates() returns a flat Template[] (already status=Published).
+    // NOTE: the bare /templates endpoint returns { data, total, page, limit } — reading
+    // r.data as an array silently yielded an empty picker for every response-action type.
+    getPublishedTemplates()
+      .then(setTemplates)
       .catch(() => {});
     getWorkPackages()
       .then((wps) => setOpenWps(wps.filter((w) => w.computedStatus === 'Open' || w.computedStatus === 'In Progress')))
