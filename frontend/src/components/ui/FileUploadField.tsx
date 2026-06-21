@@ -29,6 +29,11 @@ interface FileUploadFieldProps {
   onChange?: (attachmentIds: number[]) => void;
   /** Shows an inline caption input under each image (report_block galleries only). */
   captionable?: boolean;
+  /** Mirrors the live attachment list (metadata, not just ids) for a sibling
+   * component (e.g. report_block's inline image picker). Purely informational —
+   * unlike onChange, safe to fire on the initial read since it never touches
+   * saved TaskData. */
+  onAttachmentsChange?: (attachments: Attachment[]) => void;
 }
 
 // Rounding matches the backend formatBytes (attachmentService.ts) so the limit
@@ -46,6 +51,7 @@ export default function FileUploadField({
   disabled = false,
   onChange,
   captionable = false,
+  onAttachmentsChange,
 }: FileUploadFieldProps) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [config, setConfig] = useState<FileUploadConfig | null>(null);
@@ -59,6 +65,10 @@ export default function FileUploadField({
     (list: Attachment[]) => onChange?.(list.map((a) => a.id)),
     [onChange]
   );
+
+  useEffect(() => {
+    onAttachmentsChange?.(attachments);
+  }, [attachments, onAttachmentsChange]);
 
   useEffect(() => {
     let active = true;
