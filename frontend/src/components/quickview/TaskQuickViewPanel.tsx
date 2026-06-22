@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { TaskEnriched } from '../../types';
-import { getTaskById } from '../../api/taskApi';
+import { TaskEnriched, TaskActivityEnriched } from '../../types';
+import { getTaskById, getTaskActivity, getRelatedFindings, RelatedFinding } from '../../api/taskApi';
+import { formatTimestamp } from '../../utils/feedHelpers';
+import { useQuickView } from './QuickViewProvider';
 import TaskStatusBadge from '../tasks/TaskStatusBadge';
 import { ResponseActionBadge } from '../findings/FindingBadges';
-import { X, ExternalLink, AlertTriangle, ClipboardList } from 'lucide-react';
+import { X, ExternalLink, AlertTriangle, ClipboardList, Flag, FileText } from 'lucide-react';
 
 interface Props {
   taskId: number;
@@ -18,22 +20,34 @@ function formatDate(d: string | null): string {
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-// Preview a task inline anywhere it is referenced — no navigation. Reuses
-// getTaskById so the drawer shows live status/assignee/etc., with an explicit
-// "Open full task" link for the full page. Mounted once by QuickViewProvider.
+// Preview a task inline anywhere it is referenced — no navigation. Pulls the
+// live task, its related finding(s), and the latest activity so the drawer
+// answers "what is this, who owns it, where did it come from, what just
+// happened" without leaving the page. Mounted once by QuickViewProvider.
 export default function TaskQuickViewPanel({ taskId, onClose }: Props) {
+  const { openFinding } = useQuickView();
   const [task, setTask] = useState<TaskEnriched | null>(null);
+  const [activity, setActivity] = useState<TaskActivityEnriched[]>([]);
+  const [relatedFindings, setRelatedFindings] = useState<RelatedFinding[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    getTaskById(taskId)
-      .then((t) => { if (active) { setTask(t); setError(null); } })
+    Promise.all([
+      getTaskById(taskId),
+      getTaskActivity(taskId).catch(() => [] as TaskActivityEnriched[]),
+      getRelatedFindings(taskId).catch(() => [] as RelatedFinding[]),
+    ])
+      .then(([t, acts, findings]) => { if (active) { setTask(t); setActivity(acts); setRelatedFindings(findings); setError(null); } })
       .catch(() => { if (active) setError('Failed to load task'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [taskId]);
+
+  // Most recent few entries, newest first.
+  const recent = activity.slice(-5).reverse();
+  const hasReport = !!task?.taskData?.data && Object.keys(task.taskData.data).length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={onClose}>
@@ -72,8 +86,30 @@ export default function TaskQuickViewPanel({ taskId, onClose }: Props) {
                 )}
               </div>
 
+              {relatedFindings.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+                    {relatedFindings.length > 1 ? 'Related findings' : 'Related finding'}
+                  </h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {relatedFindings.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => openFinding(f.id)}
+                        title={f.description}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-xs font-semibold hover:bg-amber-100 transition-colors"
+                      >
+                        <Flag className="w-3 h-3" /> Finding #{f.id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <dl className="space-y-3 text-sm">
                 <Row label="Template" value={task.template?.title ?? '—'} />
+                <Row label="Issuer" value={task.issuer?.name ?? '—'} />
                 <Row label="Assignee" value={task.assignedToUser?.name ?? 'Unassigned'} />
                 <Row label="Division" value={task.targetDivision?.name ?? '—'} />
                 <Row label="Work Package" value={task.wp ? `${task.wp.wpId} — ${task.wp.name}` : '—'} />
@@ -88,12 +124,42 @@ export default function TaskQuickViewPanel({ taskId, onClose }: Props) {
                   </dd>
                 </div>
               </dl>
+
+              <div>
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Latest activity</h4>
+                {recent.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic">No activity yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {recent.map((entry) => (
+                      <li key={entry.id} className="text-xs">
+                        <p className={`leading-relaxed break-words ${entry.type === 'SYSTEM_EVENT' ? 'text-slate-500 italic' : 'text-slate-700'}`}>
+                          {entry.type !== 'SYSTEM_EVENT' && (
+                            <span className="font-semibold text-slate-600">{entry.author?.name ?? 'Unknown'}: </span>
+                          )}
+                          {entry.content}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{formatTimestamp(entry.createdAt)}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </>
           )}
         </div>
 
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 font-medium">Close</button>
+          {hasReport && (
+            <Link
+              href={`/tasks/${taskId}/report`}
+              onClick={onClose}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-600 text-slate-600 text-sm font-semibold rounded-xl transition-colors"
+            >
+              <FileText className="w-4 h-4" /> Report
+            </Link>
+          )}
           <Link
             href={`/dashboard/tasks/${taskId}`}
             onClick={onClose}

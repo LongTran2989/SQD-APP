@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
 import { TaskEnriched, TaskActivityEnriched, FormField, FindingListItem } from '../../../../types';
-import { getTaskById, getTaskActivity, saveTaskData } from '../../../../api/taskApi';
+import { getTaskById, getTaskActivity, saveTaskData, getRelatedFindings, RelatedFinding } from '../../../../api/taskApi';
 import { getFindingsByTask } from '../../../../api/findingApi';
 import TaskDetailPanel from '../../../../components/tasks/TaskDetailPanel';
 import TaskActionBar from '../../../../components/tasks/TaskActionBar';
@@ -37,6 +37,9 @@ export default function TaskDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [linkedFindings, setLinkedFindings] = useState<FindingListItem[]>([]);
+  // Every finding this task ties back to (source / follow-up parent / CAPA link) —
+  // drives the back-to-finding link so it holds even for CAPA-only tasks.
+  const [relatedFindings, setRelatedFindings] = useState<RelatedFinding[]>([]);
   const [showRaiseFinding, setShowRaiseFinding] = useState(false);
 
   // ── beforeunload guard (same pattern as TemplateBuilder) ──
@@ -64,8 +67,9 @@ export default function TaskDetailPage() {
       // Pre-fill form with saved taskData
       const saved = taskData.taskData?.data ?? {};
       setFormData(saved as Record<string, unknown>);
-      // Findings raised on this task (non-fatal)
+      // Findings raised on this task + all related findings (both non-fatal)
       getFindingsByTask(taskId).then(setLinkedFindings).catch(() => {});
+      getRelatedFindings(taskId).then(setRelatedFindings).catch(() => {});
     } catch (err: any) {
       if (err.response?.status === 403) {
         setError('You do not have permission to view this task.');
@@ -96,6 +100,7 @@ export default function TaskDetailPage() {
       setTask(taskData);
       setActivities(activityData);
       getFindingsByTask(taskId).then(setLinkedFindings).catch(() => {});
+      getRelatedFindings(taskId).then(setRelatedFindings).catch(() => {});
     } catch {
       // non-fatal — page already loaded, silently ignore
     }
@@ -233,19 +238,20 @@ export default function TaskDetailPage() {
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div className="flex-1 min-w-0">
-          {/* Back-to-finding: follow-up tasks point home via parentFinding; source
-              tasks (which raised a finding) fall back to the finding(s) linked to them. */}
+          {/* Back-to-finding: every relation the server can see — follow-up parent,
+              source finding, or a CAPA action that links here — so the route home
+              holds even for CAPA-only tasks, on a direct load. */}
           {(() => {
-            const back = task.parentFinding ?? (linkedFindings.length > 0 ? linkedFindings[0] : null);
+            const back = relatedFindings.length > 0 ? relatedFindings[0] : null;
             if (!back) return null;
-            const more = task.parentFinding ? 0 : Math.max(0, linkedFindings.length - 1);
+            const more = Math.max(0, relatedFindings.length - 1);
             return (
               <Link
                 href={`/dashboard/findings/${back.id}`}
                 className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 hover:text-amber-700 mb-1"
               >
                 <ArrowLeft className="w-3 h-3" />
-                Back to Finding #{back.id}{more > 0 ? ` (+${more} more below)` : ''}
+                Back to Finding #{back.id}{more > 0 ? ` (+${more} more)` : ''}
               </Link>
             );
           })()}
@@ -410,8 +416,9 @@ export default function TaskDetailPage() {
           onClose={() => setShowRaiseFinding(false)}
           onRaised={() => {
             setShowRaiseFinding(false);
-            // Refresh linked findings + the activity feed (a SYSTEM_EVENT was logged).
+            // Refresh linked + related findings + the activity feed (a SYSTEM_EVENT was logged).
             getFindingsByTask(task.id).then(setLinkedFindings).catch(() => {});
+            getRelatedFindings(task.id).then(setRelatedFindings).catch(() => {});
             getTaskActivity(task.id).then(setActivities).catch(() => {});
           }}
         />

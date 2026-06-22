@@ -846,4 +846,88 @@ describe('Findings Backend (Phase 6)', () => {
       expect(finding?.status).toBe('In Progress');
     });
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 9 — Related findings for a task (back-to-finding link + quick-view)
+  // GET /api/tasks/:id/related-findings — every finding a task ties back to,
+  // by any relation: source (it raised it), follow-up parent, or CAPA link.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('Related findings for a task', () => {
+    const mkFinding = (overrides: Record<string, unknown> = {}) =>
+      prisma.finding.create({
+        data: { description: 'Rel test finding', eventType: 'Procedural Breach', departmentId, reportedByUserId: staffId, ...overrides }
+      });
+
+    const mkTask = (taskId: string, overrides: Record<string, unknown> = {}) =>
+      prisma.task.create({
+        data: { taskId, templateId: allowsFindingsTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Closed', schemaSnapshot: [] as any, assignmentType: 'INDIVIDUAL', ...overrides }
+      });
+
+    const mkCapa = (findingId: number, overrides: Record<string, unknown> = {}) =>
+      prisma.capaAction.create({
+        data: { findingId, type: 'CORRECTIVE', description: 'Fix it', createdByUserId: managerId, ...overrides }
+      });
+
+    const getRelated = (taskId: number, token = staffToken) =>
+      request(app).get(`/api/tasks/${taskId}/related-findings`).set('Authorization', `Bearer ${token}`);
+
+    it('R01: returns the finding a task raised (source), excluding unrelated findings', async () => {
+      const f = await mkFinding({ sourceTaskId });
+      await mkFinding(); // unrelated — must not appear
+      const res = await getRelated(sourceTaskId);
+      expect(res.status).toBe(200);
+      expect(res.body.map((x: any) => x.id)).toEqual([f.id]);
+      expect(res.body[0]).toEqual(expect.objectContaining({ id: f.id, status: 'Open', description: 'Rel test finding' }));
+      expect(res.body[0]).toHaveProperty('severity');
+    });
+
+    it('R02: returns the finding a follow-up task belongs to (parentFindingId)', async () => {
+      const f = await mkFinding();
+      const t = await mkTask('REL-T-002', { parentFindingId: f.id });
+      const res = await getRelated(t.id);
+      expect(res.status).toBe(200);
+      expect(res.body.map((x: any) => x.id)).toEqual([f.id]);
+    });
+
+    it('R03: returns the finding a CAPA action links to — task is neither source nor follow-up', async () => {
+      const f = await mkFinding();
+      const t = await mkTask('REL-T-003');
+      const capa = await mkCapa(f.id);
+      await prisma.capaTaskLink.create({ data: { capaId: capa.id, taskId: t.id, mandatory: true } });
+      const res = await getRelated(t.id);
+      expect(res.status).toBe(200);
+      expect(res.body.map((x: any) => x.id)).toEqual([f.id]);
+    });
+
+    it('R04: a task related by multiple paths returns the finding once (dedup)', async () => {
+      const f = await mkFinding({ sourceTaskId });
+      const capa = await mkCapa(f.id);
+      await prisma.capaTaskLink.create({ data: { capaId: capa.id, taskId: sourceTaskId, mandatory: true } });
+      const res = await getRelated(sourceTaskId);
+      expect(res.status).toBe(200);
+      expect(res.body.map((x: any) => x.id)).toEqual([f.id]); // not [f.id, f.id]
+    });
+
+    it('R05: excludes soft-deleted findings', async () => {
+      await mkFinding({ sourceTaskId, deletedAt: new Date() });
+      const res = await getRelated(sourceTaskId);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('R06: excludes a finding linked only via a soft-deleted CAPA action', async () => {
+      const f = await mkFinding();
+      const t = await mkTask('REL-T-006');
+      const capa = await mkCapa(f.id, { deletedAt: new Date() });
+      await prisma.capaTaskLink.create({ data: { capaId: capa.id, taskId: t.id, mandatory: true } });
+      const res = await getRelated(t.id);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('R07: 404 for a non-existent task', async () => {
+      const res = await getRelated(99999999);
+      expect(res.status).toBe(404);
+    });
+  });
 });

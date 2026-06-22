@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry, TimeEntry, TimeEntrySummary, ReviewAction, DeadlineDecision } from '../types';
+import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry, TimeEntry, TimeEntrySummary, ReviewAction, DeadlineDecision, FindingStatus, FindingSeverity } from '../types';
 
 // ─── List endpoints ────────────────────────────────────────────────────────────
 
@@ -36,6 +36,20 @@ export const getUnassignedTasks = (): Promise<TaskEnriched[]> =>
 
 export const getTaskById = (id: number): Promise<TaskEnriched> =>
   apiClient.get(`/tasks/${id}`).then((r) => r.data);
+
+// Every finding this task is connected to — whether it raised it (source), is a
+// follow-up of it (parent), or a CAPA action on it links here. Drives the
+// back-to-finding link on the task page + quick-view drawer (covers CAPA-only
+// tasks that have no parentFinding and aren't a source).
+export interface RelatedFinding {
+  id: number;
+  status: FindingStatus;
+  severity: FindingSeverity | null;
+  description: string;
+}
+
+export const getRelatedFindings = (id: number): Promise<RelatedFinding[]> =>
+  apiClient.get(`/tasks/${id}/related-findings`).then((r) => r.data);
 
 // ─── Create ────────────────────────────────────────────────────────────────────
 

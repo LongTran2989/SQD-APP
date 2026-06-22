@@ -531,6 +531,45 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
+// ─── GET /api/tasks/:id/related-findings ────────────────────────────────────────
+// Every finding connected to this task, by any relation: the task raised it
+// (sourceTaskId), the task is a follow-up of it (parentFindingId), or a CAPA
+// action on the finding links to this task. One OR query auto-dedups a task
+// matching several relations. Powers the task page's back-to-finding link and
+// the task quick-view drawer so the route home holds even for CAPA-only tasks
+// (no parentFindingId, not a source). Open-read — consistent with the
+// transparent viewing model used by getTaskById / getTaskActivity.
+export const getRelatedFindings = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
+
+    const task = await prisma.task.findUnique({
+      where: { id, deletedAt: null },
+      select: { id: true }
+    });
+    if (!task) { res.status(404).json({ message: 'Task not found' }); return; }
+
+    const findings = await prisma.finding.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { sourceTaskId: id },                                                    // task raised this finding
+          { followUpTasks: { some: { id } } },                                     // task is a follow-up of it
+          { capaActions: { some: { deletedAt: null, linkedItems: { some: { taskId: id } } } } } // CAPA links to it
+        ]
+      },
+      select: { id: true, status: true, severity: true, description: true },
+      orderBy: { id: 'asc' }
+    });
+
+    res.json(findings);
+  } catch (error) {
+    console.error('Error fetching related findings:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // ─── POST /api/tasks ──────────────────────────────────────────────────────────
 
 export interface CreateTaskParams {

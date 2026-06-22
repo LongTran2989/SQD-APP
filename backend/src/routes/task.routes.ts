@@ -6,6 +6,7 @@ import {
   getMyTasks,
   getUnassignedTasks,
   getTaskById,
+  getRelatedFindings,
   createTask,
   createQuickTask,
   updateTaskWp,
@@ -41,6 +42,7 @@ router.get('/unassigned', getUnassignedTasks);
 
 // ─── Single task ────────────────────────────────────────────────────
 router.get('/:id', getTaskById);
+router.get('/:id/related-findings', getRelatedFindings);
 router.post('/', createTask);
 router.post('/quick', createQuickTask);
 router.patch('/:id/wp', updateTaskWp);

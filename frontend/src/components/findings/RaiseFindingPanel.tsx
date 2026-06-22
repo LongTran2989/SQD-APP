@@ -7,10 +7,11 @@ import { listAtaChapters, listHazardTags, listEventTypes } from '../../api/taxon
 import { apiErrorMessage } from '../../api/errorMessage';
 import { AtaChapter, HazardTag, EventType } from '../../types';
 import toast from 'react-hot-toast';
-import { X, AlertTriangle, ChevronDown, ChevronRight, Layers } from 'lucide-react';
+import { X, AlertTriangle, ChevronDown, ChevronRight, Layers, Eye } from 'lucide-react';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
 import SearchableSelect from '../ui/SearchableSelect';
 import { FindingStatusBadge } from './FindingBadges';
+import { useQuickView } from '../quickview/QuickViewProvider';
 
 interface Props {
   taskId?: number;
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) {
+  const { openFinding } = useQuickView();
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
   const [targetDivisionId, setTargetDivisionId] = useState('');
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
@@ -241,13 +243,24 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
                         <FindingStatusBadge status={c.status} />
                         <span className="text-xs text-slate-600 truncate">{c.description}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setDuplicateOfId(selected ? null : c.id)}
-                        className={`flex-shrink-0 text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${selected ? 'bg-amber-600 text-white border-amber-600' : 'text-amber-700 border-amber-300 hover:bg-amber-100'}`}
-                      >
-                        {selected ? 'Selected' : 'Mark as duplicate'}
-                      </button>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openFinding(c.id)}
+                          title="Preview finding"
+                          aria-label={`Preview finding #${c.id}`}
+                          className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDuplicateOfId(selected ? null : c.id)}
+                          className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${selected ? 'bg-amber-600 text-white border-amber-600' : 'text-amber-700 border-amber-300 hover:bg-amber-100'}`}
+                        >
+                          {selected ? 'Selected' : 'Mark as duplicate'}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
