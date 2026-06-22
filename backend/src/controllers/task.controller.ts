@@ -555,7 +555,7 @@ export const getRelatedFindings = async (req: Request, res: Response): Promise<v
         deletedAt: null,
         OR: [
           { sourceTaskId: id },                                                    // task raised this finding
-          { followUpTasks: { some: { id } } },                                     // task is a follow-up of it
+          { followUpTasks: { some: { id, deletedAt: null } } },                    // task is a follow-up of it
           { capaActions: { some: { deletedAt: null, linkedItems: { some: { taskId: id } } } } } // CAPA links to it
         ]
       },

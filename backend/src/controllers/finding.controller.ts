@@ -719,6 +719,47 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
   }
 };
 
+// ─── GET /api/findings/:id/summary ────────────────────────────────────────────
+// Lightweight, side-effect-free read for inline previews (the quick-view drawer
+// + duplicate-candidate peeks). Unlike getFindingById this loads only the fields
+// the drawer renders — no RCA / CAPA / links / responseActions tree, no trend
+// computation, and crucially no ensureDueDateBreachLogged write. Open-read,
+// consistent with the transparent viewing model.
+export const getFindingSummary = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    if (Number.isNaN(id)) { res.status(400).json({ message: 'Invalid finding id' }); return; }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        severity: true,
+        description: true,
+        eventType: true,
+        createdAt: true,
+        dueDate: true,
+        fieldId: true,
+        regulatoryReference: true,
+        aircraftRegistrationCode: true,
+        aircraftRegistration: { select: { registration: true } },
+        reportedByUser: { select: { id: true, name: true } },
+        department: { select: { id: true, name: true } },
+        ataChapter: { select: { id: true, code: true, title: true } },
+        hazardTags: { select: { hazardTag: { select: { id: true, label: true } } } }
+      }
+    });
+
+    if (!finding) { res.status(404).json({ message: 'Finding not found' }); return; }
+
+    res.json(finding);
+  } catch (error) {
+    console.error('Error fetching finding summary:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // ─── PUT /api/findings/:id/review ─────────────────────────────────────────────
 
 export const reviewFinding = async (req: Request, res: Response): Promise<void> => {

@@ -930,4 +930,44 @@ describe('Findings Backend (Phase 6)', () => {
       expect(res.status).toBe(404);
     });
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 10 — Finding summary (lightweight, side-effect-free preview read)
+  // GET /api/findings/:id/summary — used by the quick-view drawer.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('Finding summary', () => {
+    const getSummary = (id: number, token = staffToken) =>
+      request(app).get(`/api/findings/${id}/summary`).set('Authorization', `Bearer ${token}`);
+
+    it('S01: returns the preview fields and omits the heavy detail tree', async () => {
+      const raised = await raiseFinding(staffToken);
+      const res = await getSummary(raised.body.id);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(expect.objectContaining({
+        id: raised.body.id,
+        status: 'Open',
+        description: 'Torque values missing',
+        eventType: 'Procedural Breach'
+      }));
+      expect(res.body.reportedByUser).toEqual(expect.objectContaining({ id: staffId }));
+      expect(res.body.department).toEqual(expect.objectContaining({ id: departmentId }));
+      expect(Array.isArray(res.body.hazardTags)).toBe(true);
+      // Detail-only fields must NOT be in the lightweight projection.
+      expect(res.body).not.toHaveProperty('trend');
+      expect(res.body).not.toHaveProperty('capaActions');
+      expect(res.body).not.toHaveProperty('rca');
+    });
+
+    it('S02: 404 for a non-existent finding', async () => {
+      const res = await getSummary(99999999);
+      expect(res.status).toBe(404);
+    });
+
+    it('S03: 404 for a soft-deleted finding', async () => {
+      const raised = await raiseFinding(staffToken);
+      await prisma.finding.update({ where: { id: raised.body.id }, data: { deletedAt: new Date() } });
+      const res = await getSummary(raised.body.id);
+      expect(res.status).toBe(404);
+    });
+  });
 });

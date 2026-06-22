@@ -13,6 +13,25 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-22 — Quick-View Enrichment + Back-to-Finding Code Review
+
+**Branch reviewed:** `claude/nice-darwin-nwyj81` (commit `251ebad` — `GET /tasks/:id/related-findings`, task quick-view enrichment, reusable finding quick-view drawer, CAPA-aware back-link, +7 tests).
+**Scope:** xhigh-effort `/code-review` of the `HEAD~1..HEAD` diff (9 files). 6 findings. User triaged: fix #1 (correctness) + #5 (Rule 2), then directed "fix all maintainability and performance" → also #3 (perf) + #4 (maintainability); #2 and #6 accepted-as-is.
+**Tests after fixes:** Backend 582/582 (was 579; +3 covering the lightweight summary endpoint). Frontend `tsc --noEmit` clean, `next build` ✓, changed files ESLint-clean (the residual `set-state-in-effect` at `tasks/[id]/page.tsx:87` is the pre-existing `loadTask()` pattern, untouched).
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| QV-1 | Medium (regression) | `tasks/[id]/page.tsx` back-link | Back-link was sourced only from the async, error-swallowed `relatedFindings` fetch, so a follow-up task lost the link that `task.parentFinding` already provided synchronously — on any transient `getRelatedFindings` failure, and flashed it in late on every load. | ✅ Fixed — `relatedFindings[0] ?? task.parentFinding ?? linkedFindings[0] ?? null`: keeps CAPA coverage primary, falls back to in-hand data. |
+| QV-2 | Low (coupling) | `RaiseFindingPanel.tsx` | Now calls `useQuickView()`, which throws if the panel is rendered outside a `QuickViewProvider`. | ✔ Accepted-as-is — both call sites are under the dashboard layout (provider mounted); consuming the QuickView context is the established pattern for every quick-view consumer (decoupling via props would make this the lone exception), and crash-on-misuse is the standard React context contract. |
+| QV-3 | Low (perf + side-effect) | `FindingQuickViewPanel.tsx` → `getFindingById` | The lightweight preview fetched the full detail payload (RCA/CAPA/links/responseActions/**trend**) and, worse, triggered `ensureDueDateBreachLogged` — a **write/audit side-effect on a GET** — on every preview / duplicate-peek. | ✅ Fixed — new side-effect-free `GET /findings/:id/summary` (lean projection, no trend, no breach logging); drawer + `getFindingSummary` consume it. +3 tests (S01–S03). |
+| QV-4 | Low (maintainability) | `quickview/*Panel.tsx` | `Row` + `formatDate` were copy-pasted across the 3 drawers, and the "latest activity" list was duplicated between the Task and Finding panels. | ✅ Fixed — extracted `quickview/shared.tsx` (`QvRow`, `formatQvDate`, `QvFeed`); all three panels now consume it. |
+| QV-5 | Very low (Rule 2) | `task.controller.ts` `getRelatedFindings` | `followUpTasks: { some: { id } }` relation filter omitted `deletedAt: null` (Rule 2 — "no exceptions"). Not exploitable (the id is a verified-live task and only Findings are returned), but a literal breach. | ✅ Fixed — `{ some: { id, deletedAt: null } }`. |
+| QV-6 | Info (behavior) | `tasks/[id]/page.tsx` back-link | Primary related finding is chosen by ascending id, so a task that is both a follow-up of A and CAPA-linked to an older B points "Back to Finding #B". | ✔ Accepted-as-is — still a valid related finding and "(+N more)" flags the rest; parent-first ordering would reintroduce the chance of linking a soft-deleted parent that the related-findings query correctly excludes. |
+
+**Note:** `CLAUDE_HANDOVER.md` §2/§8 feature-status + handover update for the WS5 quick-view feature (and this review) is pending the user's confirmation that the feature is complete (Rule 12); it will be folded in then.
+
+---
+
 ## Session: 2026-06-21 — Finding Workflow Hardening (P1–P4) Code Review
 
 **Branch reviewed:** `claude/nice-darwin-nwyj81` (commits `6facc70`, `263eef1`, `6343051`, `b7847fb` — the severity-configurable closed loop, SLA due dates, proactive overdue alerts, stuck-finding surface, CAPA-link simplification, and schema/feed cleanup).

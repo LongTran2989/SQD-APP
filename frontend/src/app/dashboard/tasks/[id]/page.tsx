@@ -242,7 +242,11 @@ export default function TaskDetailPage() {
               source finding, or a CAPA action that links here — so the route home
               holds even for CAPA-only tasks, on a direct load. */}
           {(() => {
-            const back = relatedFindings.length > 0 ? relatedFindings[0] : null;
+            // Prefer the full related set (covers CAPA-only tasks); fall back to
+            // the synchronously-loaded parentFinding / source findings so a slow
+            // or failed related-findings fetch never drops a link the task
+            // already had in hand.
+            const back = relatedFindings[0] ?? task.parentFinding ?? linkedFindings[0] ?? null;
             if (!back) return null;
             const more = Math.max(0, relatedFindings.length - 1);
             return (

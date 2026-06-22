@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { TaskEnriched, TaskActivityEnriched } from '../../types';
 import { getTaskById, getTaskActivity, getRelatedFindings, RelatedFinding } from '../../api/taskApi';
-import { formatTimestamp } from '../../utils/feedHelpers';
 import { useQuickView } from './QuickViewProvider';
+import { QvRow, QvFeed, formatQvDate } from './shared';
 import TaskStatusBadge from '../tasks/TaskStatusBadge';
 import { ResponseActionBadge } from '../findings/FindingBadges';
 import { X, ExternalLink, AlertTriangle, ClipboardList, Flag, FileText } from 'lucide-react';
@@ -13,11 +13,6 @@ import { X, ExternalLink, AlertTriangle, ClipboardList, Flag, FileText } from 'l
 interface Props {
   taskId: number;
   onClose: () => void;
-}
-
-function formatDate(d: string | null): string {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 // Preview a task inline anywhere it is referenced — no navigation. Pulls the
@@ -108,12 +103,12 @@ export default function TaskQuickViewPanel({ taskId, onClose }: Props) {
               )}
 
               <dl className="space-y-3 text-sm">
-                <Row label="Template" value={task.template?.title ?? '—'} />
-                <Row label="Issuer" value={task.issuer?.name ?? '—'} />
-                <Row label="Assignee" value={task.assignedToUser?.name ?? 'Unassigned'} />
-                <Row label="Division" value={task.targetDivision?.name ?? '—'} />
-                <Row label="Work Package" value={task.wp ? `${task.wp.wpId} — ${task.wp.name}` : '—'} />
-                <Row label="Deadline" value={formatDate(task.deadline)} />
+                <QvRow label="Template" value={task.template?.title ?? '—'} />
+                <QvRow label="Issuer" value={task.issuer?.name ?? '—'} />
+                <QvRow label="Assignee" value={task.assignedToUser?.name ?? 'Unassigned'} />
+                <QvRow label="Division" value={task.targetDivision?.name ?? '—'} />
+                <QvRow label="Work Package" value={task.wp ? `${task.wp.wpId} — ${task.wp.name}` : '—'} />
+                <QvRow label="Deadline" value={formatQvDate(task.deadline)} />
                 <div className="flex items-start gap-3">
                   <dt className="text-xs font-semibold text-slate-400 uppercase tracking-wide w-28 flex-shrink-0 pt-0.5">Type</dt>
                   <dd className="flex-1 flex items-center gap-2 flex-wrap">
@@ -127,23 +122,7 @@ export default function TaskQuickViewPanel({ taskId, onClose }: Props) {
 
               <div>
                 <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Latest activity</h4>
-                {recent.length === 0 ? (
-                  <p className="text-sm text-slate-400 italic">No activity yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {recent.map((entry) => (
-                      <li key={entry.id} className="text-xs">
-                        <p className={`leading-relaxed break-words ${entry.type === 'SYSTEM_EVENT' ? 'text-slate-500 italic' : 'text-slate-700'}`}>
-                          {entry.type !== 'SYSTEM_EVENT' && (
-                            <span className="font-semibold text-slate-600">{entry.author?.name ?? 'Unknown'}: </span>
-                          )}
-                          {entry.content}
-                        </p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">{formatTimestamp(entry.createdAt)}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <QvFeed entries={recent} />
               </div>
             </>
           )}
@@ -169,15 +148,6 @@ export default function TaskQuickViewPanel({ taskId, onClose }: Props) {
           </Link>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start gap-3">
-      <dt className="text-xs font-semibold text-slate-400 uppercase tracking-wide w-28 flex-shrink-0 pt-0.5">{label}</dt>
-      <dd className="text-slate-700 flex-1 break-words">{value}</dd>
     </div>
   );
 }

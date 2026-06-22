@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { FindingDetail, FeedPostEnriched } from '../../types';
-import { getFindingById } from '../../api/findingApi';
+import { FeedPostEnriched } from '../../types';
+import { getFindingSummary, FindingSummary } from '../../api/findingApi';
 import { getFeed } from '../../api/feedApi';
 import { SeverityBadge, FindingStatusBadge } from '../findings/FindingBadges';
-import { formatTimestamp } from '../../utils/feedHelpers';
+import { QvRow, QvFeed, formatQvDate } from './shared';
 import { X, ExternalLink, AlertTriangle, Flag } from 'lucide-react';
 
 interface Props {
@@ -14,17 +14,12 @@ interface Props {
   onClose: () => void;
 }
 
-function formatDate(d: string | null): string {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-// Preview a finding inline anywhere it is referenced — no navigation. Shows the
-// content, who raised it, and the optional context filled at raise time, so a
-// reviewer can judge (e.g.) a duplicate candidate without leaving the page.
-// Mirrors Task/WpQuickViewPanel; mounted once by QuickViewProvider.
+// Preview a finding inline anywhere it is referenced — no navigation. Uses the
+// lightweight, side-effect-free summary endpoint (no RCA/CAPA/links/trend and no
+// due-date-breach logging) plus the latest feed, so a reviewer can judge (e.g.)
+// a duplicate candidate without leaving the page. Mounted by QuickViewProvider.
 export default function FindingQuickViewPanel({ findingId, onClose }: Props) {
-  const [finding, setFinding] = useState<FindingDetail | null>(null);
+  const [finding, setFinding] = useState<FindingSummary | null>(null);
   const [feed, setFeed] = useState<FeedPostEnriched[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +27,7 @@ export default function FindingQuickViewPanel({ findingId, onClose }: Props) {
   useEffect(() => {
     let active = true;
     Promise.all([
-      getFindingById(findingId),
+      getFindingSummary(findingId),
       getFeed('FINDING', findingId).catch(() => [] as FeedPostEnriched[]),
     ])
       .then(([f, posts]) => { if (active) { setFinding(f); setFeed(posts); setError(null); } })
@@ -80,37 +75,21 @@ export default function FindingQuickViewPanel({ findingId, onClose }: Props) {
               </div>
 
               <dl className="space-y-3 text-sm">
-                <Row label="Event Type" value={finding.eventType} />
-                <Row label="Reported by" value={finding.reportedByUser?.name ?? '—'} />
-                <Row label="Raised" value={formatDate(finding.createdAt)} />
-                <Row label="Department" value={finding.department?.name ?? '—'} />
-                <Row label="Due date" value={formatDate(finding.dueDate)} />
-                <Row label="ATA Chapter" value={finding.ataChapter ? `${finding.ataChapter.code} — ${finding.ataChapter.title}` : '—'} />
-                <Row label="Hazard Tags" value={hazardLabels || '—'} />
-                <Row label="Aircraft" value={finding.aircraftRegistration?.registration ?? finding.aircraftRegistrationCode ?? '—'} />
-                <Row label="Regulatory Ref" value={finding.regulatoryReference ?? '—'} />
-                <Row label="Field Ref" value={finding.fieldId ?? '—'} />
+                <QvRow label="Event Type" value={finding.eventType} />
+                <QvRow label="Reported by" value={finding.reportedByUser?.name ?? '—'} />
+                <QvRow label="Raised" value={formatQvDate(finding.createdAt)} />
+                <QvRow label="Department" value={finding.department?.name ?? '—'} />
+                <QvRow label="Due date" value={formatQvDate(finding.dueDate)} />
+                <QvRow label="ATA Chapter" value={finding.ataChapter ? `${finding.ataChapter.code} — ${finding.ataChapter.title}` : '—'} />
+                <QvRow label="Hazard Tags" value={hazardLabels || '—'} />
+                <QvRow label="Aircraft" value={finding.aircraftRegistration?.registration ?? finding.aircraftRegistrationCode ?? '—'} />
+                <QvRow label="Regulatory Ref" value={finding.regulatoryReference ?? '—'} />
+                <QvRow label="Field Ref" value={finding.fieldId ?? '—'} />
               </dl>
 
               <div>
                 <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Latest activity</h4>
-                {recent.length === 0 ? (
-                  <p className="text-sm text-slate-400 italic">No activity yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {recent.map((entry) => (
-                      <li key={entry.id} className="text-xs">
-                        <p className={`leading-relaxed break-words ${entry.type === 'SYSTEM_EVENT' ? 'text-slate-500 italic' : 'text-slate-700'}`}>
-                          {entry.type !== 'SYSTEM_EVENT' && (
-                            <span className="font-semibold text-slate-600">{entry.author?.name ?? 'Unknown'}: </span>
-                          )}
-                          {entry.content}
-                        </p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">{formatTimestamp(entry.createdAt)}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <QvFeed entries={recent} />
               </div>
             </>
           )}
@@ -127,15 +106,6 @@ export default function FindingQuickViewPanel({ findingId, onClose }: Props) {
           </Link>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start gap-3">
-      <dt className="text-xs font-semibold text-slate-400 uppercase tracking-wide w-28 flex-shrink-0 pt-0.5">{label}</dt>
-      <dd className="text-slate-700 flex-1 break-words">{value}</dd>
     </div>
   );
 }

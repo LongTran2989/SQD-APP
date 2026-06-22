@@ -38,6 +38,30 @@ export const listFindings = (params: FindingListParams = {}): Promise<FindingsLi
 export const getFindingById = (id: number): Promise<FindingDetail> =>
   apiClient.get(`/findings/${id}`).then((r) => r.data);
 
+// Lightweight, side-effect-free read for inline previews (quick-view drawer).
+// Only the fields the drawer renders — no RCA/CAPA/links/trend, and no
+// due-date-breach logging side effect that getFindingById performs.
+export interface FindingSummary {
+  id: number;
+  status: FindingStatus;
+  severity: FindingSeverity | null;
+  description: string;
+  eventType: string;
+  createdAt: string;
+  dueDate: string | null;
+  fieldId: string | null;
+  regulatoryReference: string | null;
+  aircraftRegistrationCode: string | null;
+  aircraftRegistration: { registration: string } | null;
+  reportedByUser: { id: number; name: string } | null;
+  department: { id: number; name: string } | null;
+  ataChapter: { id: number; code: string; title: string } | null;
+  hazardTags: { hazardTag: { id: number; label: string } }[];
+}
+
+export const getFindingSummary = (id: number): Promise<FindingSummary> =>
+  apiClient.get(`/findings/${id}/summary`).then((r) => r.data);
+
 // All findings raised on a given source task (used by the Task detail page).
 export const getFindingsByTask = (taskId: number): Promise<FindingListItem[]> =>
   apiClient.get('/findings', { params: { taskId, pageSize: 100 } }).then((r) => r.data.findings);

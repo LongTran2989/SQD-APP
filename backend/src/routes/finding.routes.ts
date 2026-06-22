@@ -5,6 +5,7 @@ import {
   getDuplicateCandidates,
   listFindings,
   getFindingById,
+  getFindingSummary,
   reviewFinding,
   generateFollowUpTasks,
   closeFinding,
@@ -38,6 +39,7 @@ router.get('/duplicate-candidates', getDuplicateCandidates);
 
 // ─── Single finding ─────────────────────────────────────────────────
 router.get('/:id', getFindingById);
+router.get('/:id/summary', getFindingSummary);
 
 // ─── Review workflow ─────────────────────────────────────────────────
 router.put('/:id/review', reviewFinding);
