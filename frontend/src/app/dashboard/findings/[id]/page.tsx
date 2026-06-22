@@ -18,6 +18,7 @@ import FindingActivityFeed from '../../../../components/findings/FindingActivity
 import FileUploadField from '../../../../components/ui/FileUploadField';
 import EditDetailsModal from '../../../../components/findings/EditDetailsModal';
 import { useQuickView } from '../../../../components/quickview/QuickViewProvider';
+import { formatDueDate } from '../../../../utils/dateFormat';
 import toast from 'react-hot-toast';
 import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X, Pencil, Copy, CalendarClock } from 'lucide-react';
 
@@ -229,12 +230,12 @@ export default function FindingDetailPage() {
               <div className="text-sm flex items-center gap-1.5">
                 <span className="text-slate-400">Due: </span>
                 <span className={finding.dueDateBreached ? 'text-red-600 font-semibold' : 'text-slate-700'}>
-                  {formatDate(finding.dueDate)}
+                  {formatDueDate(finding.dueDate)}
                 </span>
                 {canEditDueDate && (
                   <button
                     onClick={() => {
-                      setDueDateDraft(finding.dueDate ? new Date(finding.dueDate).toISOString().slice(0, 10) : '');
+                      setDueDateDraft(finding.dueDate ? finding.dueDate.slice(0, 10) : '');
                       setDueDateReason('');
                       setShowEditDueDate(true);
                     }}

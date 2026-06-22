@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { FindingDetail, FindingSeverity } from '../../types';
 import { reviewFinding, dismissFinding, updateFindingSeverity } from '../../api/findingApi';
 import { SeverityBadge } from './FindingBadges';
+import { formatDueDate } from '../../utils/dateFormat';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 import { ShieldCheck } from 'lucide-react';
@@ -21,11 +22,6 @@ const SEVERITIES: FindingSeverity[] = ['Observation', 'Level 1', 'Level 2'];
 // this is a convenience prefill + "required" hint only. Severities listed here
 // require a due date at review time.
 const SEVERITY_SLA_DAYS: Record<string, number> = { 'Level 1': 7, 'Level 2': 30 };
-
-function formatDate(d: string | null): string {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 function isoDatePlusDays(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -158,7 +154,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
           <div className="flex items-center gap-3">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide w-28">Due Date</span>
             <span className={`text-sm ${finding.dueDateBreached ? 'text-red-600 font-semibold' : 'text-slate-700'}`}>
-              {formatDate(finding.dueDate)}
+              {formatDueDate(finding.dueDate)}
             </span>
           </div>
         </div>
