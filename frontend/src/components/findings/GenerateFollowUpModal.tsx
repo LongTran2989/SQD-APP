@@ -5,7 +5,7 @@ import { Template, WorkPackageEnriched, ResponseActionType } from '../../types';
 import { generateFollowUpTasks, FollowUpTaskInput } from '../../api/findingApi';
 import { getWorkPackages } from '../../api/wpApi';
 import { getDatasource } from '../../api/taskApi';
-import { getPublishedTemplates } from '../../api/templateApi';
+import { searchTemplates } from '../../api/templateApi';
 import toast from 'react-hot-toast';
 import { X, Plus, Trash2, ListPlus } from 'lucide-react';
 import { MULTI_DEPT_SINGLE_TASK_TYPES } from '../../constants/findingExpansion';
@@ -44,11 +44,14 @@ export default function GenerateFollowUpModal({ findingId, onClose, onGenerated 
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    // getPublishedTemplates() returns a flat Template[] (already status=Published).
-    // NOTE: the bare /templates endpoint returns { data, total, page, limit } — reading
-    // r.data as an array silently yielded an empty picker for every response-action type.
-    getPublishedTemplates()
-      .then(setTemplates)
+    // Load every Published template for the picker. Guards two gotchas:
+    //  - /templates returns { data, total, page, limit }, not an array (reading it
+    //    as an array silently emptied the picker for every response-action type);
+    //  - it only honours ?status=Published for Admin/Director, so a non-admin's own
+    //    Draft templates come back too — filter them out client-side.
+    // limit:1000 (the backend max) so a large catalogue isn't silently truncated.
+    searchTemplates({ status: 'Published', limit: 1000 })
+      .then((r) => setTemplates(r.data.filter((t) => t.status === 'Published')))
       .catch(() => {});
     getWorkPackages()
       .then((wps) => setOpenWps(wps.filter((w) => w.computedStatus === 'Open' || w.computedStatus === 'In Progress')))
