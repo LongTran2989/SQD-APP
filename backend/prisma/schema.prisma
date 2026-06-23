@@ -369,6 +369,12 @@ model Finding {
   updatedAt DateTime  @updatedAt
 
   @@index([departmentId, ataChapterId]) // supports the trend recurrence query
+  // Hot read paths: dashboard status counts, division dashboards, and the
+  // "my reported findings" feed/list. All filter deletedAt: null (Rule 2), so it
+  // trails each composite. Finding is the 2nd-hottest table after Task.
+  @@index([status, deletedAt])
+  @@index([targetDivisionId, status, deletedAt])
+  @@index([reportedByUserId, deletedAt])
 }
 
 // -----------------------------------------------------------------------
