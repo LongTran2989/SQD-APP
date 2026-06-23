@@ -5,6 +5,9 @@ import {
   getTasks,
   getMyTasks,
   getUnassignedTasks,
+  getTaskStats,
+  getTaskAssignees,
+  getTaskOptions,
   getTaskById,
   getRelatedFindings,
   createTask,
@@ -39,6 +42,10 @@ router.use(authenticateJWT);
 router.get('/', getTasks);
 router.get('/my-tasks', getMyTasks);
 router.get('/unassigned', getUnassignedTasks);
+// Aggregates for the Tasks page (must precede '/:id' to avoid being captured by it).
+router.get('/stats', getTaskStats);
+router.get('/assignees', getTaskAssignees);
+router.get('/options', getTaskOptions);
 
 // ─── Single task ────────────────────────────────────────────────────
 router.get('/:id', getTaskById);

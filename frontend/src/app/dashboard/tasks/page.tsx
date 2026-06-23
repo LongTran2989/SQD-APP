@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
 import { TaskEnriched, TaskStatus, DeadlineStatus } from '../../../types';
-import { getTasks, getMyTasks, getUnassignedTasks, selfAssignTask } from '../../../api/taskApi';
+import { getTaskList, getTaskStats, getTaskAssignees, TaskAssignee, TaskTab, selfAssignTask } from '../../../api/taskApi';
 import { updateMyPreferences } from '../../../api/userApi';
 import { formatRelativeTime } from '../../../utils/feedHelpers';
 import TaskStatusBadge, { STATUS_CONFIG } from '../../../components/tasks/TaskStatusBadge';
@@ -169,13 +169,30 @@ export default function TaskListPage() {
     setEndDate(toInputDate(today));
   };
 
-  // ── Data state ──
+  // ── Data state (server-side paginated — Phase 5) ──
   const [tasks, setTasks] = useState<TaskEnriched[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 25;
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [selfAssigning, setSelfAssigning] = useState<number | null>(null);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Distinct assignees for the dropdown (server-provided, scope-aware).
+  const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
+
+  // Debounce the free-text search so it doesn't fire a request per keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // lastActivity is derived from FeedPost server-side and has no sortable column,
+  // so it is handled client-side on the loaded page; all other columns sort server-side.
+  const serverSortColumn = sortColumn === 'lastActivity' ? undefined : sortColumn;
 
   // ── Persisted filters: hydrate once on mount ──
   useEffect(() => {
@@ -211,123 +228,70 @@ export default function TaskListPage() {
     if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
   }, []);
 
-  // ── Fetch on tab change ──
+  // ── Fetch the current page (server applies scope + filters + sort) ──
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
     try {
-      let data: TaskEnriched[];
-      if (activeTab === 'unassigned') data = await getUnassignedTasks();
-      else if (activeTab === 'my-tasks') data = await getMyTasks();
-      else data = await getTasks();
-      setTasks(data);
+      const res = await getTaskList({
+        tab: activeTab as TaskTab,
+        page,
+        pageSize: PAGE_SIZE,
+        statuses: statusFilters.length > 0 ? statusFilters : undefined,
+        assignedToUserId: assigneeFilter !== '' ? assigneeFilter : undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        overdueOnly: overdueOnly || undefined,
+        dueFilter: dueFilter ?? undefined,
+        search: debouncedSearch || undefined,
+        sortColumn: serverSortColumn,
+        sortDir: sortDirection,
+      });
+      setTasks(res.tasks);
+      setTotal(res.total);
     } catch {
       setFetchError('Failed to load tasks. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, page, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, debouncedSearch, serverSortColumn, sortDirection]);
 
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
 
-  // ── Tab badges ──
-  // Unassigned: every unassigned task is itself the urgency signal.
-  // My Tasks / All Tasks: count of tasks needing attention — overdue, due
-  // today, or awaiting follow-up. Each badge is fetched once on mount (for
-  // whichever tabs aren't the active one) so it's visible no matter which
-  // tab the user is currently viewing, then kept in sync from the live list
-  // whenever that tab itself is the one being viewed.
-  const countNeedsAttention = (list: TaskEnriched[]) =>
-    list.filter((t) => t.deadlineStatus === 'Overdue' || t.deadlineStatus === 'Due Today' || t.status === 'Follow-up Required').length;
+  // Reset to page 1 whenever the result set (tab / filters / sort) changes, so the
+  // user never lands on an out-of-range page.
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, debouncedSearch, serverSortColumn, sortDirection]);
 
+  // ── Tab badges (server-computed) + assignee options ──
   const [unassignedCount, setUnassignedCount] = useState<number | null>(null);
   const [myAttentionCount, setMyAttentionCount] = useState<number | null>(null);
   const [allAttentionCount, setAllAttentionCount] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (activeTab !== 'unassigned') {
-      getUnassignedTasks().then((data) => setUnassignedCount(data.length)).catch(() => {});
-    }
-    if (activeTab !== 'my-tasks') {
-      getMyTasks().then((data) => setMyAttentionCount(countNeedsAttention(data))).catch(() => {});
-    }
-    if (activeTab !== 'all') {
-      getTasks().then((data) => setAllAttentionCount(countNeedsAttention(data))).catch(() => {});
-    }
-    // Mount-only: each tab's own badge stays current via the sync effect below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Bumped after a self-assign so badges + assignee options refresh.
+  const [statsRefresh, setStatsRefresh] = useState(0);
 
   useEffect(() => {
-    if (activeTab === 'unassigned') setUnassignedCount(tasks.length);
-    else if (activeTab === 'my-tasks') setMyAttentionCount(countNeedsAttention(tasks));
-    else if (activeTab === 'all') setAllAttentionCount(countNeedsAttention(tasks));
-  }, [activeTab, tasks]);
+    getTaskStats()
+      .then((s) => { setUnassignedCount(s.unassigned); setMyAttentionCount(s.myAttention); setAllAttentionCount(s.allAttention); })
+      .catch(() => {});
+    getTaskAssignees().then(setAssignees).catch(() => {});
+  }, [statsRefresh]);
 
-  // Distinct assignees present in the current list (for the assignee dropdown).
-  const assigneeOptions = Array.from(
-    new Map(tasks.filter((t) => t.assignedToUser).map((t) => [t.assignedToUser!.id, t.assignedToUser!])).values()
-  );
+  const assigneeOptions = assignees;
 
-  // ── Filters ──
-  const filteredTasks = tasks.filter((t) => {
-    if (statusFilters.length > 0 && !statusFilters.includes(t.status)) return false;
-    if (assigneeFilter !== '' && t.assignedToUserId !== assigneeFilter) return false;
-    if (startDate && new Date(t.createdAt) < new Date(startDate)) return false;
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      if (new Date(t.createdAt) > end) return false;
-    }
-    if (overdueOnly && !t.isOverdue) return false;
-    if (dueFilter) {
-      if (!t.deadline) return false;
-      const due = new Date(t.deadline);
-      const todayStart = startOfDay(new Date());
-      const rangeEnd = new Date(todayStart);
-      rangeEnd.setDate(rangeEnd.getDate() + (dueFilter === 'today' ? 1 : 7));
-      if (due < todayStart || due >= rangeEnd) return false;
-    }
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const title = (t.schemaSnapshot as any)?.[0]?.label ?? t.template?.title ?? '';
-      return (
-        t.taskId.toLowerCase().includes(q) ||
-        title.toLowerCase().includes(q) ||
-        (t.template?.title ?? '').toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
-
-  // ── Sort (applied after filtering, before render) ──
-  const sortedTasks = [...filteredTasks].sort((a, b) => {
-    let comparison = 0;
-    switch (sortColumn) {
-      case 'taskId':
-        comparison = a.taskId.localeCompare(b.taskId);
-        break;
-      case 'title':
-        comparison = (a.template?.title ?? '').localeCompare(b.template?.title ?? '');
-        break;
-      case 'status':
-        comparison = a.status.localeCompare(b.status);
-        break;
-      case 'deadline':
-        if (!a.deadline && !b.deadline) comparison = 0;
-        else if (!a.deadline) comparison = 1;
-        else if (!b.deadline) comparison = -1;
-        else comparison = new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
-        break;
-      case 'lastActivity':
-        if (!a.lastActivityAt && !b.lastActivityAt) comparison = 0;
-        else if (!a.lastActivityAt) comparison = 1;
-        else if (!b.lastActivityAt) comparison = -1;
-        else comparison = new Date(a.lastActivityAt).getTime() - new Date(b.lastActivityAt).getTime();
-        break;
-    }
+  // The server already applied scope + filters; keep the name for the render. Only
+  // the lastActivity sort is resolved client-side (no sortable column server-side).
+  const filteredTasks = tasks;
+  const sortedTasks = sortColumn !== 'lastActivity' ? tasks : [...tasks].sort((a, b) => {
+    let comparison: number;
+    if (!a.lastActivityAt && !b.lastActivityAt) comparison = 0;
+    else if (!a.lastActivityAt) comparison = 1;
+    else if (!b.lastActivityAt) comparison = -1;
+    else comparison = new Date(a.lastActivityAt).getTime() - new Date(b.lastActivityAt).getTime();
     return sortDirection === 'asc' ? comparison : -comparison;
   });
 
@@ -341,6 +305,7 @@ export default function TaskListPage() {
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to self-assign task');
       setSelfAssigning(null);
+      setStatsRefresh((n) => n + 1); // badge counts may have shifted under us
     }
   };
 
@@ -838,6 +803,32 @@ export default function TaskListPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination footer — server-side paged (Phase 5) */}
+        {!loading && !fetchError && total > 0 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm text-slate-600 rounded-b-2xl">
+            <span>
+              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-600 disabled:opacity-40 hover:border-slate-400 transition-colors"
+              >
+                Previous
+              </button>
+              <span className="text-slate-500">Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span>
+              <button
+                onClick={() => setPage((p) => (p * PAGE_SIZE < total ? p + 1 : p))}
+                disabled={page * PAGE_SIZE >= total}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-600 disabled:opacity-40 hover:border-slate-400 transition-colors"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>

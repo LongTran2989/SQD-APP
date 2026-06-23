@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FindingDetail, CapaAction, CapaType, CapaTaskLink, TaskEnriched, WorkPackageEnriched } from '../../types';
+import { FindingDetail, CapaAction, CapaType, CapaTaskLink, WorkPackageEnriched } from '../../types';
 import { createCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink, CapaPayload } from '../../api/findingApi';
-import { getTasks } from '../../api/taskApi';
+import { getTaskOptions, TaskOption } from '../../api/taskApi';
 import { getWorkPackages } from '../../api/wpApi';
 import SearchableSelect from '../ui/SearchableSelect';
 import CreateTaskModal from '../tasks/CreateTaskModal';
@@ -202,14 +202,14 @@ function CapaLinkForm({
   const [refId, setRefId] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const [tasks, setTasks] = useState<TaskEnriched[]>([]);
+  const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [wps, setWps] = useState<WorkPackageEnriched[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showWpModal, setShowWpModal] = useState(false);
 
   useEffect(() => {
-    Promise.all([getTasks(), getWorkPackages()])
+    Promise.all([getTaskOptions(), getWorkPackages()])
       .then(([t, w]) => { setTasks(t); setWps(w); })
       .finally(() => setLoadingOptions(false));
   }, []);
@@ -222,7 +222,7 @@ function CapaLinkForm({
 
   const taskOptions = tasks.map((t) => ({
     value: String(t.id),
-    label: `${t.taskId} — ${t.template?.title ?? 'No template'} (${t.status})`,
+    label: `${t.taskId} — ${t.title ?? 'No template'} (${t.status})`,
   }));
   const wpOptions = wps
     .filter((w) => !['Closed', 'Inactive'].includes(w.computedStatus))
@@ -306,7 +306,7 @@ function CapaLinkForm({
           onSaved={(id) => {
             setShowTaskModal(false);
             setRefId(String(id));
-            getTasks().then(setTasks);
+            getTaskOptions().then(setTasks);
           }}
         />
       )}

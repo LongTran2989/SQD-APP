@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
 import { WorkPackageDetail, WpStatus, TaskEnriched } from '../../../../types';
 import { getWorkPackageById, updateWpStatus } from '../../../../api/wpApi';
-import { getTasks, relinkTaskWp } from '../../../../api/taskApi';
+import { getTaskList, relinkTaskWp } from '../../../../api/taskApi';
 import WorkPackageStatusBadge from '../../../../components/work-packages/WorkPackageStatusBadge';
 import WorkPackageAssignmentPanel from '../../../../components/work-packages/WorkPackageAssignmentPanel';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
@@ -147,8 +147,8 @@ export default function WorkPackageDetailPage() {
   const openAddExisting = async () => {
     if (!wp) return;
     try {
-      const all = await getTasks();
-      // Orphaned, non-final tasks in the same division as this WP.
+      const { tasks: all } = await getTaskList({ tab: 'all', pageSize: 100 });
+      // Orphaned, non-final tasks in the same division as this WP (bounded page).
       const FINAL = ['Closed', 'Rejected', 'Terminated'];
       setOrphanTasks(
         all.filter((t) => t.wpId === null && !FINAL.includes(t.status) && t.targetDivisionId === wp.divisionId)
