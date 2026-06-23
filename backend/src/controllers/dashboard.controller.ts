@@ -9,15 +9,18 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
     let metrics: any = {};
 
     if (role === 'Staff') {
-      const myPendingTasks = await prisma.task.count({
-        where: { assignedToUserId: userId, status: { notIn: ['Closed', 'Approved'] }, deletedAt: null }
-      });
-      const unassignedTasks = await prisma.task.count({
-        where: { targetDivisionId: divisionId, status: 'Unassigned', deletedAt: null }
-      });
-      const allOpenFindings = await prisma.finding.count({
-        where: { status: { notIn: ['Closed'] }, deletedAt: null }
-      });
+      // Independent counts — run in parallel (one round trip wave, not three serial).
+      const [myPendingTasks, unassignedTasks, allOpenFindings] = await Promise.all([
+        prisma.task.count({
+          where: { assignedToUserId: userId, status: { notIn: ['Closed', 'Approved'] }, deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { targetDivisionId: divisionId, status: 'Unassigned', deletedAt: null }
+        }),
+        prisma.finding.count({
+          where: { status: { notIn: ['Closed'] }, deletedAt: null }
+        }),
+      ]);
       metrics = { myPendingTasks, unassignedTasks, allOpenFindings };
       
     } else if (role === 'Manager') {
@@ -25,21 +28,23 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
       startOfToday.setHours(0, 0, 0, 0);
       const endOfToday = new Date(startOfToday.getTime() + 86400000);
 
-      const unassigned = await prisma.task.count({
-        where: { targetDivisionId: divisionId, status: 'Unassigned', deletedAt: null }
-      });
-      const dueToday = await prisma.task.count({
-        where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
-      });
-      const overdue = await prisma.task.count({
-        where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
-      });
-      const inReview = await prisma.task.count({
-        where: { targetDivisionId: divisionId, status: 'In Review', deletedAt: null }
-      });
-      const pendingRating = await prisma.task.count({
-        where: { targetDivisionId: divisionId, status: { in: ['Closed', 'Approved'] }, rating: null, deletedAt: null }
-      });
+      const [unassigned, dueToday, overdue, inReview, pendingRating] = await Promise.all([
+        prisma.task.count({
+          where: { targetDivisionId: divisionId, status: 'Unassigned', deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { targetDivisionId: divisionId, status: 'In Review', deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { targetDivisionId: divisionId, status: { in: ['Closed', 'Approved'] }, rating: null, deletedAt: null }
+        }),
+      ]);
       const divisionPendingTasks = { unassigned, dueToday, overdue, inReview, pendingRating };
       
       let escalationsCount = 0;
@@ -64,9 +69,11 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
 
       // Findings are organisation-wide transparent (no division filter), matching
       // the open Findings list/detail. Tasks + escalations above stay division-scoped.
-      const openFindings = await prisma.finding.count({ where: { status: 'Open', deletedAt: null } });
-      const pendingVerification = await prisma.finding.count({ where: { status: 'Pending Verification', deletedAt: null } });
-      const inProgressFindings = await prisma.finding.count({ where: { status: 'In Progress', deletedAt: null } });
+      const [openFindings, pendingVerification, inProgressFindings] = await Promise.all([
+        prisma.finding.count({ where: { status: 'Open', deletedAt: null } }),
+        prisma.finding.count({ where: { status: 'Pending Verification', deletedAt: null } }),
+        prisma.finding.count({ where: { status: 'In Progress', deletedAt: null } }),
+      ]);
       const findingsOverview = { open: openFindings, pendingVerification, inProgress: inProgressFindings };
 
       metrics = { divisionPendingTasks, escalations: escalationsCount, findingsOverview };
@@ -76,21 +83,23 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
       startOfToday.setHours(0, 0, 0, 0);
       const endOfToday = new Date(startOfToday.getTime() + 86400000);
 
-      const unassigned = await prisma.task.count({
-        where: { status: 'Unassigned', deletedAt: null }
-      });
-      const dueToday = await prisma.task.count({
-        where: { status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
-      });
-      const overdue = await prisma.task.count({
-        where: { status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
-      });
-      const inReview = await prisma.task.count({
-        where: { status: 'In Review', deletedAt: null }
-      });
-      const pendingRating = await prisma.task.count({
-        where: { status: { in: ['Closed', 'Approved'] }, rating: null, deletedAt: null }
-      });
+      const [unassigned, dueToday, overdue, inReview, pendingRating] = await Promise.all([
+        prisma.task.count({
+          where: { status: 'Unassigned', deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { status: 'In Review', deletedAt: null }
+        }),
+        prisma.task.count({
+          where: { status: { in: ['Closed', 'Approved'] }, rating: null, deletedAt: null }
+        }),
+      ]);
       const systemPendingTasks = { unassigned, dueToday, overdue, inReview, pendingRating };
       
       let escalationsCount = 0;
@@ -98,9 +107,11 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
         escalationsCount = await prisma.escalationFlag.count({ where: { status: 'PENDING' } });
       }
 
-      const openFindings = await prisma.finding.count({ where: { status: 'Open', deletedAt: null } });
-      const pendingVerification = await prisma.finding.count({ where: { status: 'Pending Verification', deletedAt: null } });
-      const inProgressFindings = await prisma.finding.count({ where: { status: 'In Progress', deletedAt: null } });
+      const [openFindings, pendingVerification, inProgressFindings] = await Promise.all([
+        prisma.finding.count({ where: { status: 'Open', deletedAt: null } }),
+        prisma.finding.count({ where: { status: 'Pending Verification', deletedAt: null } }),
+        prisma.finding.count({ where: { status: 'In Progress', deletedAt: null } }),
+      ]);
       const findingsOverview = { open: openFindings, pendingVerification, inProgress: inProgressFindings };
 
       metrics = { systemPendingTasks, escalations: escalationsCount, findingsOverview };
