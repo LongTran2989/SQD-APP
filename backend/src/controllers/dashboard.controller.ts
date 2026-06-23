@@ -221,13 +221,16 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
 
     const [tasks, findings, wps, divisions] = await Promise.all([
       taskIds.length    ? prisma.task.findMany        ({ where: { id: { in: taskIds    } }, select: { id: true, taskId: true   } }) : [],
-      findingIds.length ? prisma.finding.findMany     ({ where: { id: { in: findingIds } }, select: { id: true, findingId: true} }) : [],
+      findingIds.length ? prisma.finding.findMany     ({ where: { id: { in: findingIds } }, select: { id: true                  } }) : [],
       wpIds.length      ? prisma.workPackage.findMany ({ where: { id: { in: wpIds      } }, select: { id: true, wpId: true     } }) : [],
       divIds.length     ? prisma.division.findMany    ({ where: { id: { in: divIds     } }, select: { id: true, name: true     } }) : [],
     ]);
 
     const taskMap    = new Map(tasks.map(t    => [t.id, t.taskId   ]));
-    const findingMap = new Map(findings.map(f => [f.id, f.findingId]));
+    // Finding has no human-readable business code (unlike Task.taskId / WorkPackage.wpId),
+    // so the feed deep-link label is derived from the numeric id. (Phase 4 may introduce a
+    // real Finding.findingId, at which point this can surface it instead.)
+    const findingMap = new Map(findings.map(f => [f.id, `#${f.id}`]));
     const wpMap      = new Map(wps.map(w      => [w.id, w.wpId     ]));
     const divMap     = new Map(divisions.map(d=> [d.id, d.name     ]));
 
