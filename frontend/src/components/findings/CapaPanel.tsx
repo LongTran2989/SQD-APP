@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FindingDetail, CapaAction, CapaType, CapaTaskLink, WorkPackageEnriched } from '../../types';
 import { createCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink, CapaPayload } from '../../api/findingApi';
 import { getTaskOptions, TaskOption } from '../../api/taskApi';
@@ -220,6 +220,19 @@ function CapaLinkForm({
     setRefId('');
   };
 
+  // Server-side task search (debounced): the option list is capped, so as the user
+  // types we re-query rather than filtering only the loaded page. WPs are small and
+  // fully loaded, so they keep the built-in client-side filter.
+  const taskSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleTaskQuery = (q: string) => {
+    if (refType !== 'task') return;
+    if (taskSearchTimer.current) clearTimeout(taskSearchTimer.current);
+    taskSearchTimer.current = setTimeout(() => {
+      getTaskOptions(q.trim() || undefined).then(setTasks).catch(() => {});
+    }, 300);
+  };
+  useEffect(() => () => { if (taskSearchTimer.current) clearTimeout(taskSearchTimer.current); }, []);
+
   const taskOptions = tasks.map((t) => ({
     value: String(t.id),
     label: `${t.taskId} — ${t.title ?? 'No template'} (${t.status})`,
@@ -289,6 +302,7 @@ function CapaLinkForm({
             options={currentOptions}
             value={refId}
             onChange={setRefId}
+            onQueryChange={refType === 'task' ? handleTaskQuery : undefined}
             placeholder={loadingOptions ? 'Loading…' : `Search ${refType === 'task' ? 'tasks' : 'work packages'}…`}
             disabled={loadingOptions}
           />

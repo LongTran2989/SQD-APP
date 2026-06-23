@@ -260,11 +260,17 @@ export default function TaskListPage() {
     fetchTasks();
   }, [fetchTasks]);
 
-  // Reset to page 1 whenever the result set (tab / filters / sort) changes, so the
-  // user never lands on an out-of-range page.
-  useEffect(() => {
-    setPage(1);
-  }, [activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, debouncedSearch, serverSortColumn, sortDirection]);
+  // When the result set (tab / filters / sort) changes, snap back to page 1 — done
+  // during render via React's "adjust state when a value changes" pattern (compare
+  // against the previous filters key held in state), so the reset lands BEFORE the
+  // fetch effect runs. This avoids firing a wasted request for a now-out-of-range
+  // page (and the empty-table flash) that a separate reset effect would cause.
+  const filtersKey = JSON.stringify([activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, debouncedSearch, serverSortColumn, sortDirection]);
+  const [prevFiltersKey, setPrevFiltersKey] = useState(filtersKey);
+  if (filtersKey !== prevFiltersKey) {
+    setPrevFiltersKey(filtersKey);
+    setPage(1); // no-op when already 1; otherwise re-renders and the fetch runs once on page 1
+  }
 
   // ── Tab badges (server-computed) + assignee options ──
   const [unassignedCount, setUnassignedCount] = useState<number | null>(null);
@@ -274,14 +280,23 @@ export default function TaskListPage() {
   // Bumped after a self-assign so badges + assignee options refresh.
   const [statsRefresh, setStatsRefresh] = useState(0);
 
+  // Badges are scope-level totals (independent of the page's filters). Refresh them
+  // on mount, on tab navigation, and after a self-assign — so they don't sit stale
+  // for a whole session while the underlying data shifts under the user.
   useEffect(() => {
     getTaskStats()
       .then((s) => { setUnassignedCount(s.unassigned); setMyAttentionCount(s.myAttention); setAllAttentionCount(s.allAttention); })
       .catch(() => {});
     getTaskAssignees().then(setAssignees).catch(() => {});
-  }, [statsRefresh]);
+  }, [statsRefresh, activeTab]);
 
   const assigneeOptions = assignees;
+
+  // Distinguishes "this scope is genuinely empty" from "your filters matched nothing"
+  // for the empty-state copy (server-side filtering means an empty page can be either).
+  const hasActiveFilters =
+    statusFilters.length > 0 || assigneeFilter !== '' || !!startDate || !!endDate ||
+    overdueOnly || !!dueFilter || !!debouncedSearch;
 
   // The server already applied scope + filters; keep the name for the render. Only
   // the lastActivity sort is resolved client-side (no sortable column server-side).
@@ -611,14 +626,14 @@ export default function TaskListPage() {
           <div className="p-12 text-center rounded-b-2xl overflow-hidden">
             <ClipboardList className="w-12 h-12 text-slate-300 mx-auto mb-4" />
             <h2 className="text-lg font-semibold text-slate-700 mb-2">
-              {tasks.length === 0 ? 'No tasks found' : 'No matching tasks'}
+              {hasActiveFilters ? 'No matching tasks' : 'No tasks found'}
             </h2>
             <p className="text-slate-500">
-              {tasks.length === 0
-                ? activeTab === 'unassigned'
+              {hasActiveFilters
+                ? 'Try adjusting your search or filter criteria.'
+                : activeTab === 'unassigned'
                   ? 'There are no unassigned tasks in your division right now.'
-                  : 'No tasks match the current view.'
-                : 'Try adjusting your search or filter criteria.'}
+                  : 'No tasks match the current view.'}
             </p>
           </div>
         ) : (
