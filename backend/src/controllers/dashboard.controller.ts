@@ -12,7 +12,7 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
       // Independent counts — run in parallel (one round trip wave, not three serial).
       const [myPendingTasks, unassignedTasks, allOpenFindings] = await Promise.all([
         prisma.task.count({
-          where: { assignedToUserId: userId, status: { notIn: ['Closed', 'Approved'] }, deletedAt: null }
+          where: { assignedToUserId: userId, status: { notIn: ['Closed'] }, deletedAt: null }
         }),
         prisma.task.count({
           where: { targetDivisionId: divisionId, status: 'Unassigned', deletedAt: null }
@@ -33,16 +33,16 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
           where: { targetDivisionId: divisionId, status: 'Unassigned', deletedAt: null }
         }),
         prisma.task.count({
-          where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
+          where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
         }),
         prisma.task.count({
-          where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
+          where: { targetDivisionId: divisionId, status: { notIn: ['Closed', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
         }),
         prisma.task.count({
           where: { targetDivisionId: divisionId, status: 'In Review', deletedAt: null }
         }),
         prisma.task.count({
-          where: { targetDivisionId: divisionId, status: { in: ['Closed', 'Approved'] }, rating: null, deletedAt: null }
+          where: { targetDivisionId: divisionId, status: { in: ['Closed'] }, rating: null, deletedAt: null }
         }),
       ]);
       const divisionPendingTasks = { unassigned, dueToday, overdue, inReview, pendingRating };
@@ -88,16 +88,16 @@ export const getSummary = async (req: Request, res: Response): Promise<void> => 
           where: { status: 'Unassigned', deletedAt: null }
         }),
         prisma.task.count({
-          where: { status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
+          where: { status: { notIn: ['Closed', 'Inactive', 'Terminated'] }, deadline: { gte: startOfToday, lt: endOfToday }, deletedAt: null }
         }),
         prisma.task.count({
-          where: { status: { notIn: ['Closed', 'Approved', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
+          where: { status: { notIn: ['Closed', 'Inactive', 'Terminated'] }, deadline: { lt: startOfToday }, deletedAt: null }
         }),
         prisma.task.count({
           where: { status: 'In Review', deletedAt: null }
         }),
         prisma.task.count({
-          where: { status: { in: ['Closed', 'Approved'] }, rating: null, deletedAt: null }
+          where: { status: { in: ['Closed'] }, rating: null, deletedAt: null }
         }),
       ]);
       const systemPendingTasks = { unassigned, dueToday, overdue, inReview, pendingRating };
@@ -150,7 +150,7 @@ export const getWorkPackages = async (req: Request, res: Response): Promise<void
 
     const formattedWps = wps.map(wp => {
       const totalTasks = wp.tasks.length;
-      const completedTasks = wp.tasks.filter(t => t.status === 'Closed' || t.status === 'Approved').length;
+      const completedTasks = wp.tasks.filter(t => t.status === 'Closed').length;
       const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
       
       return {
@@ -280,7 +280,7 @@ export const getOngoingWorks = async (req: Request, res: Response): Promise<void
     }
 
     wpWhere.status = { notIn: ['Closed', 'Inactive'] };
-    taskWhere.status = { notIn: ['Closed', 'Inactive', 'Approved', 'Terminated'] };
+    taskWhere.status = { notIn: ['Closed', 'Inactive', 'Terminated'] };
 
     // Blueprints
     let bpWhere: any = { isActive: true, recurrenceType: { not: null } };
