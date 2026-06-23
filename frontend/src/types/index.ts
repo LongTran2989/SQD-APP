@@ -494,6 +494,7 @@ export type FindingStatus = 'Open' | 'In Progress' | 'Pending Verification' | 'C
 
 export interface Finding {
   id: number;
+  findingId: string | null; // Human-readable business code, e.g. FND-000001 (null for legacy rows not yet backfilled).
   severity: FindingSeverity | null;
   description: string;
   status: FindingStatus;

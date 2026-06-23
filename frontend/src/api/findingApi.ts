@@ -43,6 +43,7 @@ export const getFindingById = (id: number): Promise<FindingDetail> =>
 // due-date-breach logging side effect that getFindingById performs.
 export interface FindingSummary {
   id: number;
+  findingId: string | null;
   status: FindingStatus;
   severity: FindingSeverity | null;
   description: string;

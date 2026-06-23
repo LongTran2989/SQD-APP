@@ -325,6 +325,7 @@ model TaskData {
 
 model Finding {
   id          Int     @id @default(autoincrement())
+  findingId   String? @unique // Human-readable business code, e.g. FND-000001 (org-wide sequence). Nullable for clean two-step migration/backfill; always set at creation going forward.
   severity    String? // FINDING_SEVERITIES: Observation, Level 1, Level 2 (nullable). CHECK-constrained — see migration 20260623000100.
   description String
   status      String  @default("Open") // FINDING_STATUSES: Open, In Progress, Pending Verification, Closed, Dismissed. CHECK-constrained — see migration 20260623000100.

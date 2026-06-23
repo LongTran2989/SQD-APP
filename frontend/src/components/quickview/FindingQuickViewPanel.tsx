@@ -7,6 +7,7 @@ import { getFindingSummary, FindingSummary } from '../../api/findingApi';
 import { getFeed } from '../../api/feedApi';
 import { SeverityBadge, FindingStatusBadge } from '../findings/FindingBadges';
 import { QvRow, QvFeed, formatQvDate } from './shared';
+import { formatFindingRef } from '../../utils/findingFormat';
 import { X, ExternalLink, AlertTriangle, Flag } from 'lucide-react';
 
 interface Props {
@@ -47,7 +48,7 @@ export default function FindingQuickViewPanel({ findingId, onClose }: Props) {
           <div className="flex items-center gap-2 min-w-0">
             <Flag className="w-5 h-5 text-amber-500 flex-shrink-0" />
             <h3 className="text-base font-bold text-slate-800 truncate">
-              {finding ? `Finding #${finding.id}` : 'Finding'}
+              {finding ? `Finding ${formatFindingRef(finding)}` : 'Finding'}
             </h3>
             {finding && <FindingStatusBadge status={finding.status} />}
             {finding?.severity && <SeverityBadge severity={finding.severity} />}

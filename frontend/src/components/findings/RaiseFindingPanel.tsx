@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { raiseFinding, getDuplicateCandidates, DuplicateCandidate } from '../../api/findingApi';
+import { formatFindingRef } from '../../utils/findingFormat';
 import { getDatasource, getDivisions as getDivisionsApi } from '../../api/taskApi';
 import { listAtaChapters, listHazardTags, listEventTypes } from '../../api/taxonomyApi';
 import { apiErrorMessage } from '../../api/errorMessage';
@@ -135,8 +136,8 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
       });
       toast.success(
         duplicateOfId != null
-          ? `Finding #${finding.id} raised and marked as duplicate of #${duplicateOfId}`
-          : `Finding #${finding.id} raised`
+          ? `Finding ${formatFindingRef(finding)} raised and marked as duplicate of #${duplicateOfId}`
+          : `Finding ${formatFindingRef(finding)} raised`
       );
       onRaised();
     } catch (err) {

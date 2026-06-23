@@ -9,6 +9,7 @@ import { apiErrorMessage } from '../../api/errorMessage';
 import SearchableSelect from '../ui/SearchableSelect';
 import toast from 'react-hot-toast';
 import { X } from 'lucide-react';
+import { formatFindingRef } from '../../utils/findingFormat';
 
 interface Props {
   finding: FindingDetail;
@@ -81,7 +82,7 @@ export default function EditDetailsModal({ finding, onClose, onSaved }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
-          <h3 className="text-base font-bold text-slate-800">Edit details — Finding #{finding.id}</h3>
+          <h3 className="text-base font-bold text-slate-800">Edit details — Finding {formatFindingRef(finding)}</h3>
           <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg">
             <X className="w-5 h-5" />
           </button>

@@ -56,6 +56,30 @@ async function generateWpId(divisionCode: string, tx: Prisma.TransactionClient):
   return `${divisionCode}-WP-${String(nextSeq).padStart(6, '0')}`;
 }
 
+/**
+ * Generates the next sequential human-readable findingId (e.g. FND-000001).
+ * Findings are organisation-wide (no division prefix, unlike Task/WP), so
+ * allocation is serialised with a transaction-scoped advisory lock rather than a
+ * division row lock. Must run inside a $transaction (all callers do); the lock is
+ * released automatically at commit/rollback.
+ */
+async function generateFindingId(client: PrismaLike): Promise<string> {
+  // Fixed arbitrary key dedicated to the finding-id sequence. $executeRaw (not
+  // $queryRaw) because pg_advisory_xact_lock returns void — nothing to deserialize.
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(8123401)`;
+  const last = await client.finding.findFirst({
+    where: { findingId: { not: null } },
+    orderBy: { id: 'desc' },
+    select: { findingId: true }
+  });
+  let nextSeq = 1;
+  if (last?.findingId) {
+    const seqPart = last.findingId.split('-').pop();
+    if (seqPart) nextSeq = parseInt(seqPart, 10) + 1;
+  }
+  return `FND-${String(nextSeq).padStart(6, '0')}`;
+}
+
 // Findings still in flight — eligible as duplicate-merge canonicals and surfaced
 // as raise-time duplicate candidates (Closed / Dismissed are terminal).
 const FINDING_ACTIVE_STATUSES = ['Open', 'In Progress', 'Pending Verification'];
@@ -348,8 +372,11 @@ export async function createFindingService(
   const reporter = await client.user.findUnique({ where: { id: actor.userId }, select: { name: true } });
   const reporterName = reporter?.name ?? `User ${actor.userId}`;
 
+  const findingId = await generateFindingId(client);
+
   const created = await client.finding.create({
     data: {
+      findingId,
       eventType,
       description,
       departmentId,
@@ -375,8 +402,8 @@ export async function createFindingService(
     taskId ?? null,
     'CREATED',
     actor.userId,
-    `Finding #${created.id} raised by ${reporterName}`,
-    { findingId: created.id, eventType, sourceTaskId: taskId ?? null }
+    `Finding ${created.findingId ?? `#${created.id}`} raised by ${reporterName}`,
+    { findingId: created.id, findingCode: created.findingId, eventType, sourceTaskId: taskId ?? null }
   );
 
   // Raise-time duplicate merge: record this finding against the task but park it
@@ -529,6 +556,7 @@ export const getDuplicateCandidates = async (req: Request, res: Response): Promi
       take: 8,
       select: {
         id: true,
+        findingId: true,
         description: true,
         status: true,
         severity: true,
@@ -734,6 +762,7 @@ export const getFindingSummary = async (req: Request, res: Response): Promise<vo
       where: { id, deletedAt: null },
       select: {
         id: true,
+        findingId: true,
         status: true,
         severity: true,
         description: true,
