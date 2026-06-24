@@ -45,7 +45,7 @@ User triaged: fix #1, #4, #5, #6; accept #3; #2 is a deploy-pipeline question (f
 | PR5-5 | Low (efficiency) | `tasks/page.tsx` | Filter change while page>1 fired a wasted request for the stale page (+ empty flash) before the reset effect. | ✅ Fixed — render-time "adjust state when a value changes" (`prevFiltersKey` in state) snaps page to 1 before the fetch runs. |
 | PR5-6 | Low (UX) | `tasks/page.tsx` | Empty-state always showed "No tasks found"; the "adjust filters" hint was dead. | ✅ Fixed — `hasActiveFilters` distinguishes empty scope from filtered-to-zero. |
 
-**Note:** `CLAUDE_HANDOVER.md` §2/§8 feature-status + handover update (Phases 1–5 DB hardening, new task-list pagination + endpoints, the `Finding.findingId` identifier, and the new migrations/deploy runbook steps) is pending the user's confirmation that the work is complete (Rule 12); it will be folded in then. **Deploy flag (PR5-2): RESOLVED** — migration history squashed to a clean baseline + `migrate deploy` workflow wired and validated (see PR5-2 row above and `backend/prisma/migrations/README.md`).
+**Note:** `CLAUDE_HANDOVER.md` updated to **rev 18** (2026-06-24) after the user verified the branch locally (595/595, build clean, DB CHECK constraint confirmed at runtime): new §2 entry (Phases 1–5 + pagination + squash), Test Suite count, gotchas #56–58, §12.5 deploy steps, and a new **§12.8 "Pre-deploy items to MONITOR & RECTIFY"** (most important: the test-DB/prod CHECK-constraint parity gap). `CLAUDE.md` master-user line corrected (employeeId `VAE00071` / `Abc@12345`). **Deploy flag (PR5-2): RESOLVED** — migration history squashed to a clean baseline + `migrate deploy` workflow wired and validated (see PR5-2 row above and `backend/prisma/migrations/README.md`).
 
 ---
 
