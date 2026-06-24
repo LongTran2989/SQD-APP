@@ -64,7 +64,16 @@ User triaged: fix #1, #4, #5, #6; accept #3; #2 is a deploy-pipeline question (f
 | QV-5 | Very low (Rule 2) | `task.controller.ts` `getRelatedFindings` | `followUpTasks: { some: { id } }` relation filter omitted `deletedAt: null` (Rule 2 — "no exceptions"). Not exploitable (the id is a verified-live task and only Findings are returned), but a literal breach. | ✅ Fixed — `{ some: { id, deletedAt: null } }`. |
 | QV-6 | Info (behavior) | `tasks/[id]/page.tsx` back-link | Primary related finding is chosen by ascending id, so a task that is both a follow-up of A and CAPA-linked to an older B points "Back to Finding #B". | ✔ Accepted-as-is — still a valid related finding and "(+N more)" flags the rest; parent-first ordering would reintroduce the chance of linking a soft-deleted parent that the related-findings query correctly excludes. |
 
-**Note:** `CLAUDE_HANDOVER.md` §2/§8 feature-status + handover update for the WS5 quick-view feature (and this review) is pending the user's confirmation that the feature is complete (Rule 12); it will be folded in then.
+**Note:** `CLAUDE_HANDOVER.md` §2/§8 updated 2026-06-24 (rev 18) — see the session immediately above.
+
+---
+
+## Session: 2026-06-22 — Quick-View Enrichment + Back-to-Finding Security Review
+
+**Branch reviewed:** `claude/nice-darwin-nwyj81`, cumulative diff back to merge-base `519563d` (covers both `251ebad` and the `1ecd3de` code-review fix pass above).
+**Scope:** `/security-review` 3-phase methodology (Phase 1 identification sub-agent → Phase 2 per-candidate false-positive filter → Phase 3 keep confidence ≥8). Phase 1 sub-agent scrutinized: `PUT /findings/:id/details`, `PUT /findings/:id/due-date`, `POST /findings` (`duplicateOfFindingId` path), `GET /findings/duplicate-candidates`, the new `GET /findings/:id/summary`, the new `GET /tasks/:id/related-findings`, the CAPA-link refactor, and all new/changed frontend components for XSS sinks.
+**Result:** **Zero candidate vulnerabilities identified** — Phase 1 returned no findings, so Phases 2–3 (parallel false-positive filtering) were not needed per the skill's own instructions. Verified directly: authz present on every new/changed mutation endpoint; all new read endpoints are consistent with the documented transparent-viewing model (cross-division read is intentional, not a vuln — see `CLAUDE.md`); no SQL injection (all `$queryRaw` parameterized); no `dangerouslySetInnerHTML`/`innerHTML`/`bypassSecurityTrust*` in any new component; every new `:id` route param is NaN-guarded before use. One non-vulnerability note: `updateCapa`'s `ownerUserId` FK handling was flagged for code-quality attention but is not a security issue.
+**Status:** ✔ No findings — nothing to fix or defer.
 
 ---
 
