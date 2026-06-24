@@ -1,6 +1,8 @@
 # SQD-APP: Claude Code Project Handover
 *Last updated: 2026-06-24 (rev 18). Supersedes all previous versions.*
 
+> **rev 18 (2026-06-24):** Task-list server-side pagination + new `/tasks/stats|assignees|options` endpoints; `Finding.findingId` business code (`FND-000001`); DB integrity hardening (CHECK constraints, Finding indexes); post-review picker/UX fixes; **migration history squashed to a clean replayable baseline** (was unshippable). Backend **595/595**, frontend build clean — verified locally on a real DB (incl. the DB-level CHECK constraint rejection). **⚠️ Read §12.8 "Pre-deploy items to MONITOR & RECTIFY" before going to prod** — most importantly the test-DB/prod schema-application parity gap. Also folds in the Quick-View Enrichment + Back-to-Finding feature (582/582) and its clean `/security-review` from `claude/nice-darwin-nwyj81`.
+
 ---
 
 ## 1. PROJECT OVERVIEW
@@ -17,6 +19,22 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 ## 2. CURRENT IMPLEMENTATION STATUS
 
 ### Completed
+- **DB Architecture Hardening (Phases 1–5) + Task-List Pagination + Migration Squash** (2026-06-23/24 — branch `claude/relaxed-lamport-sst3dn`)
+  > A senior-architect review of `schema.prisma` + data-access, a phased remediation, a post-review `/code-review`, and a migration-history rebuild. **Verified locally against a real DB: backend 595/595, frontend `next build` clean (24 routes), and the new DB-level CHECK constraint confirmed rejecting a bad status (Postgres `23514`).** Full finding-by-finding log in `CODE_REVIEW_AUDIT_LOG.md` (2026-06-23 session).
+  >
+  > **Phase 1 — Dashboard feed crash (High, active 500):** `getFeed` selected the non-existent `Finding.findingId` column at the time (findings DO emit `scope:'FINDING'` feed posts), so the dashboard feed threw for any user with a reported finding. Fixed; added `dashboard.controller.test.ts`.
+  >
+  > **Phase 2 — Dashboard perf:** `getSummary`'s 8+ serial `count()` queries parallelised with `Promise.all` per cluster.
+  >
+  > **Phase 3 — Finding indexes:** 3 composite indexes (all trailing `deletedAt`) for the hot status/division/reporter reads (migration folded into the baseline).
+  >
+  > **Phase 4 — Data integrity (the only new *runtime* behavior):** DB-level **CHECK constraints** on `Task.status`, `Finding.status`, `Finding.severity` (nullable), `WorkPackage.status`, and a `FindingLink` self-reference guard — Prisma cannot express CHECK in `schema.prisma`, so they live in raw SQL in migration `20260623000100_add_status_check_constraints`. Also added **`Finding.findingId`** human-readable business code (`FND-000001`, org-wide). Allocation is **app-side** in `generateFindingId` (`finding.controller.ts`) using `pg_advisory_xact_lock` + a max-query — **no DB sequence object is needed at runtime** (verified: sequence is contiguous across server restarts). Wired into the create path, feed label, and 5 frontend display sites.
+  >
+  > **Phase 5 — Task-list server-side pagination (High, scale):** `getTasks`/`getMyTasks`/`getUnassignedTasks` previously pulled the whole table to filter/count in the browser. Now server-paginated (`{tasks,total,page,pageSize}`, `pageSize` clamped ≤100, page/size defaulted on bad input) with new `GET /tasks/stats` (tab badges), `/tasks/assignees`, and `/tasks/options` (slim, bounded pickers). Tasks page reworked; single-fetch on filter change; pickers gained server-side search (`SearchableSelect.onQueryChange`).
+  >
+  > **Post-Phase-5 `/code-review` (PR5-1…6):** picker server-search (#1), tab-badge refresh on navigation (#4), eliminate double-fetch via render-time page reset (#5), empty-state copy (#6) — all fixed; search field-label narrowing (#3) accepted-as-is.
+  >
+  > **Migration squash (2026-06-23, pre-prod, one-time):** the prior 12-folder history could **not** rebuild from empty (`0_init` created 23/45 tables; an `ALTER "CapaAction"` sorted before its `CREATE`) — discovered by replaying it on a throwaway PG cluster. With the app confirmed pre-production, squashed to **`0_init`** (full schema from `schema.prisma`, 45 tables) + **`20260623000100_add_status_check_constraints`** (the 5 CHECK constraints — the only non-schema-expressible objects). Added `migration_lock.toml` (was missing — `migrate deploy`/`diff` couldn't run without it), `migrate:dev`/`migrate:deploy`/`migrate:status` npm scripts, and `backend/prisma/migrations/README.md`. Validated: `migrate deploy` on empty → clean (2 migrations, 5 constraints, "schema is up to date"); `migrate diff` → no drift. **Deploy via `migrate deploy` against a fresh DB.** See §12.7 for the standing pre-prod items this introduces (esp. test-DB constraint coverage).
 - **Quick-View Enrichment + Reliable Back-to-Finding** (✅ **COMPLETE**, 2026-06-22 — branch `claude/nice-darwin-nwyj81`, commits `251ebad` then `1ecd3de`)
   > New `GET /api/tasks/:id/related-findings` endpoint dedupes a task's findings across the source/follow-up/CAPA relations (`task.controller.ts::getRelatedFindings`). Task quick-view drawer (`TaskQuickViewPanel`) enriched with issuer, clickable related-finding badges, latest-activity feed, and a "Report" link when `taskData` is non-empty. New reusable Finding quick-view drawer (`FindingQuickViewPanel`) wired into `QuickViewProvider` (`openFinding`, mutually exclusive with `openTask`/`openWp`) and into `RaiseFindingPanel`'s duplicate-candidate previews. Full task-page back-link made CAPA-aware. +7 backend tests (572→579).
   > **`/code-review` (xhigh) on the diff surfaced 6 findings** — user agreed to fix #1 (real regression) plus, on explicit instruction ("fix all maintainability and performance related issues also"), #3 and #5; #2 and #6 accepted-as-is. Applied in `1ecd3de`:
@@ -521,6 +539,7 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
   - **Not verified in-browser:** the backend dev server could not start in this remote container (no `.env`, only `.env.test` — missing `JWT_SECRET`), so the UI was not manually exercised in a live browser this session.
 
 ### Test Suite
+- **595/595 full backend suite passing (DB Hardening Phases 1–5 + migration squash, 2026-06-23/24, branch `claude/relaxed-lamport-sst3dn`) — verified locally against a real DB.** Frontend `next build` clean (24 routes). ⚠️ Note: the suite runs on a `db push`'d test DB, so it does **not** exercise the 5 DB-level CHECK constraints (gotcha #60, §12.8 item 1) — DB-constraint behavior was verified separately at runtime (Postgres `23514` rejection).
 - **582/582 backend tests on branch `claude/nice-darwin-nwyj81` (Quick-View Enrichment + Back-to-Finding, 2026-06-22): all 582 passing.** 572 baseline → 579 after the WS5 feature (`getRelatedFindings`, +7 tests, commit `251ebad`) → 582 after the code-review fix pass (`getFindingSummary`, +3 tests, commit `1ecd3de`). Backend `tsc --noEmit` clean. Frontend `tsc --noEmit` clean, `next build` clean.
 - **19/19 `workload.test.ts` tests passing; 536/537 full backend suite (Personnel Analytics Filter/Sort, 2026-06-20, branch `claude/gallant-thompson-y1gn85`).** 1 pre-existing unrelated `templateSet.test.ts` failure (not a regression — confirmed present before this session's changes). Frontend `tsc --noEmit` clean; lint at baseline (no new errors).
 - **499 backend tests on branch `claude/determined-shannon-efxjwm` (Generalized Auto-Generate WP, P1–P6, 2026-06-17→2026-06-18): all 499 passing.** 453 baseline → 469 after P1–P3 (`autoGen.test.ts`, new) → +11 in P5 (`templateSet.test.ts`) → +15 in P6 (`wpBlueprint.test.ts`) → 499. Backend `tsc --noEmit` clean. Frontend `tsc`/lint/`next build` clean for all phases. P7 (recurrence automation + Master Calendar) not yet built.
@@ -1540,6 +1559,12 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 57. **Quick-view drawers share JSX via `frontend/src/components/quickview/shared.tsx` — don't re-duplicate `Row`/`formatDate`/feed rendering:** `QvRow`, `formatQvDate`, and `QvFeed` are the canonical building blocks for `TaskQuickViewPanel`/`WpQuickViewPanel`/`FindingQuickViewPanel`. A 4th quick-view panel should import from `shared.tsx`, not redefine local equivalents. `QuickViewProvider`'s `openTask`/`openWp`/`openFinding` are mutually exclusive (opening one clears the other two) — only one drawer is ever mounted at a time.
 58. **Task-detail back-to-finding link uses a fallback chain, not a single async source (2026-06-22 code-review fix):** `relatedFindings[0] ?? task.parentFinding ?? linkedFindings[0] ?? null` in `app/dashboard/tasks/[id]/page.tsx`. `relatedFindings` (from `getRelatedFindings`, CAPA-aware) is preferred, but the chain falls back to the synchronously-loaded `task.parentFinding`/`linkedFindings[0]` so a slow or failed fetch never drops a link the task already had. Do not collapse this back to depending solely on the async fetch.
 
+59. **Migration history was squashed to a clean baseline (2026-06-23) — `migrate deploy`, never `db push`, and never squash again:** The prior 12-folder history could not rebuild from empty (`0_init` covered 23/45 tables; an `ALTER "CapaAction"` sorted before its `CREATE`). It was replaced, while pre-prod, with `0_init` (full schema from `schema.prisma`) + `20260623000100_add_status_check_constraints`, plus `migration_lock.toml` and `npm run migrate:deploy`/`migrate:dev`/`migrate:status` scripts. **This supersedes every earlier "run `npx prisma db push` on first deploy of branch X" gotcha (#24, #25, #40, #54) — those per-branch manual steps are now baked into the baseline.** Going forward: schema changes via `npm run migrate:dev` only (writes the file *and* keeps `migration_lock.toml` correct); never hand-author folders; the squash is a one-time pre-prod action — once any environment records this history, only ever *add* migrations. Full workflow in `backend/prisma/migrations/README.md`.
+
+60. **The 5 DB CHECK constraints live ONLY in raw SQL and are NOT in the test DB:** `Task_status_check`, `Finding_status_check`, `Finding_severity_check`, `WorkPackage_status_check`, `FindingLink_no_self_reference_check` are in migration `20260623000100` (Prisma can't express CHECK in `schema.prisma`). `test:setup` uses `db push`, which skips raw-SQL migrations, so **the constraints do not exist in `sqd_qa_test_db` and the suite never exercises them**. A change that writes an off-list status can pass all tests yet 500 in prod with Postgres `23514`. When you add/rename a status or severity, update **both** the constant in `constants/*` **and** the CHECK list in the migration. See §12.8 item 1 for the parity-fix options.
+
+61. **`Finding.findingId` (`FND-000001`) is allocated in app code, not by a DB sequence:** `generateFindingId` (`finding.controller.ts`) takes a transaction-scoped `pg_advisory_xact_lock(8123401)`, reads the current max `findingId`, and increments — so allocation is serialised without a dedicated DB sequence object (none exists; do not add one expecting the app to use it). The column is `String? @unique` (nullable for the historical two-step backfill; always set at creation going forward). It is org-wide (no division prefix). Verified contiguous across server restarts.
+
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 
 19. **Test DB reset on the Feed & Escalation branch**: Suites seed with `create` (not upsert) and assume an empty DB at process start; each self-cleans in `afterAll` (`escalation.test.ts` mirrors `feed.test.ts`'s FK-safe deletes). There is **no global wipe**. Between local runs, reset with a plain `TRUNCATE … RESTART IDENTITY CASCADE` of every table except `_prisma_migrations`, then a single `npm run test`. **Do NOT** use `prisma db push --force-reset` — Prisma's AI guardrail blocks it, and on an empty DB the `prisma.config.ts` seed auto-runs and then collides with suite fixtures. Also: a stale generated client makes `prisma.feedPost` undefined → run `npx prisma generate` after pulling schema changes. *(Still relevant.)*
@@ -1699,10 +1724,13 @@ Backend:
 cd backend
 npm ci
 npx prisma generate
-# Apply schema. For a fresh prod DB use migrate deploy if migrations are present,
-# otherwise db push. (No schema change was introduced by the auth hardening.)
-npx prisma migrate deploy   # or: npx prisma db push
+# Apply schema to a FRESH (empty) prod DB. The migration history is a clean,
+# replayable baseline as of 2026-06-23 (see backend/prisma/migrations/README.md).
+# ALWAYS use migrate deploy — NOT db push. `db push` cannot apply the raw-SQL
+# CHECK constraints in 20260623000100, so it would silently ship an integrity gap.
+npm run migrate:deploy      # = prisma migrate deploy  (idempotent; applies pending migrations)
 npm run build               # if a build script exists; otherwise run via ts-node/node
+npx prisma db seed          # first deploy only: roles, divisions, master user, templates
 # start the compiled server (NODE_ENV=production)
 ```
 
@@ -1736,6 +1764,50 @@ npm run start               # serves the optimized production build
 - [ ] Set `JWT_SECRET`, `NODE_ENV=production`, `FRONTEND_ORIGIN` on the host
 - [ ] HTTPS enabled (required for the `Secure` cookie)
 - [x] `trust proxy` configured if behind a reverse proxy (`app.set('trust proxy', 1)` in `index.ts`, 2026-06-19 — fixed after `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` surfaced on the `sqdvaeco.duckdns.org` VPS)
+
+### 12.8 Pre-deploy items to MONITOR & RECTIFY (added rev 18, 2026-06-23) ⚠️
+
+Open standing items that are **not blockers for the current pre-prod branch** but must be
+watched/closed as the app approaches and enters production. Ordered by importance.
+
+1. **[MONITOR — highest] Test-DB ≠ prod schema-application path → CHECK constraints are NOT exercised by the suite.**
+   `npm run test:setup` builds `sqd_qa_test_db` with `prisma db push`, which applies only what
+   `schema.prisma` expresses — it does **not** run the raw-SQL migration `20260623000100`, so the
+   5 DB-level CHECK constraints **do not exist in the test DB**. Consequence: a code path that
+   writes an off-list `status`/`severity`, or a newly-added constraint, can pass all **595** tests
+   yet fail at **runtime in prod** with Postgres `23514`. This gap is real and permanent until closed.
+   - **Rule going forward:** whenever you add/rename a status or severity value, update **both** the
+     constant in `backend/src/constants/*` **and** the CHECK list in the constraints migration.
+   - **Rectify before prod (pick one):** (a) switch `test:setup` to `prisma migrate deploy` against
+     the test DB for true parity (slower per run, faithful), or (b) keep `db push` for speed but add a
+     CI job that replays `migrate deploy` onto an empty DB and asserts the constraints exist.
+
+2. **[DO — at deploy] Provision prod via `migrate deploy` on a FRESH (empty) DB — never `db push`.**
+   `db push` would silently skip the CHECK constraints (item 1). The migration history was **squashed
+   to a clean baseline on 2026-06-23 while pre-prod** — this is a **one-time** action: once any
+   environment has recorded this history, **never squash again**; only ever *add* migrations via
+   `npm run migrate:dev`. Never hand-author migration folders. (Full rationale + workflow in
+   `backend/prisma/migrations/README.md`.)
+
+3. **[VERIFY — only if not a fresh DB] Data audit before applying constraints to a populated DB.**
+   A fresh prod DB needs nothing. But if `migrate deploy` is ever pointed at a DB that already has
+   rows, run the `SELECT DISTINCT status/severity …` audit in the header of migration
+   `20260623000100` first — `ADD CONSTRAINT` fails if any existing row is off-list.
+
+4. **[MINOR] `DISABLE_RATE_LIMIT` only takes effect via `backend/.env`, not as a shell-prefixed env var.**
+   Passing it inline to `npm run dev` doesn't propagate through nodemon/ts-node to `process.env`;
+   it must be written into `backend/.env` and the server restarted. Irrelevant to prod (you would
+   never disable the limiter there) but a known rough edge for staging/QA smoke testing. If you want
+   inline override to work, read the flag at request time rather than module-load time.
+
+5. **[DOC — done] Master user corrected.** Login is by **employeeId** `VAE00071` / `Abc@12345`
+   (Director, `forcePasswordChange: true` on fresh seed) — *not* `director@sqd.com` / `password123`,
+   which was never valid. `email` is optional/notifications-only. (`CLAUDE.md` fixed 2026-06-24.)
+
+> Lower-severity deferred items (DEF-1…DEF-6: DOMPurify-on-import, `SearchableSelect` keyboard a11y,
+> issuer-transfer division scope, `task:assign_div` target-division check, `FILE_UPLOAD_CONFIG` PUT
+> endpoint, attachment per-entity scope) remain tracked in `CODE_REVIEW_AUDIT_LOG.md` — none are prod
+> blockers at the current privilege matrix.
 
 ---
 

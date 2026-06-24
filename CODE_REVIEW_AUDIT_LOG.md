@@ -13,6 +13,42 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-23 — Database Architecture Review + Remediation (Phases 1–5) + Post-Phase-5 Code Review
+
+**Branch:** `claude/relaxed-lamport-sst3dn` (commits for Phases 1–5 + the review-fix commit).
+**Scope:** A senior-architect review of `schema.prisma` + the data-access layer, then a phased remediation, then a high-effort `/code-review` of the resulting diff. Two parts below.
+**Tests after fixes:** Backend 595/595 (was 582; +13). Frontend `tsc --noEmit` clean, `next build` ✓, lint net-improved (123→121 problems; residual `set-state-in-effect` are the pre-existing project pattern).
+
+### Part A — Architecture review findings (remediated across Phases 1–5)
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| B1 | **High (active 500)** | `dashboard.controller.ts` `getFeed` | Selected the non-existent `Finding.findingId` column; findings DO write `scope:'FINDING'` feed posts (`findingService`), so the dashboard feed threw `PrismaClientValidationError` for any user with a reported finding. No dashboard test existed. | ✅ Fixed (Phase 1) — drop the bad select; new `dashboard.controller.test.ts` reproduces + guards. |
+| P1 | High (perf) | `dashboard.controller.ts` `getSummary` | 8+ independent `count()` queries run serially per role branch. | ✅ Fixed (Phase 2) — `Promise.all` per cluster. |
+| P2 | Low (perf) | `task.controller.ts` `taskInclude()` | Proposed narrowing `timeBooking` JSON. | ✔ Accepted-as-is / **not done** — verified it would strip `assigneeEntry`/`collaborators` that `TimeBookingPanel` reads on the detail page (shared 21-site helper incl. `getTaskById`). |
+| I1 | Medium (perf) | `Finding` model | Only one composite index; hot status/division/reporter reads fell back to seq scans. | ✅ Fixed (Phase 3) — 3 composites (all trailing `deletedAt`) + migration `20260623000000`. |
+| D1 | Medium (integrity) | `Task/Finding/WorkPackage.status`, `Finding.severity` | Free-text status/severity, app-validated only; schema comments already drifted (e.g. dead `'Approved'`). | ✅ Fixed (Phase 4a) — CHECK constraints (migration `20260623000100`) + dead-`'Approved'` cleanup (9 read-filters) + comment fixes + proof test. |
+| D2 | Low (hardening) | `FindingLink` | No DB guard against a self-referential link. | ✅ Fixed (Phase 4a) — `CHECK (fromFindingId <> relatedFindingId)`; app already enforced it (`findingLink.controller.ts:64`), so belt-and-suspenders. |
+| B2 | Medium (compliance/UX) | `Finding` model | No human-readable business code (unlike Task/WP/Template); root cause of the B1 confusion. | ✅ Fixed (Phase 4b) — `Finding.findingId` (`FND-000001`, advisory-locked global sequence) + backfill migration `20260623000200` + wired into create path, feed label, 5 frontend display sites. |
+| — | High (scale) | `getTasks`/`getMyTasks`/`getUnassignedTasks` | Unbounded list scans; frontend pulled the whole table to filter/count client-side. | ✅ Fixed (Phase 5) — server-side pagination `{tasks,total,page,pageSize}` + `/tasks/stats`, `/tasks/assignees`, `/tasks/options`; tasks page reworked; pickers bounded. |
+
+### Part B — Post-Phase-5 `/code-review` (high effort, recall-biased)
+
+User triaged: fix #1, #4, #5, #6; accept #3; #2 is a deploy-pipeline question (flagged, not code).
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| PR5-1 | Medium (regression) | `work-packages/[id]/page.tsx`, `CapaPanel.tsx` | Slim/bounded task pickers (cap 100, no search) could not reach tasks beyond the first page. | ✅ Fixed — `SearchableSelect` gains optional `onQueryChange`; CapaPanel re-queries `getTaskOptions(search)` (debounced); WP "Add existing task" modal gains a search box that refetches `getTaskList({search})`. |
+| PR5-2 | Medium (deploy) | `migrations/20260623000100…` | CHECK constraints + `findingId` backfill live only in raw migration SQL, which `db push` never applies; if prod is provisioned via `db push` (like the test setup; no `migrate deploy` script / `migration_lock.toml`), D1 integrity + backfill silently don't ship. | ✅ **Resolved (2026-06-23)** — investigated with a throwaway PG cluster: discovered the migration history could not rebuild from empty at all (`0_init` covered 23/45 tables; an `ALTER "CapaAction"` sorted before its `CREATE`). User confirmed pre-prod → **squashed to a clean baseline**: `0_init` (45 tables from `schema.prisma`) + `…000100` (the 5 CHECK constraints, the only non-schema-expressible objects; runtime `findingId` needs no DB sequence — `generateFindingId` uses `pg_advisory_xact_lock` + max-query). Added `migration_lock.toml`, `migrate:deploy`/`migrate:dev`/`migrate:status` scripts, and `prisma/migrations/README.md`. Validated: `migrate deploy` on empty → clean (2 migrations, 5 constraints, "up to date"); `migrate diff` → no drift. Deploy via `migrate deploy` against a fresh DB. |
+| PR5-3 | Low (removed behavior) | `task.controller.ts` `buildTaskFilters` | Server search matches taskId + template title only; the old client search also matched `schemaSnapshot[0].label`. | ✔ Accepted-as-is — fuzzy extra; matching JSON field labels server-side isn't worth the complexity. |
+| PR5-4 | Low-med (staleness) | `tasks/page.tsx` | Tab badges fetched once on mount; only refreshed on a self-assign failure. | ✅ Fixed — `getTaskStats`/`getTaskAssignees` also refresh on tab navigation. |
+| PR5-5 | Low (efficiency) | `tasks/page.tsx` | Filter change while page>1 fired a wasted request for the stale page (+ empty flash) before the reset effect. | ✅ Fixed — render-time "adjust state when a value changes" (`prevFiltersKey` in state) snaps page to 1 before the fetch runs. |
+| PR5-6 | Low (UX) | `tasks/page.tsx` | Empty-state always showed "No tasks found"; the "adjust filters" hint was dead. | ✅ Fixed — `hasActiveFilters` distinguishes empty scope from filtered-to-zero. |
+
+**Note:** `CLAUDE_HANDOVER.md` updated to **rev 18** (2026-06-24) after the user verified the branch locally (595/595, build clean, DB CHECK constraint confirmed at runtime): new §2 entry (Phases 1–5 + pagination + squash), Test Suite count, gotchas #56–58, §12.5 deploy steps, and a new **§12.8 "Pre-deploy items to MONITOR & RECTIFY"** (most important: the test-DB/prod CHECK-constraint parity gap). `CLAUDE.md` master-user line corrected (employeeId `VAE00071` / `Abc@12345`). **Deploy flag (PR5-2): RESOLVED** — migration history squashed to a clean baseline + `migrate deploy` workflow wired and validated (see PR5-2 row above and `backend/prisma/migrations/README.md`).
+
+---
+
 ## Session: 2026-06-22 — Quick-View Enrichment + Back-to-Finding Code Review
 
 **Branch reviewed:** `claude/nice-darwin-nwyj81` (commit `251ebad` — `GET /tasks/:id/related-findings`, task quick-view enrichment, reusable finding quick-view drawer, CAPA-aware back-link, +7 tests).

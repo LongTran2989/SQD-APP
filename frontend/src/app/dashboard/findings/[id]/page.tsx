@@ -18,6 +18,7 @@ import FindingActivityFeed from '../../../../components/findings/FindingActivity
 import FileUploadField from '../../../../components/ui/FileUploadField';
 import EditDetailsModal from '../../../../components/findings/EditDetailsModal';
 import { useQuickView } from '../../../../components/quickview/QuickViewProvider';
+import { formatFindingRef } from '../../../../utils/findingFormat';
 import { formatDueDate } from '../../../../utils/dateFormat';
 import toast from 'react-hot-toast';
 import { ArrowLeft, AlertTriangle, ClipboardList, Plus, CheckCircle2, X, Pencil, Copy, CalendarClock } from 'lucide-react';
@@ -207,7 +208,7 @@ export default function FindingDetailPage() {
               <p className="text-sm text-amber-900">
                 <span className="font-semibold">Duplicate:</span> this finding is managed on{' '}
                 <Link href={`/dashboard/findings/${duplicateOf.id}`} className="font-mono font-semibold text-amber-700 hover:underline">
-                  Finding #{duplicateOf.id}
+                  Finding {formatFindingRef(duplicateOf)}
                 </Link>
                 . No separate investigation is required here.
               </p>
@@ -222,7 +223,7 @@ export default function FindingDetailPage() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-3">
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded text-sm font-bold font-mono border border-slate-200">
-                  Finding #{finding.id}
+                  Finding {formatFindingRef(finding)}
                 </span>
                 <FindingStatusBadge status={finding.status} />
                 <SeverityBadge severity={finding.severity} />
@@ -433,7 +434,7 @@ export default function FindingDetailPage() {
               </button>
             </div>
             <p className="text-sm text-slate-500 mb-4">
-              Adjust the review deadline for Finding #{finding.id}. The change is recorded in the compliance audit trail.
+              Adjust the review deadline for Finding {formatFindingRef(finding)}. The change is recorded in the compliance audit trail.
             </p>
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
               New due date <span className="text-red-500">*</span>
@@ -483,7 +484,7 @@ export default function FindingDetailPage() {
               </button>
             </div>
             <p className="text-sm text-slate-500 mb-4">
-              This signs off Finding #{finding.id} as resolved. This action records a compliance audit entry.
+              This signs off Finding {formatFindingRef(finding)} as resolved. This action records a compliance audit entry.
             </p>
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
               Closure note <span className="text-red-500">*</span>

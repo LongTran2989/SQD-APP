@@ -5,6 +5,7 @@ import { FindingDetail, FindingSeverity } from '../../types';
 import { reviewFinding, dismissFinding, updateFindingSeverity } from '../../api/findingApi';
 import { SeverityBadge } from './FindingBadges';
 import { formatDueDate } from '../../utils/dateFormat';
+import { formatFindingRef } from '../../utils/findingFormat';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 import { ShieldCheck } from 'lucide-react';
@@ -219,7 +220,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
       {showDismissModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <h3 className="text-base font-bold text-slate-800 mb-3">Dismiss Finding #{finding.id}?</h3>
+            <h3 className="text-base font-bold text-slate-800 mb-3">Dismiss Finding {formatFindingRef(finding)}?</h3>
             <p className="text-sm text-slate-500 mb-4">
               Please enter the reason for dismissing this finding. This action cannot be undone.
             </p>
@@ -256,7 +257,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
       {showCorrectModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <h3 className="text-base font-bold text-slate-800 mb-3">Correct Severity for Finding #{finding.id}</h3>
+            <h3 className="text-base font-bold text-slate-800 mb-3">Correct Severity for Finding {formatFindingRef(finding)}</h3>
             <div className="space-y-4 mb-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
