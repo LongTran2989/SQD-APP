@@ -1,16 +1,17 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../../store/authStore';
 import { WorkPackageDetail, WpStatus, TaskEnriched } from '../../../../types';
 import { getWorkPackageById, updateWpStatus } from '../../../../api/wpApi';
-import { getTasks, relinkTaskWp } from '../../../../api/taskApi';
+import { getTaskList, relinkTaskWp } from '../../../../api/taskApi';
 import WorkPackageStatusBadge from '../../../../components/work-packages/WorkPackageStatusBadge';
 import WorkPackageAssignmentPanel from '../../../../components/work-packages/WorkPackageAssignmentPanel';
 import TaskStatusBadge from '../../../../components/tasks/TaskStatusBadge';
 import FeedPanel from '../../../../components/feed/FeedPanel';
+import { useQuickView } from '../../../../components/quickview/QuickViewProvider';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft,
@@ -112,7 +113,7 @@ const EDIT_ROLES = ['Manager', 'Director', 'Admin'];
 
 export default function WorkPackageDetailPage() {
   const params = useParams();
-  const router = useRouter();
+  const { openTask } = useQuickView();
   const { user } = useAuthStore();
 
   const wpId = Number(params.id);
@@ -126,6 +127,8 @@ export default function WorkPackageDetailPage() {
   // "Add Existing Task" modal
   const [showAddExisting, setShowAddExisting] = useState(false);
   const [orphanTasks, setOrphanTasks] = useState<TaskEnriched[]>([]);
+  const [orphanSearch, setOrphanSearch] = useState('');
+  const orphanSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [linkingTaskId, setLinkingTaskId] = useState<number | null>(null);
 
   const loadWp = useCallback(async () => {
@@ -143,20 +146,34 @@ export default function WorkPackageDetailPage() {
 
   useEffect(() => { loadWp(); }, [loadWp]);
 
-  const openAddExisting = async () => {
+  // Orphan-task picker is a bounded page (100), so a search box lets the user reach
+  // unlinked tasks beyond the first page rather than only the most-recently-updated.
+  const loadOrphans = useCallback(async (search?: string) => {
     if (!wp) return;
     try {
-      const all = await getTasks();
-      // Orphaned, non-final tasks in the same division as this WP.
+      const { tasks: all } = await getTaskList({ tab: 'all', pageSize: 100, search: search || undefined });
       const FINAL = ['Closed', 'Rejected', 'Terminated'];
       setOrphanTasks(
         all.filter((t) => t.wpId === null && !FINAL.includes(t.status) && t.targetDivisionId === wp.divisionId)
       );
-      setShowAddExisting(true);
     } catch {
       toast.error('Failed to load tasks');
     }
+  }, [wp]);
+
+  const openAddExisting = async () => {
+    setOrphanSearch('');
+    await loadOrphans();
+    setShowAddExisting(true);
   };
+
+  const handleOrphanSearchChange = (q: string) => {
+    setOrphanSearch(q);
+    if (orphanSearchTimer.current) clearTimeout(orphanSearchTimer.current);
+    orphanSearchTimer.current = setTimeout(() => loadOrphans(q), 300);
+  };
+
+  useEffect(() => () => { if (orphanSearchTimer.current) clearTimeout(orphanSearchTimer.current); }, []);
 
   const handleLinkExisting = async (taskId: number) => {
     if (!wp) return;
@@ -422,7 +439,7 @@ export default function WorkPackageDetailPage() {
                       <tr
                         key={task.id}
                         className="hover:bg-slate-50/80 transition-colors cursor-pointer"
-                        onClick={() => router.push(`/dashboard/tasks/${task.id}`)}
+                        onClick={() => openTask(task.id)}
                       >
                         <td className="p-4 align-middle">
                           <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-bold font-mono border border-slate-200">
@@ -474,9 +491,16 @@ export default function WorkPackageDetailPage() {
               <button onClick={() => setShowAddExisting(false)} className="text-slate-400 hover:text-slate-600 text-sm">Close</button>
             </div>
             <div className="p-4 overflow-y-auto">
+              <input
+                type="text"
+                value={orphanSearch}
+                onChange={(e) => handleOrphanSearchChange(e.target.value)}
+                placeholder="Search by Task ID or title…"
+                className="w-full mb-3 px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
               {orphanTasks.length === 0 ? (
                 <p className="text-sm text-slate-500 text-center py-8">
-                  No unlinked tasks available in this division.
+                  {orphanSearch ? 'No matching unlinked tasks.' : 'No unlinked tasks available in this division.'}
                 </p>
               ) : (
                 <ul className="divide-y divide-slate-100">

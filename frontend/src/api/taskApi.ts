@@ -1,41 +1,94 @@
 import { apiClient } from './client';
-import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry, TimeEntry, TimeEntrySummary, ReviewAction, DeadlineDecision } from '../types';
+import { TaskEnriched, TaskActivityEnriched, TimeBooking, TimeBookingEntry, TimeEntry, TimeEntrySummary, ReviewAction, DeadlineDecision, FindingStatus, FindingSeverity } from '../types';
 
-// ─── List endpoints ────────────────────────────────────────────────────────────
+// ─── List endpoints (server-side paginated — Phase 5) ───────────────────────────
 
-export interface TaskFilters {
+export type TaskTab = 'all' | 'my-tasks' | 'unassigned';
+
+export interface TaskListParams {
+  tab: TaskTab;
+  page?: number;
+  pageSize?: number;
   statuses?: string[];
   issuerId?: number;
   assignedToUserId?: number;
   startDate?: string;
   endDate?: string;
+  overdueOnly?: boolean;
+  dueFilter?: 'today' | 'week';
+  search?: string;
+  sortColumn?: string;
+  sortDir?: 'asc' | 'desc';
 }
 
-export const getTasks = (filters?: TaskFilters): Promise<TaskEnriched[]> => {
-  const params = new URLSearchParams();
-  if (filters?.statuses) filters.statuses.forEach((s) => params.append('statuses', s));
-  if (filters?.issuerId != null) params.set('issuerId', String(filters.issuerId));
-  if (filters?.assignedToUserId != null) params.set('assignedToUserId', String(filters.assignedToUserId));
-  if (filters?.startDate) params.set('startDate', filters.startDate);
-  if (filters?.endDate) params.set('endDate', filters.endDate);
-  const qs = params.toString();
-  return apiClient.get(`/tasks${qs ? `?${qs}` : ''}`).then((r) => r.data);
+export interface TaskListResponse {
+  tasks: TaskEnriched[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+const TAB_PATH: Record<TaskTab, string> = {
+  all: '/tasks',
+  'my-tasks': '/tasks/my-tasks',
+  unassigned: '/tasks/unassigned',
 };
+
+export const getTaskList = (p: TaskListParams): Promise<TaskListResponse> => {
+  const params = new URLSearchParams();
+  if (p.page != null) params.set('page', String(p.page));
+  if (p.pageSize != null) params.set('pageSize', String(p.pageSize));
+  if (p.statuses) p.statuses.forEach((s) => params.append('statuses', s));
+  if (p.issuerId != null) params.set('issuerId', String(p.issuerId));
+  if (p.assignedToUserId != null) params.set('assignedToUserId', String(p.assignedToUserId));
+  if (p.startDate) params.set('startDate', p.startDate);
+  if (p.endDate) params.set('endDate', p.endDate);
+  if (p.overdueOnly) params.set('overdueOnly', 'true');
+  if (p.dueFilter) params.set('dueFilter', p.dueFilter);
+  if (p.search) params.set('search', p.search);
+  if (p.sortColumn) params.set('sortColumn', p.sortColumn);
+  if (p.sortDir) params.set('sortDir', p.sortDir);
+  const qs = params.toString();
+  return apiClient.get(`${TAB_PATH[p.tab]}${qs ? `?${qs}` : ''}`).then((r) => r.data);
+};
+
+// Tab badge counts (computed server-side).
+export interface TaskStats { unassigned: number; myAttention: number; allAttention: number; }
+export const getTaskStats = (): Promise<TaskStats> =>
+  apiClient.get('/tasks/stats').then((r) => r.data);
+
+// Distinct assignees in the All-Tasks scope (for the assignee dropdown).
+export interface TaskAssignee { id: number; name: string; }
+export const getTaskAssignees = (): Promise<TaskAssignee[]> =>
+  apiClient.get('/tasks/assignees').then((r) => r.data);
+
+// Slim task list for pickers (CAPA link / WP selector).
+export interface TaskOption { id: number; taskId: string; title: string | null; status: string; }
+export const getTaskOptions = (search?: string): Promise<TaskOption[]> =>
+  apiClient.get(`/tasks/options${search ? `?search=${encodeURIComponent(search)}` : ''}`).then((r) => r.data);
 
 // Link an existing task to a Work Package, or clear it (wpId: null).
 export const relinkTaskWp = (id: number, wpId: number | null): Promise<TaskEnriched> =>
   apiClient.patch(`/tasks/${id}/wp`, { wpId }).then((r) => r.data);
 
-export const getMyTasks = (): Promise<TaskEnriched[]> =>
-  apiClient.get('/tasks/my-tasks').then((r) => r.data);
-
-export const getUnassignedTasks = (): Promise<TaskEnriched[]> =>
-  apiClient.get('/tasks/unassigned').then((r) => r.data);
-
 // ─── Single task ───────────────────────────────────────────────────────────────
 
 export const getTaskById = (id: number): Promise<TaskEnriched> =>
   apiClient.get(`/tasks/${id}`).then((r) => r.data);
+
+// Every finding this task is connected to — whether it raised it (source), is a
+// follow-up of it (parent), or a CAPA action on it links here. Drives the
+// back-to-finding link on the task page + quick-view drawer (covers CAPA-only
+// tasks that have no parentFinding and aren't a source).
+export interface RelatedFinding {
+  id: number;
+  status: FindingStatus;
+  severity: FindingSeverity | null;
+  description: string;
+}
+
+export const getRelatedFindings = (id: number): Promise<RelatedFinding[]> =>
+  apiClient.get(`/tasks/${id}/related-findings`).then((r) => r.data);
 
 // ─── Create ────────────────────────────────────────────────────────────────────
 

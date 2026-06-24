@@ -494,8 +494,8 @@ export type FindingStatus = 'Open' | 'In Progress' | 'Pending Verification' | 'C
 
 export interface Finding {
   id: number;
+  findingId: string | null; // Human-readable business code, e.g. FND-000001 (null for legacy rows not yet backfilled).
   severity: FindingSeverity | null;
-  category: string | null;
   description: string;
   status: FindingStatus;
   fieldId: string | null;
@@ -506,11 +506,6 @@ export interface Finding {
   // Populated relation (present on list/detail reads). Null when no aircraft set.
   aircraftRegistration: { registration: string; description: string | null; operatorCode: string | null } | null;
   regulatoryReference: string | null;
-  errorCode: string | null;
-  rootCause: string | null;
-  correctiveAction: string | null;
-  recurrence: boolean | null;
-  violatorIds: unknown | null;
   sourceTaskId: number | null;
   reportedByUserId: number;
   closedByUserId: number | null;
@@ -527,7 +522,6 @@ export type RcaMethod = 'MEDA' | 'FIVE_WHYS' | 'OTHER';
 export type RcaStatus = 'Draft' | 'Complete';
 export type CapaType = 'CORRECTIVE' | 'PREVENTIVE';
 export type CapaStatus = 'Open' | 'In Progress' | 'Completed' | 'Verified' | 'Waived';
-export type CapaLinkRole = 'EXECUTION' | 'EFFECTIVENESS' | 'SUPPORTING';
 export type FindingLinkType = 'DUPLICATE' | 'RELATED' | 'CAUSED_BY';
 export type ResponseActionType = 'CAR' | 'NCR' | 'QN' | 'QR' | 'IR' | 'Dissemination';
 
@@ -536,7 +530,7 @@ export interface CapaWpRef { id: number; wpId: string; name: string; status: str
 export interface CapaTaskLink {
   id: number;
   capaId: number;
-  role: CapaLinkRole;
+  mandatory: boolean;
   taskId: number | null;
   task?: { id: number; taskId: string; title: string | null; status: TaskStatus; } | null;
   wpId: number | null;
@@ -715,6 +709,7 @@ export type NotificationType =
   | 'TASK_SUBMITTED'
   | 'ESCALATION_QUEUED'
   | 'FINDING_CREATED'
+  | 'FINDING_OVERDUE'
   | 'FEED_ACTIVITY'
   | 'BLUEPRINT_LAUNCHED'
   | 'TASKS_GENERATED';

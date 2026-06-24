@@ -327,99 +327,200 @@ function enrichTask<
   };
 }
 
+// ─── List endpoints (server-side paginated — Phase 5) ──────────────────────────
+//
+// getTasks / getMyTasks / getUnassignedTasks back the three tabs on the Tasks page.
+// They share a paginated executor and a common filter parser so the page can push
+// status / assignee / date / overdue / due / search filters server-side instead of
+// pulling the whole table into the browser. Response shape mirrors listFindings:
+//   { tasks, total, page, pageSize }
+// Tab badge counts come from getTaskStats; the assignee dropdown from getTaskAssignees;
+// pickers (CAPA / WP) from the slim getTaskOptions. NOTE: sort-by-lastActivity has no
+// task column to order on (it is derived from FeedPost), so list ordering is a stable
+// updatedAt desc and the client sorts the loaded page for that one secondary column.
+
+const ATTENTION_EXCLUDED_STATUSES = [...FINAL_TASK_STATUSES, 'Inactive'];
+
+function parsePagination(req: Request): { page: number; pageSize: number; skip: number; take: number } {
+  const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+  const pageSize = Math.min(100, Math.max(1, parseInt(String(req.query.pageSize ?? '25'), 10) || 25));
+  return { page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
+}
+
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** RBAC visibility scope for the "All Tasks" tab (role-dependent). Async for the
+ *  Staff/Group-Leader path, which also surfaces tasks in WPs they belong to. */
+async function buildAllTasksScope(user: { userId: number; role: string; divisionId: number }): Promise<Prisma.TaskWhereInput> {
+  const { userId, role, divisionId } = user;
+  if (role === 'Director' || role === 'Admin') {
+    return { deletedAt: null };
+  }
+  if (role === 'Manager') {
+    return {
+      deletedAt: null,
+      OR: [
+        { targetDivisionId: divisionId },
+        { issuerId: userId },
+        { assignedToUser: { divisionId } }
+      ]
+    };
+  }
+  const wpAssignments = await prisma.workPackageAssignment.findMany({ where: { userId }, select: { wpId: true } });
+  const memberWpIds = wpAssignments.map((a) => a.wpId);
+  return {
+    deletedAt: null,
+    OR: [
+      { assignedToUserId: userId },
+      { issuerId: userId },
+      { status: 'Unassigned', targetDivisionId: divisionId },
+      ...(memberWpIds.length > 0 ? [{ wpId: { in: memberWpIds } }] : [])
+    ]
+  };
+}
+
+function buildMyTasksScope(userId: number): Prisma.TaskWhereInput {
+  return { deletedAt: null, OR: [{ assignedToUserId: userId }, { issuerId: userId }] };
+}
+
+function buildUnassignedScope(user: { role: string; divisionId: number }): Prisma.TaskWhereInput {
+  const where: Prisma.TaskWhereInput = { deletedAt: null, status: 'Unassigned' };
+  if (user.role !== 'Director' && user.role !== 'Admin') where.targetDivisionId = user.divisionId;
+  return where;
+}
+
+/** A task "needs attention" when it is Overdue, Due Today, or Follow-up Required —
+ *  the same definition the dashboard/tab badges use. Overdue+DueToday collapse to
+ *  "deadline before start of tomorrow and not terminal/inactive". */
+function attentionFilter(): Prisma.TaskWhereInput {
+  const startOfTomorrow = startOfToday();
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+  return {
+    OR: [
+      { deadline: { lt: startOfTomorrow }, status: { notIn: ATTENTION_EXCLUDED_STATUSES } },
+      { status: 'Follow-up Required' }
+    ]
+  };
+}
+
+/** Parses the optional list filters shared by all three tabs. */
+function buildTaskFilters(req: Request): Prisma.TaskWhereInput[] {
+  const filters: Prisma.TaskWhereInput[] = [];
+
+  const rawStatuses = req.query.statuses;
+  if (rawStatuses) {
+    const statuses = Array.isArray(rawStatuses) ? rawStatuses.map(String) : [String(rawStatuses)];
+    if (statuses.length > 0) filters.push({ status: { in: statuses } });
+  }
+
+  const issuerId = req.query.issuerId ? parseInt(String(req.query.issuerId), 10) : null;
+  if (issuerId && !Number.isNaN(issuerId)) filters.push({ issuerId });
+
+  const assignedToUserId = req.query.assignedToUserId ? parseInt(String(req.query.assignedToUserId), 10) : null;
+  if (assignedToUserId && !Number.isNaN(assignedToUserId)) filters.push({ assignedToUserId });
+
+  // Date range filters the task creation date (createdAt).
+  const createdAtFilter: { gte?: Date; lte?: Date } = {};
+  if (req.query.startDate) {
+    const d = new Date(String(req.query.startDate));
+    if (!Number.isNaN(d.getTime())) createdAtFilter.gte = d;
+  }
+  if (req.query.endDate) {
+    const d = new Date(String(req.query.endDate));
+    if (!Number.isNaN(d.getTime())) { d.setHours(23, 59, 59, 999); createdAtFilter.lte = d; }
+  }
+  if (createdAtFilter.gte || createdAtFilter.lte) filters.push({ createdAt: createdAtFilter });
+
+  // overdueOnly mirrors computeIsOverdue: deadline already passed AND not terminal/inactive.
+  if (String(req.query.overdueOnly) === 'true') {
+    filters.push({ deadline: { lt: new Date() }, status: { notIn: ATTENTION_EXCLUDED_STATUSES } });
+  }
+
+  // dueFilter: 'today' | 'week' — deadline within [startOfToday, +1d|+7d), not terminal/inactive.
+  const dueFilter = req.query.dueFilter ? String(req.query.dueFilter) : null;
+  if (dueFilter === 'today' || dueFilter === 'week') {
+    const from = startOfToday();
+    const to = new Date(from);
+    to.setDate(to.getDate() + (dueFilter === 'today' ? 1 : 7));
+    filters.push({ deadline: { gte: from, lt: to }, status: { notIn: ATTENTION_EXCLUDED_STATUSES } });
+  }
+
+  // attentionOnly — used by stat parity; deadline-or-followup needing attention.
+  if (String(req.query.attentionOnly) === 'true') filters.push(attentionFilter());
+
+  // search across taskId + template title (case-insensitive).
+  const search = req.query.search ? String(req.query.search).trim() : '';
+  if (search) {
+    filters.push({
+      OR: [
+        { taskId: { contains: search, mode: 'insensitive' } },
+        { template: { title: { contains: search, mode: 'insensitive' } } }
+      ]
+    });
+  }
+
+  return filters;
+}
+
+/** Maps the requested sort column to a Prisma orderBy. lastActivity has no column to
+ *  sort on (derived from FeedPost) — it falls back to updatedAt and is sorted client-side
+ *  within the page. */
+function buildTaskOrderBy(req: Request): Prisma.TaskOrderByWithRelationInput {
+  const dir: Prisma.SortOrder = String(req.query.sortDir) === 'asc' ? 'asc' : 'desc';
+  switch (String(req.query.sortColumn)) {
+    case 'taskId': return { taskId: dir };
+    case 'status': return { status: dir };
+    case 'deadline': return { deadline: dir };
+    case 'title': return { template: { title: dir } };
+    case 'createdAt': return { createdAt: dir };
+    default: return { updatedAt: 'desc' };
+  }
+}
+
+/** Shared paginated executor: counts + fetches one page, then enriches it with the
+ *  per-task activity preview (batched), matching the previous response object shape. */
+async function fetchTaskPage(
+  scope: Prisma.TaskWhereInput,
+  filters: Prisma.TaskWhereInput[],
+  orderBy: Prisma.TaskOrderByWithRelationInput,
+  skip: number,
+  take: number,
+  user: ReviewerActor
+): Promise<{ tasks: unknown[]; total: number }> {
+  const where: Prisma.TaskWhereInput = filters.length > 0 ? { AND: [scope, ...filters] } : scope;
+
+  const [total, tasks] = await Promise.all([
+    prisma.task.count({ where }),
+    prisma.task.findMany({ where, orderBy, skip, take, include: taskInclude() })
+  ]);
+
+  const taskIds = tasks.map((t) => t.id);
+  const [lastActivityMap, recentActivitiesMap] = await Promise.all([
+    getLastActivityMap(taskIds),
+    getRecentActivitiesMap(taskIds)
+  ]);
+
+  const data = tasks.map((t) => ({
+    ...enrichTask(t, user),
+    lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt,
+    recentActivities: recentActivitiesMap.get(t.id) ?? []
+  }));
+
+  return { tasks: data, total };
+}
+
 // ─── GET /api/tasks ───────────────────────────────────────────────────────────
 
 export const getTasks = async (req: Request, res: Response): Promise<void> => {
-  // TODO (Phase 5.4): Add divisionId query param and showAll filter when the frontend
-  // filter bar is built. For now, scope is enforced by role only.
   try {
-    const { userId, role, divisionId } = req.user!;
-
-    let where: any = { deletedAt: null };
-
-    if (role === 'Director' || role === 'Admin') {
-      // System-wide visibility
-    } else if (role === 'Manager') {
-      // Tasks in their division (by target or by assigned user) + tasks they issued anywhere
-      where = {
-        deletedAt: null,
-        OR: [
-          { targetDivisionId: divisionId },
-          { issuerId: userId },
-          { assignedToUser: { divisionId: divisionId } }
-        ]
-      };
-    } else {
-      // Staff / Group Leader: tasks they are assignee or issuer of,
-      // plus all Unassigned tasks targeted at their division (so they can see & claim them),
-      // plus all tasks belonging to WPs they are assigned to
-      const wpAssignments = await prisma.workPackageAssignment.findMany({
-        where: { userId },
-        select: { wpId: true }
-      });
-      const memberWpIds = wpAssignments.map((a) => a.wpId);
-
-      where = {
-        deletedAt: null,
-        OR: [
-          { assignedToUserId: userId },
-          { issuerId: userId },
-          { status: 'Unassigned', targetDivisionId: divisionId },
-          ...(memberWpIds.length > 0 ? [{ wpId: { in: memberWpIds } }] : [])
-        ]
-      };
-    }
-
-    // ── Optional filters (combined with the RBAC scope via AND) ────────────────
-    const filters: any[] = [];
-
-    // statuses[] — accept ?statuses=A&statuses=B or ?statuses=A
-    const rawStatuses = req.query.statuses;
-    if (rawStatuses) {
-      const statuses = Array.isArray(rawStatuses) ? rawStatuses.map(String) : [String(rawStatuses)];
-      if (statuses.length > 0) filters.push({ status: { in: statuses } });
-    }
-
-    const issuerId = req.query.issuerId ? parseInt(String(req.query.issuerId), 10) : null;
-    if (issuerId && !Number.isNaN(issuerId)) filters.push({ issuerId });
-
-    const assignedToUserId = req.query.assignedToUserId ? parseInt(String(req.query.assignedToUserId), 10) : null;
-    if (assignedToUserId && !Number.isNaN(assignedToUserId)) filters.push({ assignedToUserId });
-
-    // Date range filters the task creation date (createdAt).
-    const createdAtFilter: { gte?: Date; lte?: Date } = {};
-    if (req.query.startDate) {
-      const d = new Date(String(req.query.startDate));
-      if (!Number.isNaN(d.getTime())) createdAtFilter.gte = d;
-    }
-    if (req.query.endDate) {
-      const d = new Date(String(req.query.endDate));
-      if (!Number.isNaN(d.getTime())) {
-        d.setHours(23, 59, 59, 999); // inclusive end-of-day
-        createdAtFilter.lte = d;
-      }
-    }
-    if (createdAtFilter.gte || createdAtFilter.lte) filters.push({ createdAt: createdAtFilter });
-
-    const finalWhere = filters.length > 0 ? { AND: [where, ...filters] } : where;
-
-    const tasks = await prisma.task.findMany({
-      where: finalWhere,
-      orderBy: { updatedAt: 'desc' },
-      include: taskInclude()
-    });
-
-    const taskIds = tasks.map(t => t.id);
-    const lastActivityMap = await getLastActivityMap(taskIds);
-    const recentActivitiesMap = await getRecentActivitiesMap(taskIds);
-
-    const result = tasks.map(t => ({
-      ...enrichTask(t, req.user!),
-      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt,
-      recentActivities: recentActivitiesMap.get(t.id) ?? []
-    }));
-
-    res.json(result);
+    const scope = await buildAllTasksScope(req.user!);
+    const { page, pageSize, skip, take } = parsePagination(req);
+    const { tasks, total } = await fetchTaskPage(scope, buildTaskFilters(req), buildTaskOrderBy(req), skip, take, req.user!);
+    res.json({ tasks, total, page, pageSize });
   } catch (error) {
     console.error('Error fetching tasks:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -430,31 +531,10 @@ export const getTasks = async (req: Request, res: Response): Promise<void> => {
 
 export const getMyTasks = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { userId } = req.user!;
-
-    const tasks = await prisma.task.findMany({
-      where: {
-        deletedAt: null,
-        OR: [
-          { assignedToUserId: userId },
-          { issuerId: userId }
-        ]
-      },
-      orderBy: { updatedAt: 'desc' },
-      include: taskInclude()
-    });
-
-    const taskIds = tasks.map(t => t.id);
-    const lastActivityMap = await getLastActivityMap(taskIds);
-    const recentActivitiesMap = await getRecentActivitiesMap(taskIds);
-
-    const result = tasks.map(t => ({
-      ...enrichTask(t, req.user!),
-      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt,
-      recentActivities: recentActivitiesMap.get(t.id) ?? []
-    }));
-
-    res.json(result);
+    const scope = buildMyTasksScope(req.user!.userId);
+    const { page, pageSize, skip, take } = parsePagination(req);
+    const { tasks, total } = await fetchTaskPage(scope, buildTaskFilters(req), buildTaskOrderBy(req), skip, take, req.user!);
+    res.json({ tasks, total, page, pageSize });
   } catch (error) {
     console.error('Error fetching my tasks:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -465,36 +545,87 @@ export const getMyTasks = async (req: Request, res: Response): Promise<void> => 
 
 export const getUnassignedTasks = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { role, divisionId } = req.user!;
-
-    let where: any = { deletedAt: null, status: 'Unassigned' };
-
-    if (role === 'Director' || role === 'Admin') {
-      // All unassigned tasks system-wide
-    } else {
-      // Staff, Group Leader, Manager: unassigned tasks in their division
-      where.targetDivisionId = divisionId;
-    }
-
-    const tasks = await prisma.task.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: taskInclude()
-    });
-
-    const taskIds = tasks.map(t => t.id);
-    const lastActivityMap = await getLastActivityMap(taskIds);
-    const recentActivitiesMap = await getRecentActivitiesMap(taskIds);
-
-    const result = tasks.map(t => ({
-      ...enrichTask(t, req.user!),
-      lastActivityAt: lastActivityMap.get(t.id) ?? t.updatedAt,
-      recentActivities: recentActivitiesMap.get(t.id) ?? []
-    }));
-
-    res.json(result);
+    const scope = buildUnassignedScope(req.user!);
+    const { page, pageSize, skip, take } = parsePagination(req);
+    // Unassigned defaults to createdAt desc (oldest claimable surfaced predictably).
+    const orderBy = req.query.sortColumn ? buildTaskOrderBy(req) : { createdAt: 'desc' as Prisma.SortOrder };
+    const { tasks, total } = await fetchTaskPage(scope, buildTaskFilters(req), orderBy, skip, take, req.user!);
+    res.json({ tasks, total, page, pageSize });
   } catch (error) {
     console.error('Error fetching unassigned tasks:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/tasks/stats ─────────────────────────────────────────────────────
+// The three tab badges, computed server-side (the page no longer fetches every task
+// to derive them). unassigned = claimable count; my/all attention = needs-attention
+// count within each scope.
+
+export const getTaskStats = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const allScope = await buildAllTasksScope(req.user!);
+    const myScope = buildMyTasksScope(req.user!.userId);
+    const unassignedScope = buildUnassignedScope(req.user!);
+    const attention = attentionFilter();
+
+    const [unassigned, myAttention, allAttention] = await Promise.all([
+      prisma.task.count({ where: unassignedScope }),
+      prisma.task.count({ where: { AND: [myScope, attention] } }),
+      prisma.task.count({ where: { AND: [allScope, attention] } })
+    ]);
+
+    res.json({ unassigned, myAttention, allAttention });
+  } catch (error) {
+    console.error('Error fetching task stats:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/tasks/assignees ─────────────────────────────────────────────────
+// Distinct assignees within the user's All-Tasks scope, for the page's assignee
+// dropdown (which previously derived options from the full in-memory list).
+
+export const getTaskAssignees = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const scope = await buildAllTasksScope(req.user!);
+    const rows = await prisma.task.findMany({
+      where: { AND: [scope, { assignedToUserId: { not: null } }] },
+      distinct: ['assignedToUserId'],
+      select: { assignedToUser: { select: { id: true, name: true } } },
+      orderBy: { assignedToUser: { name: 'asc' } }
+    });
+    const assignees = rows.map((r) => r.assignedToUser).filter((u): u is { id: number; name: string } => u != null);
+    res.json(assignees);
+  } catch (error) {
+    console.error('Error fetching task assignees:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/tasks/options ───────────────────────────────────────────────────
+// Slim task list for pickers (CAPA link / WP task selector) — id + taskId + title +
+// status only, no enrichment/activity. Bounded (optional ?search, capped take) so a
+// dropdown never pulls the full enriched payload.
+
+export const getTaskOptions = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const scope = await buildAllTasksScope(req.user!);
+    const search = req.query.search ? String(req.query.search).trim() : '';
+    const where: Prisma.TaskWhereInput = search
+      ? { AND: [scope, { OR: [{ taskId: { contains: search, mode: 'insensitive' } }, { template: { title: { contains: search, mode: 'insensitive' } } }] }] }
+      : scope;
+
+    const rows = await prisma.task.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { id: true, taskId: true, title: true, status: true, template: { select: { title: true } } }
+    });
+    const options = rows.map((t) => ({ id: t.id, taskId: t.taskId, title: t.title ?? t.template?.title ?? null, status: t.status }));
+    res.json(options);
+  } catch (error) {
+    console.error('Error fetching task options:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -527,6 +658,45 @@ export const getTaskById = async (req: Request, res: Response): Promise<void> =>
     res.json(enrichTask(task, req.user!));
   } catch (error) {
     console.error('Error fetching task:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/tasks/:id/related-findings ────────────────────────────────────────
+// Every finding connected to this task, by any relation: the task raised it
+// (sourceTaskId), the task is a follow-up of it (parentFindingId), or a CAPA
+// action on the finding links to this task. One OR query auto-dedups a task
+// matching several relations. Powers the task page's back-to-finding link and
+// the task quick-view drawer so the route home holds even for CAPA-only tasks
+// (no parentFindingId, not a source). Open-read — consistent with the
+// transparent viewing model used by getTaskById / getTaskActivity.
+export const getRelatedFindings = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseTaskId(req.params.id);
+    if (id === null) { res.status(400).json({ message: 'Invalid task id' }); return; }
+
+    const task = await prisma.task.findUnique({
+      where: { id, deletedAt: null },
+      select: { id: true }
+    });
+    if (!task) { res.status(404).json({ message: 'Task not found' }); return; }
+
+    const findings = await prisma.finding.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { sourceTaskId: id },                                                    // task raised this finding
+          { followUpTasks: { some: { id, deletedAt: null } } },                    // task is a follow-up of it
+          { capaActions: { some: { deletedAt: null, linkedItems: { some: { taskId: id } } } } } // CAPA links to it
+        ]
+      },
+      select: { id: true, status: true, severity: true, description: true },
+      orderBy: { id: 'asc' }
+    });
+
+    res.json(findings);
+  } catch (error) {
+    console.error('Error fetching related findings:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

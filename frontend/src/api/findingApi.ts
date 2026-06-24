@@ -5,6 +5,7 @@ import {
   FindingsListResponse,
   FindingListItem,
   FindingSeverity,
+  FindingStatus,
   RcaInvestigation,
   RcaMethod,
   RcaStatus,
@@ -13,7 +14,6 @@ import {
   CapaAction,
   CapaType,
   CapaStatus,
-  CapaLinkRole,
   CapaTaskLink,
   FindingLinkType,
   FindingLinkRecord,
@@ -38,6 +38,31 @@ export const listFindings = (params: FindingListParams = {}): Promise<FindingsLi
 export const getFindingById = (id: number): Promise<FindingDetail> =>
   apiClient.get(`/findings/${id}`).then((r) => r.data);
 
+// Lightweight, side-effect-free read for inline previews (quick-view drawer).
+// Only the fields the drawer renders — no RCA/CAPA/links/trend, and no
+// due-date-breach logging side effect that getFindingById performs.
+export interface FindingSummary {
+  id: number;
+  findingId: string | null;
+  status: FindingStatus;
+  severity: FindingSeverity | null;
+  description: string;
+  eventType: string;
+  createdAt: string;
+  dueDate: string | null;
+  fieldId: string | null;
+  regulatoryReference: string | null;
+  aircraftRegistrationCode: string | null;
+  aircraftRegistration: { registration: string } | null;
+  reportedByUser: { id: number; name: string } | null;
+  department: { id: number; name: string } | null;
+  ataChapter: { id: number; code: string; title: string } | null;
+  hazardTags: { hazardTag: { id: number; label: string } }[];
+}
+
+export const getFindingSummary = (id: number): Promise<FindingSummary> =>
+  apiClient.get(`/findings/${id}/summary`).then((r) => r.data);
+
 // All findings raised on a given source task (used by the Task detail page).
 export const getFindingsByTask = (taskId: number): Promise<FindingListItem[]> =>
   apiClient.get('/findings', { params: { taskId, pageSize: 100 } }).then((r) => r.data.findings);
@@ -55,10 +80,36 @@ export interface RaiseFindingPayload {
   fieldId?: string;
   ataChapterId?: number;
   hazardTagIds?: number[];
+  // When set, the new finding is parked as a DUPLICATE of this existing finding
+  // (recorded against the task, but no separate investigation).
+  duplicateOfFindingId?: number;
 }
 
 export const raiseFinding = (payload: RaiseFindingPayload): Promise<Finding> =>
   apiClient.post('/findings', payload).then((r) => r.data);
+
+// ─── Raise-time duplicate detection ───────────────────────────────────────────
+
+export interface DuplicateCandidate {
+  id: number;
+  description: string;
+  status: FindingStatus;
+  severity: FindingSeverity | null;
+  eventType: string;
+  createdAt: string;
+}
+
+export interface DuplicateCandidateParams {
+  departmentId: number;
+  taskId?: number;
+  targetDivisionId?: number;
+  ataChapterId?: number;
+  eventType?: string;
+  excludeId?: number;
+}
+
+export const getDuplicateCandidates = (params: DuplicateCandidateParams): Promise<DuplicateCandidate[]> =>
+  apiClient.get('/findings/duplicate-candidates', { params }).then((r) => r.data);
 
 // ─── Review ───────────────────────────────────────────────────────────────────
 
@@ -90,11 +141,33 @@ export const generateFollowUpTasks = (
 
 // ─── Close + workflow escapes ────────────────────────────────────────────────
 
-export const closeFinding = (id: number): Promise<Finding> =>
-  apiClient.put(`/findings/${id}/close`).then((r) => r.data);
+export const closeFinding = (id: number, closureNote: string): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/close`, { closureNote }).then((r) => r.data);
 
 export const advanceFinding = (id: number): Promise<Finding> =>
   apiClient.put(`/findings/${id}/advance`).then((r) => r.data);
+
+// ─── Admin: stuck findings (best-effort Pending-Verification trigger missed) ──
+
+export interface StuckFinding {
+  id: number;
+  description: string;
+  status: string;
+  severity: FindingSeverity | null;
+  dueDate: string | null;
+  reportedByUser?: { id: number; name: string } | null;
+  targetDivision?: { id: number; name: string; code: string } | null;
+  department?: { id: number; name: string } | null;
+  followUpTasks: { id: number; taskId: string | null; status: string }[];
+}
+
+// Admin/Director only — findings still "In Progress" whose follow-up tasks are
+// all final (the auto-advance hook did not fire). 403 for everyone else.
+export const getStuckFindings = (): Promise<StuckFinding[]> =>
+  apiClient.get('/findings/admin/stuck').then((r) => r.data);
+
+export const forcePendingVerification = (id: number): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/force-pending-verification`).then((r) => r.data);
 
 export const dismissFinding = (id: number, reason: string): Promise<Finding> =>
   apiClient.put(`/findings/${id}/dismiss`, { reason }).then((r) => r.data);
@@ -110,6 +183,31 @@ export const updateFindingTaxonomy = (
   payload: { ataChapterId?: number | null; hazardTagIds?: number[] }
 ): Promise<Finding> =>
   apiClient.put(`/findings/${id}/taxonomy`, payload).then((r) => r.data);
+
+// Enrich a finding's optional context post-raise (ATA, hazard tags, aircraft,
+// regulatory ref, field ref) — feeds monitoring + trend analysis. Editable by
+// the reporter, a follow-up assignee, or a reviewer while not Closed/Dismissed.
+export interface UpdateFindingDetailsPayload {
+  ataChapterId?: number | null;
+  hazardTagIds?: number[];
+  aircraftRegistrationCode?: string | null;
+  regulatoryReference?: string | null;
+  fieldId?: string | null;
+}
+
+export const updateFindingDetails = (
+  id: number,
+  payload: UpdateFindingDetailsPayload
+): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/details`, payload).then((r) => r.data);
+
+// Director-only: change a finding's review/SLA due date after it is set, with a
+// mandatory reason. The change is audited (DUE_DATE_UPDATED).
+export const updateFindingDueDate = (
+  id: number,
+  payload: { dueDate: string; reason: string }
+): Promise<Finding> =>
+  apiClient.put(`/findings/${id}/due-date`, payload).then((r) => r.data);
 
 // ─── RCA (Root Cause Analysis) ────────────────────────────────────────────────
 
@@ -156,8 +254,8 @@ export const updateCapa = (
 ): Promise<CapaAction> =>
   apiClient.put(`/findings/${id}/capa/${capaId}`, payload).then((r) => r.data);
 
-export const verifyCapa = (id: number, capaId: number): Promise<CapaAction> =>
-  apiClient.put(`/findings/${id}/capa/${capaId}/verify`).then((r) => r.data);
+export const verifyCapa = (id: number, capaId: number, effectivenessNote: string): Promise<CapaAction> =>
+  apiClient.put(`/findings/${id}/capa/${capaId}/verify`, { effectivenessNote }).then((r) => r.data);
 
 export const waiveCapa = (id: number, capaId: number, waivedReason: string): Promise<CapaAction> =>
   apiClient.put(`/findings/${id}/capa/${capaId}/waive`, { waivedReason }).then((r) => r.data);
@@ -168,7 +266,7 @@ export const deleteCapa = (id: number, capaId: number): Promise<void> =>
 export const addCapaLink = (
   findingId: number,
   capaId: number,
-  payload: { role: CapaLinkRole; taskId?: number; wpId?: number }
+  payload: { mandatory: boolean; taskId?: number; wpId?: number }
 ): Promise<CapaTaskLink> =>
   apiClient.post(`/findings/${findingId}/capa/${capaId}/links`, payload).then((r) => r.data);
 

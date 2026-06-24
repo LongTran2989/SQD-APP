@@ -15,6 +15,7 @@ import {
 import toast from 'react-hot-toast';
 import { AlertTriangle, ClipboardList, PlusCircle } from 'lucide-react';
 import RaiseFindingPanel from '../../../components/findings/RaiseFindingPanel';
+import { formatDueDate } from '../../../utils/dateFormat';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -254,7 +255,7 @@ export default function FindingsListPage() {
                     </td>
                     <td className="p-4 align-middle text-sm">
                       <span className={f.dueDateBreached ? 'text-red-600 font-semibold' : 'text-slate-600'}>
-                        {formatDate(f.dueDate)}
+                        {formatDueDate(f.dueDate)}
                       </span>
                     </td>
                     <td className="p-4 align-middle text-sm text-slate-600">

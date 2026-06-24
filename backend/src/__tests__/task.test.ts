@@ -1131,8 +1131,8 @@ describe('Task Backend (Phase 5.2)', () => {
         .get('/api/tasks?statuses=Unassigned')
         .set('Authorization', `Bearer ${directorToken}`);
       expect(res.status).toBe(200);
-      expect(res.body.length).toBeGreaterThan(0);
-      expect(res.body.every((t: { status: string }) => t.status === 'Unassigned')).toBe(true);
+      expect(res.body.tasks.length).toBeGreaterThan(0);
+      expect(res.body.tasks.every((t: { status: string }) => t.status === 'Unassigned')).toBe(true);
     });
 
     it('PR5-B: filter by assignedToUserId', async () => {
@@ -1141,14 +1141,59 @@ describe('Task Backend (Phase 5.2)', () => {
         .get(`/api/tasks?assignedToUserId=${staffId}`)
         .set('Authorization', `Bearer ${directorToken}`);
       expect(res.status).toBe(200);
-      expect(res.body.every((t: { assignedToUserId: number }) => t.assignedToUserId === staffId)).toBe(true);
+      expect(res.body.tasks.every((t: { assignedToUserId: number }) => t.assignedToUserId === staffId)).toBe(true);
     });
 
     it('PR5-C: list includes lastActivityAt', async () => {
       const res = await request(app).get('/api/tasks').set('Authorization', `Bearer ${directorToken}`);
       expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('total');
+      if (res.body.tasks.length > 0) {
+        expect(res.body.tasks[0]).toHaveProperty('lastActivityAt');
+      }
+    });
+
+    it('P5: paginates — pageSize caps the page and total reflects the full match count', async () => {
+      for (let i = 0; i < 3; i++) {
+        await prisma.task.create({ data: { taskId: `TSK-PG${i}${Date.now() % 100000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      }
+      const res = await request(app).get('/api/tasks?pageSize=2&page=1').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.pageSize).toBe(2);
+      expect(res.body.page).toBe(1);
+      expect(res.body.tasks.length).toBeLessThanOrEqual(2);
+      expect(res.body.total).toBeGreaterThanOrEqual(3);
+    });
+
+    it('P5: GET /api/tasks/stats returns the three badge counts', async () => {
+      const res = await request(app).get('/api/tasks/stats').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('unassigned');
+      expect(res.body).toHaveProperty('myAttention');
+      expect(res.body).toHaveProperty('allAttention');
+      expect(typeof res.body.unassigned).toBe('number');
+    });
+
+    it('P5: GET /api/tasks/assignees returns distinct {id,name} in scope', async () => {
+      await prisma.task.create({ data: { taskId: `TSK-AS${Date.now() % 100000}`, templateId: publishedTemplateId, issuerId: managerId, assignedToUserId: staffId, targetDivisionId: divisionId, status: 'Assigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      const res = await request(app).get('/api/tasks/assignees').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      const ids = res.body.map((u: { id: number }) => u.id);
+      expect(new Set(ids).size).toBe(ids.length); // distinct
+      expect(res.body.every((u: any) => 'id' in u && 'name' in u)).toBe(true);
+    });
+
+    it('P5: GET /api/tasks/options returns a slim picker list (no enrichment)', async () => {
+      await prisma.task.create({ data: { taskId: `TSK-OP${Date.now() % 100000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      const res = await request(app).get('/api/tasks/options').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
       if (res.body.length > 0) {
-        expect(res.body[0]).toHaveProperty('lastActivityAt');
+        const o = res.body[0];
+        expect(o).toHaveProperty('taskId');
+        expect(o).toHaveProperty('status');
+        expect(o).not.toHaveProperty('lastActivityAt'); // slim, not enriched
       }
     });
 
@@ -2154,7 +2199,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`);
 
       expect(res.status).toBe(200);
-      const found = res.body.find((t: any) => t.id === task.id);
+      const found = res.body.tasks.find((t: any) => t.id === task.id);
       expect(found).toBeUndefined();
     });
 
@@ -2214,7 +2259,7 @@ describe('Task Backend (Phase 5.2)', () => {
 
       expect(res.status).toBe(200);
       // Every returned task must have staff as assignee or issuer
-      res.body.forEach((t: any) => {
+      res.body.tasks.forEach((t: any) => {
         expect(
           t.assignedToUser?.id === staffId || t.issuer?.id === staffId
         ).toBe(true);
@@ -2252,8 +2297,8 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`);
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      res.body.forEach((t: any) => {
+      expect(Array.isArray(res.body.tasks)).toBe(true);
+      res.body.tasks.forEach((t: any) => {
         expect(t.status).toBe('Unassigned');
       });
     });

@@ -48,7 +48,7 @@ REM Terminal 2 — Backend (http://localhost:5000)
 cd backend && npm run dev
 ```
 
-**Master user:** `director@sqd.com` / `password123` (Director role)
+**Master user:** login by **employeeId** `VAE00071` / `Abc@12345` (Director role). The seed sets `forcePasswordChange: true`, so a fresh DB forces a password change on first login. (`email` is optional, notifications-only — it is NOT the login field. The old `director@sqd.com` / `password123` was never valid against the seed.)
 
 ---
 

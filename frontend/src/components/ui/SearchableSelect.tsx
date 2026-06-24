@@ -18,6 +18,10 @@ interface SearchableSelectProps {
   clearLabel?: string;
   disabled?: boolean;
   id?: string;
+  /** Notified as the user types, so the parent can fetch options server-side
+   *  (e.g. for lists too large to load up front). Internal client-side filtering
+   *  of `options` still applies on top. */
+  onQueryChange?: (query: string) => void;
 }
 
 export default function SearchableSelect({
@@ -29,6 +33,7 @@ export default function SearchableSelect({
   clearLabel = 'None',
   disabled = false,
   id,
+  onQueryChange,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -165,7 +170,7 @@ export default function SearchableSelect({
                 aria-controls={listboxId}
                 aria-activedescendant={activeDescendant}
                 value={query}
-                onChange={(e) => { setQuery(e.target.value); setFocusedIndex(-1); }}
+                onChange={(e) => { setQuery(e.target.value); setFocusedIndex(-1); onQueryChange?.(e.target.value); }}
                 onKeyDown={handleSearchKeyDown}
                 placeholder="Type to search…"
                 className="flex-1 bg-transparent text-sm text-slate-700 placeholder-slate-400 outline-none"
@@ -174,7 +179,7 @@ export default function SearchableSelect({
                 <button
                   type="button"
                   aria-label="Clear search"
-                  onClick={() => { setQuery(''); setFocusedIndex(-1); inputRef.current?.focus(); }}
+                  onClick={() => { setQuery(''); setFocusedIndex(-1); onQueryChange?.(''); inputRef.current?.focus(); }}
                   className="flex-shrink-0"
                 >
                   <X className="w-3.5 h-3.5 text-slate-400 hover:text-slate-600" aria-hidden="true" />
