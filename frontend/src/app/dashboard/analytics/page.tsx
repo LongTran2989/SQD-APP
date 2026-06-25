@@ -1,11 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { BarChart2, Star, AlertTriangle, Clock, ClipboardList, Users } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { BarChart2, Star, Clock, ClipboardList, Users } from 'lucide-react';
 import {
   getTimeBookingAnalytics,
   TimeBookingAnalytics,
 } from '../../../api/taskApi';
+import {
+  EfficiencyBadge,
+  ErrorState,
+  LoadingState,
+  analyticsErrorMessage,
+  formatHours,
+} from './shared';
 import FindingsTab from './FindingsTab';
 import PersonnelTab from './PersonnelTab';
 
@@ -24,30 +31,6 @@ function reasonLabel(reason: string | null): string {
   return REASON_LABELS[reason] ?? reason;
 }
 
-function formatHours(h: number | null): string {
-  if (h === null) return '—';
-  return h % 1 === 0 ? `${h}h` : `${h.toFixed(1)}h`;
-}
-
-// Efficiency ratio badge — green when on/under budget (<= 1.0), red when over.
-function EfficiencyBadge({ ratio }: { ratio: number | null }) {
-  if (ratio === null) {
-    return <span className="text-slate-400">N/A</span>;
-  }
-  const over = ratio > 1.0;
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-        over
-          ? 'bg-red-50 text-red-600 border border-red-200'
-          : 'bg-green-50 text-green-600 border border-green-200'
-      }`}
-    >
-      {ratio.toFixed(2)}×
-    </span>
-  );
-}
-
 // ─── Time Booking tab ───────────────────────────────────────────────────────
 
 function TimeBookingTab() {
@@ -62,14 +45,7 @@ function TimeBookingTab() {
         if (!cancelled) setData(d);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          const status = (err as { response?: { status?: number } })?.response?.status;
-          setError(
-            status === 403
-              ? 'You do not have permission to view analytics.'
-              : 'Failed to load analytics. Please try again.'
-          );
-        }
+        if (!cancelled) setError(analyticsErrorMessage(err, 'analytics'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -79,26 +55,8 @@ function TimeBookingTab() {
     };
   }, []);
 
-  // ── Loading ──
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-      </div>
-    );
-  }
-
-  // ── Error ──
-  if (error || !data) {
-    return (
-      <div className="max-w-xl mx-auto mt-16 text-center space-y-4">
-        <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto">
-          <AlertTriangle className="w-8 h-8 text-red-400" />
-        </div>
-        <h1 className="text-xl font-bold text-slate-800">{error ?? 'Something went wrong'}</h1>
-      </div>
-    );
-  }
+  if (loading) return <LoadingState />;
+  if (error || !data) return <ErrorState message={error ?? 'Something went wrong'} />;
 
   // ── Sorting (templates: efficiency desc, nulls last · staff: rating desc, nulls last) ──
   const templates = [...data.templates].sort((a, b) => {
@@ -119,52 +77,55 @@ function TimeBookingTab() {
     <div className="space-y-6">
       {/* Incomplete bookings notice */}
       {data.incompleteBookings > 0 && (
-        <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+        <div className="flex items-center gap-2 px-4 py-3 bg-amber-caution-surface border border-amber-caution/30 rounded-xl text-sm text-amber-caution">
+          <AlertTriangleInline />
           {data.incompleteBookings} closed task{data.incompleteBookings === 1 ? '' : 's'}{' '}
           {data.incompleteBookings === 1 ? 'is' : 'are'} missing a time booking and excluded from efficiency data.
         </div>
       )}
 
       {/* Template Efficiency */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="p-5 border-b border-slate-100">
-          <h2 className="text-lg font-semibold text-slate-700">Template Efficiency</h2>
+          <h2 className="text-lg font-semibold text-ink-primary">Template Efficiency</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
+            <caption className="sr-only">
+              Average actual versus estimated hours and efficiency ratio per template.
+            </caption>
             <thead>
-              <tr className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-50">
-                <th className="px-5 py-3">Template ID</th>
-                <th className="px-5 py-3">Title</th>
-                <th className="px-5 py-3 text-right">Tasks</th>
-                <th className="px-5 py-3 text-right">Avg Actual</th>
-                <th className="px-5 py-3 text-right">Avg Estimated</th>
-                <th className="px-5 py-3 text-center">Efficiency</th>
-                <th className="px-5 py-3 text-right">Over-Budget</th>
-                <th className="px-5 py-3">Top Reason</th>
+              <tr className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider bg-slate-50">
+                <th scope="col" className="px-5 py-3">Template ID</th>
+                <th scope="col" className="px-5 py-3">Title</th>
+                <th scope="col" className="px-5 py-3 text-right">Tasks</th>
+                <th scope="col" className="px-5 py-3 text-right">Avg Actual</th>
+                <th scope="col" className="px-5 py-3 text-right">Avg Estimated</th>
+                <th scope="col" className="px-5 py-3 text-center">Efficiency</th>
+                <th scope="col" className="px-5 py-3 text-right">Over-Budget</th>
+                <th scope="col" className="px-5 py-3">Top Reason</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {templates.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-8 text-center text-slate-400">
+                  <td colSpan={8} className="px-5 py-8 text-center text-ink-secondary">
                     No completed tasks with time data yet.
                   </td>
                 </tr>
               ) : (
                 templates.map((t) => (
                   <tr key={t.templateId} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-3 font-mono font-semibold text-slate-600">{t.templateCode}</td>
-                    <td className="px-5 py-3 text-slate-700">{t.title}</td>
-                    <td className="px-5 py-3 text-right text-slate-700">{t.taskCount}</td>
-                    <td className="px-5 py-3 text-right text-slate-700">{formatHours(t.avgActualHours)}</td>
-                    <td className="px-5 py-3 text-right text-slate-700">{formatHours(t.estimatedHours)}</td>
+                    <th scope="row" className="px-5 py-3 font-mono font-semibold text-ink-secondary text-left">{t.templateCode}</th>
+                    <td className="px-5 py-3 text-ink-primary">{t.title}</td>
+                    <td className="px-5 py-3 text-right text-ink-primary">{t.taskCount}</td>
+                    <td className="px-5 py-3 text-right text-ink-primary">{formatHours(t.avgActualHours)}</td>
+                    <td className="px-5 py-3 text-right text-ink-primary">{formatHours(t.estimatedHours)}</td>
                     <td className="px-5 py-3 text-center">
                       <EfficiencyBadge ratio={t.efficiencyRatio} />
                     </td>
-                    <td className="px-5 py-3 text-right text-slate-700">{t.overBudgetCount}</td>
-                    <td className="px-5 py-3 text-slate-600">{reasonLabel(t.topOverBudgetReason)}</td>
+                    <td className="px-5 py-3 text-right text-ink-primary">{t.overBudgetCount}</td>
+                    <td className="px-5 py-3 text-ink-secondary">{reasonLabel(t.topOverBudgetReason)}</td>
                   </tr>
                 ))
               )}
@@ -174,52 +135,50 @@ function TimeBookingTab() {
       </div>
 
       {/* Staff Performance */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="p-5 border-b border-slate-100">
-          <h2 className="text-lg font-semibold text-slate-700">Staff Performance</h2>
+          <h2 className="text-lg font-semibold text-ink-primary">Staff Performance</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
+            <caption className="sr-only">Average rating and efficiency per staff member.</caption>
             <thead>
-              <tr className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-50">
-                <th className="px-5 py-3">Name</th>
-                <th className="px-5 py-3 text-center">Avg Rating</th>
-                <th className="px-5 py-3 text-right">Tasks Rated</th>
-                <th className="px-5 py-3 text-center">Avg Efficiency</th>
+              <tr className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider bg-slate-50">
+                <th scope="col" className="px-5 py-3">Name</th>
+                <th scope="col" className="px-5 py-3 text-center">Avg Rating</th>
+                <th scope="col" className="px-5 py-3 text-right">Tasks Rated</th>
+                <th scope="col" className="px-5 py-3 text-center">Avg Efficiency</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {staff.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-8 text-center text-slate-400">
+                  <td colSpan={4} className="px-5 py-8 text-center text-ink-secondary">
                     No rated tasks yet.
                   </td>
                 </tr>
               ) : (
                 staff.map((s) => (
                   <tr key={s.userId} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-3 text-slate-700 font-medium">{s.name}</td>
+                    <th scope="row" className="px-5 py-3 text-ink-primary font-medium text-left">{s.name}</th>
                     <td className="px-5 py-3 text-center">
                       {s.avgRating === null ? (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-ink-muted" aria-label="No rating">—</span>
                       ) : (
                         <span
                           className={`inline-flex items-center gap-1 font-semibold ${
-                            s.avgRating >= 4 ? 'text-amber-500' : 'text-slate-500'
+                            s.avgRating >= 4 ? 'text-amber-caution' : 'text-ink-secondary'
                           }`}
+                          aria-label={`Average rating ${s.avgRating.toFixed(1)} out of 5`}
                         >
-                          <Star className="w-3.5 h-3.5 fill-current" />
+                          <Star className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
                           {s.avgRating.toFixed(1)}
                         </span>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-right text-slate-700">{s.ratedTaskCount}</td>
+                    <td className="px-5 py-3 text-right text-ink-primary">{s.ratedTaskCount}</td>
                     <td className="px-5 py-3 text-center">
-                      {s.avgEfficiencyRatio === null ? (
-                        <span className="text-slate-400">—</span>
-                      ) : (
-                        <EfficiencyBadge ratio={s.avgEfficiencyRatio} />
-                      )}
+                      <EfficiencyBadge ratio={s.avgEfficiencyRatio} />
                     </td>
                   </tr>
                 ))
@@ -229,6 +188,16 @@ function TimeBookingTab() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Small inline caution glyph for the incomplete-bookings notice (inherits
+// currentColor so it tracks the amber-caution text).
+function AlertTriangleInline() {
+  return (
+    <svg viewBox="0 0 24 24" className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+    </svg>
   );
 }
 
@@ -244,36 +213,54 @@ const TABS: { key: TabKey; label: string; icon: typeof Clock }[] = [
 
 export default function AnalyticsPage() {
   const [tab, setTab] = useState<TabKey>('time');
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Roving arrow-key navigation across the tablist (WAI-ARIA Tabs pattern).
+  const onTabKeyDown = (e: React.KeyboardEvent, index: number) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
+    const next = (index + dir + TABS.length) % TABS.length;
+    setTab(TABS[next].key);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-        <div className="p-3 bg-blue-50 rounded-xl">
-          <BarChart2 className="w-7 h-7 text-blue-600" />
+      <div className="bg-white p-8 rounded-2xl border border-slate-200 flex items-center gap-4">
+        <div className="p-3 bg-slate-100 rounded-xl">
+          <BarChart2 className="w-7 h-7 text-ink-secondary" aria-hidden="true" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Analytics</h1>
-          <p className="text-slate-500">Time efficiency, staff performance, and findings trends.</p>
+          <h1 className="text-2xl font-bold text-ink-primary text-balance">Analytics</h1>
+          <p className="text-ink-secondary">Time efficiency, staff performance, and findings trends.</p>
         </div>
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-slate-200">
-        {TABS.map(({ key, label, icon: Icon }) => {
+      <div role="tablist" aria-label="Analytics views" className="flex gap-1 border-b border-slate-200">
+        {TABS.map(({ key, label, icon: Icon }, i) => {
           const active = tab === key;
           return (
             <button
               key={key}
+              ref={(el) => { tabRefs.current[i] = el; }}
               type="button"
+              role="tab"
+              id={`tab-${key}`}
+              aria-selected={active}
+              aria-controls={`panel-${key}`}
+              tabIndex={active ? 0 : -1}
               onClick={() => setTab(key)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              onKeyDown={(e) => onTabKeyDown(e, i)}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors rounded-t-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue focus-visible:ring-offset-1 ${
                 active
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
+                  ? 'border-signal-blue text-signal-blue'
+                  : 'border-transparent text-ink-secondary hover:text-ink-primary'
               }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="w-4 h-4" aria-hidden="true" />
               {label}
             </button>
           );
@@ -281,9 +268,19 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Active tab */}
-      {tab === 'time' && <TimeBookingTab />}
-      {tab === 'findings' && <FindingsTab />}
-      {tab === 'personnel' && <PersonnelTab />}
+      {TABS.map(({ key }) => (
+        <div
+          key={key}
+          role="tabpanel"
+          id={`panel-${key}`}
+          aria-labelledby={`tab-${key}`}
+          hidden={tab !== key}
+        >
+          {tab === key && key === 'time' && <TimeBookingTab />}
+          {tab === key && key === 'findings' && <FindingsTab />}
+          {tab === key && key === 'personnel' && <PersonnelTab />}
+        </div>
+      ))}
     </div>
   );
 }

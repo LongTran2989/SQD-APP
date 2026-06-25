@@ -1,25 +1,29 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
 import { getFindingsAnalytics, FindingsAnalytics } from '../../../api/taskApi';
+import { ErrorState, LoadingState, analyticsErrorMessage } from './shared';
 
 // ─── Display helpers ────────────────────────────────────────────────────────
 
-// Per-bucket bar colours (Tailwind classes). Falls back to blue for dynamic
-// taxonomies (eventType / department / ATA) where there is no fixed palette.
+// Per-bucket bar colours, drawn ONLY from the closed design-system palette
+// (signal-blue / amber-caution / red-finding / emerald-clear / slate neutral).
+// Where there are more buckets than tiers, the always-present category label
+// and numeric count disambiguate — colour reinforces, it is never the sole
+// signal (WCAG 1.4.1). Dynamic taxonomies (eventType / department / ATA) have
+// no fixed meaning and fall back to signal-blue.
 const SEVERITY_COLORS: Record<string, string> = {
-  Observation: 'bg-sky-500',
-  'Level 1': 'bg-amber-500',
-  'Level 2': 'bg-red-500',
+  Observation: 'bg-signal-blue',
+  'Level 1': 'bg-amber-caution',
+  'Level 2': 'bg-red-finding',
   Unreviewed: 'bg-slate-400',
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  Open: 'bg-blue-500',
-  'In Progress': 'bg-indigo-500',
-  'Pending Verification': 'bg-amber-500',
-  Closed: 'bg-green-500',
+  Open: 'bg-signal-blue',
+  'In Progress': 'bg-amber-caution',
+  'Pending Verification': 'bg-amber-caution/60',
+  Closed: 'bg-emerald-clear',
   Dismissed: 'bg-slate-400',
 };
 
@@ -29,49 +33,54 @@ interface BarItem {
   color?: string;
 }
 
-// Horizontal proportional bar list — no charting library, SSR-safe.
+// Horizontal proportional bar list — no charting library, SSR-safe. Rendered as
+// a description list so each row reads as "label: count" to a screen reader.
 function BarList({ items }: { items: BarItem[] }) {
   if (items.length === 0) {
-    return <p className="text-sm text-slate-400 px-1 py-2">No data.</p>;
+    return <p className="text-sm text-ink-secondary px-1 py-2">No data.</p>;
   }
   const max = Math.max(1, ...items.map((i) => i.count));
   return (
-    <div className="space-y-2.5">
+    <dl className="space-y-2.5">
       {items.map((i) => (
         <div key={i.label} className="flex items-center gap-3 text-sm">
-          <div className="w-36 shrink-0 truncate text-slate-600" title={i.label}>
+          <dt className="w-36 shrink-0 truncate text-ink-secondary" title={i.label}>
             {i.label}
-          </div>
-          <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+          </dt>
+          <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden" aria-hidden="true">
             <div
-              className={`h-full rounded-full ${i.color ?? 'bg-blue-500'}`}
+              className={`h-full rounded-full ${i.color ?? 'bg-signal-blue'}`}
               style={{ width: `${(i.count / max) * 100}%`, minWidth: i.count > 0 ? '0.5rem' : 0 }}
             />
           </div>
-          <div className="w-8 text-right tabular-nums font-semibold text-slate-700">{i.count}</div>
+          <dd className="w-8 text-right tabular-nums font-semibold text-ink-primary">{i.count}</dd>
         </div>
       ))}
-    </div>
+    </dl>
   );
 }
 
-// Vertical mini bar chart for the monthly recurrence trend.
+// Vertical mini bar chart for the monthly recurrence trend. The bar geometry is
+// decorative; the accessible name carries the full month/count series.
 function MonthTrend({ items }: { items: { month: string; count: number }[] }) {
   if (items.length === 0) {
-    return <p className="text-sm text-slate-400 px-1 py-2">No findings yet.</p>;
+    return <p className="text-sm text-ink-secondary px-1 py-2">No findings yet.</p>;
   }
   const max = Math.max(1, ...items.map((i) => i.count));
   return (
-    <div className="flex items-end gap-2 h-44 pt-2">
+    <div
+      className="flex items-end gap-2 h-44 pt-2"
+      role="img"
+      aria-label={`Findings raised per month: ${items.map((i) => `${i.month} ${i.count}`).join(', ')}`}
+    >
       {items.map((i) => (
         <div key={i.month} className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0">
-          <span className="text-xs text-slate-500 tabular-nums">{i.count}</span>
+          <span className="text-xs text-ink-secondary tabular-nums">{i.count}</span>
           <div
-            className="w-full max-w-[2.5rem] bg-blue-500 rounded-t"
+            className="w-full max-w-[2.5rem] bg-signal-blue rounded-t"
             style={{ height: `${(i.count / max) * 100}%`, minHeight: i.count > 0 ? '4px' : 0 }}
-            title={`${i.month}: ${i.count}`}
           />
-          <span className="text-[10px] text-slate-400 truncate w-full text-center" title={i.month}>
+          <span className="text-[10px] text-ink-secondary truncate w-full text-center" title={i.month}>
             {i.month.slice(2)}
           </span>
         </div>
@@ -82,19 +91,19 @@ function MonthTrend({ items }: { items: { month: string; count: number }[] }) {
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
-      <p className="text-2xl font-bold text-slate-800 mt-1">{value}</p>
-      {hint && <p className="text-xs text-slate-400 mt-1">{hint}</p>}
+    <div className="bg-white rounded-xl border border-slate-200 p-5">
+      <p className="text-xs font-semibold text-ink-secondary uppercase tracking-wider">{label}</p>
+      <p className="text-2xl font-bold text-ink-primary mt-1">{value}</p>
+      {hint && <p className="text-xs text-ink-secondary mt-1">{hint}</p>}
     </div>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div className="p-5 border-b border-slate-100">
-        <h2 className="text-lg font-semibold text-slate-700">{title}</h2>
+        <h2 className="text-lg font-semibold text-ink-primary">{title}</h2>
       </div>
       <div className="p-5">{children}</div>
     </div>
@@ -115,14 +124,7 @@ export default function FindingsTab() {
         if (!cancelled) setData(d);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          const status = (err as { response?: { status?: number } })?.response?.status;
-          setError(
-            status === 403
-              ? 'You do not have permission to view analytics.'
-              : 'Failed to load findings analytics. Please try again.'
-          );
-        }
+        if (!cancelled) setError(analyticsErrorMessage(err, 'findings analytics'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -132,29 +134,16 @@ export default function FindingsTab() {
     };
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <div className="max-w-xl mx-auto mt-16 text-center space-y-4">
-        <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto">
-          <AlertTriangle className="w-8 h-8 text-red-400" />
-        </div>
-        <h1 className="text-xl font-bold text-slate-800">{error ?? 'Something went wrong'}</h1>
-      </div>
-    );
-  }
+  if (loading) return <LoadingState />;
+  if (error || !data) return <ErrorState message={error ?? 'Something went wrong'} />;
 
   if (data.totalCount === 0) {
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-12 text-center text-slate-400">
-        No findings to report yet.
+      <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+        <p className="text-ink-primary font-medium">No findings to report yet.</p>
+        <p className="text-sm text-ink-secondary mt-1">
+          Severity, status, and recurrence trends appear here once findings are raised against tasks.
+        </p>
       </div>
     );
   }
