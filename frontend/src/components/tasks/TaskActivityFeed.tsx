@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { TaskEnriched, TaskActivityEnriched, FeedPostType, EscalationTargetScope, User } from '../../types';
+import { TaskEnriched, TaskActivityEnriched, FeedPostType, EscalationTargetScope, User, MentionUser } from '../../types';
 import { postTaskComment, getTaskActivityPage } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
 import FlagButton from '../feed/FlagButton';
 import FeedFilterBar from '../feed/FeedFilterBar';
 import CommentModerationMenu from '../feed/CommentModerationMenu';
+import MentionField from '../feed/MentionField';
+import MentionsLine from '../feed/MentionsLine';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
@@ -45,6 +47,7 @@ export default function TaskActivityFeed({
   const feedRef = useRef<HTMLDivElement>(null);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
+  const [mentionSel, setMentionSel] = useState<MentionUser[]>([]);
   // Older entries loaded via "Load earlier" — kept separate from the parent-owned
   // `activities` (the newest page) so the parent's refresh logic stays untouched.
   // cursor: undefined = unknown (button shown optimistically), number = more
@@ -159,9 +162,10 @@ export default function TaskActivityFeed({
     if (!comment.trim()) return;
     setPosting(true);
     try {
-      const newActivity = await postTaskComment(task.id, comment.trim());
+      const newActivity = await postTaskComment(task.id, comment.trim(), mentionSel.map((m) => m.id));
       onNewActivity(newActivity);
       setComment('');
+      setMentionSel([]);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg || 'Failed to post comment');
@@ -277,6 +281,7 @@ export default function TaskActivityFeed({
                   }`}>
                     {entry.content}
                   </div>
+                  <MentionsLine mentions={entry.mentions} />
                 </div>
               </div>
             );
@@ -315,6 +320,9 @@ export default function TaskActivityFeed({
                 )}
               </button>
             </div>
+          </div>
+          <div className="mt-2 pl-10">
+            <MentionField selected={mentionSel} onChange={setMentionSel} />
           </div>
         </div>
       )}

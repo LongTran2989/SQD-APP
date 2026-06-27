@@ -6,6 +6,7 @@ import EscalationCard from './EscalationCard';
 import InfoCard from './InfoCard';
 import FlagButton from './FlagButton';
 import CommentModerationMenu from './CommentModerationMenu';
+import MentionsLine from './MentionsLine';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -100,6 +101,7 @@ export default function FeedPostItem({ post, currentUserId, flagTargets, onFlagg
         >
           {post.content}
         </div>
+        <MentionsLine mentions={post.mentions} />
       </div>
     </div>
   );

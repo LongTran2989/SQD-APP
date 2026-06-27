@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
-import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes } from '../services/feedService';
-import { createNotifications, notifyFeedWatchers } from '../services/notificationService';
+import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes, resolveMentions, mentionIdsFromMetadata } from '../services/feedService';
+import { createNotifications, notifyFeedWatchers, notifyMentions } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS, TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
@@ -2450,11 +2450,16 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
     res.setHeader('X-Next-Cursor', nextCursor != null ? String(nextCursor) : '');
     const activities = rows.reverse();
 
-    // Enrich with author name where authorId is present
-    const authorIds = [...new Set(activities.map(a => a.authorId).filter(Boolean))] as number[];
+    // Enrich with author name + mention names (Phase E) where present.
+    const mentionIdsByPost = new Map(activities.map(a => [a.id, mentionIdsFromMetadata(a.metadata)]));
+    const allMentionIds = [...new Set([...mentionIdsByPost.values()].flat())];
+    const authorIds = [...new Set([
+      ...activities.map(a => a.authorId).filter((id): id is number => typeof id === 'number'),
+      ...allMentionIds,
+    ])];
     const authors = authorIds.length > 0
       ? await prisma.user.findMany({
-          where: { id: { in: authorIds } },
+          where: { id: { in: authorIds }, deletedAt: null },
           select: { id: true, name: true }
         })
       : [];
@@ -2466,6 +2471,9 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
       author: a.authorId ? { id: a.authorId, name: authorMap.get(a.authorId) ?? null } : null,
       hidden: a.hiddenAt != null,
       pinned: a.pinnedAt != null, // always false for TASK (not pinnable) — kept for shape parity
+      mentions: (mentionIdsByPost.get(a.id) ?? [])
+        .filter((id) => authorMap.has(id))
+        .map((id) => ({ id, name: authorMap.get(id) ?? null })),
     }));
 
     res.json(enriched);
@@ -2507,12 +2515,17 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
 
     // Access control: Anyone can comment on tasks (Transparent commenting model)
 
+    // @mentions (Phase E): validate ids → real users, store + notify.
+    const mentions = await resolveMentions(prisma, req.body?.mentionUserIds);
+    const mentionIds = mentions.map((m) => m.id);
+
     const activity = await createFeedPost(prisma, {
       type: 'COMMENT',
       scope: 'TASK',
       scopeId: id,
       content: content.trim(),
-      authorId: userId
+      authorId: userId,
+      metadata: mentionIds.length ? { mentions: mentionIds } : undefined,
     });
 
     // Notify task watchers (issuer + assignee) of the new comment — best-effort.
@@ -2524,9 +2537,13 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
       select: { id: true, name: true }
     });
 
+    // Notify mentioned users (excludes the author) — best-effort.
+    await notifyMentions(prisma, mentionIds, userId, 'TASK', id, content.trim(), author?.name ?? `User ${userId}`);
+
     res.status(201).json({
       ...activity,
-      author: author ? { id: author.id, name: author.name } : null
+      author: author ? { id: author.id, name: author.name } : null,
+      mentions,
     });
   } catch (error) {
     console.error('Error posting task comment:', error);

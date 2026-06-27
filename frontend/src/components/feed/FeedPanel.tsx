@@ -3,11 +3,12 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { MessageCircle, Send, Pin } from 'lucide-react';
-import { FeedPostEnriched, FeedScope, FeedPostType, EscalationTargetScope, User } from '../../types';
+import { FeedPostEnriched, FeedScope, FeedPostType, EscalationTargetScope, User, MentionUser } from '../../types';
 import { getFeedPage, getPinnedFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
 import { getApiErrorMessage } from '../../utils/apiError';
 import FeedPostItem from './FeedPostItem';
 import FeedFilterBar from './FeedFilterBar';
+import MentionField from './MentionField';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
@@ -37,6 +38,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
+  const [mentionSel, setMentionSel] = useState<MentionUser[]>([]);
 
   // Moderation rights (Phase D). Hide/unhide is Director/Admin; pin/unpin mirrors
   // posting rights and is only offered on the pinnable (WP/Division/Org) scopes.
@@ -140,9 +142,10 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
     if (!comment.trim()) return;
     setPosting(true);
     try {
-      const created = await postFeedComment(scope, scopeId, comment.trim());
+      const created = await postFeedComment(scope, scopeId, comment.trim(), mentionSel.map((m) => m.id));
       setPosts((prev) => [...prev, created]);
       setComment('');
+      setMentionSel([]);
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Failed to post comment'));
     } finally {
@@ -262,6 +265,9 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
                 )}
               </button>
             </div>
+          </div>
+          <div className="mt-2 pl-10">
+            <MentionField selected={mentionSel} onChange={setMentionSel} />
           </div>
         </div>
       )}

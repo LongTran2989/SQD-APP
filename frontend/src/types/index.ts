@@ -336,11 +336,19 @@ export interface TaskActivity {
   createdAt: string;
 }
 
+// A user surfaced by the @mention picker / resolved on a comment.
+export interface MentionUser {
+  id: number;
+  name: string | null;
+  employeeId?: string | null;
+}
+
 // Enriched — server-side joined author name
 export interface TaskActivityEnriched extends TaskActivity {
   author: { id: number; name: string | null } | null;
   hidden?: boolean; // soft-hidden (M4) — only ever present/true for Director/Admin reads
   pinned?: boolean; // always false for TASK feeds (not pinnable); kept for shape parity
+  mentions?: MentionUser[]; // @mentioned users resolved to names (Phase E)
 }
 
 // ── Unified feed (Phase 2) — generic across all four scopes ──────────────────
@@ -378,6 +386,8 @@ export interface FeedPostEnriched extends FeedPost {
   // (others never receive hidden posts); `pinned` marks a pinned comment.
   hidden?: boolean;
   pinned?: boolean;
+  // @mentioned users resolved to names (Phase E).
+  mentions?: MentionUser[];
 }
 
 // ── Escalation (Phase 3) ─────────────────────────────────────────────────────

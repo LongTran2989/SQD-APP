@@ -233,9 +233,12 @@ export const getTaskActivityPage = (
 
 export const postTaskComment = (
   id: number,
-  content: string
+  content: string,
+  mentionUserIds?: number[]
 ): Promise<TaskActivityEnriched> =>
-  apiClient.post(`/tasks/${id}/activity`, { content }).then((r) => r.data);
+  apiClient
+    .post(`/tasks/${id}/activity`, { content, ...(mentionUserIds?.length ? { mentionUserIds } : {}) })
+    .then((r) => r.data);
 
 // ─── Time Booking (Phase 5.6) ─────────────────────────────────────────────────
 

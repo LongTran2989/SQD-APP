@@ -128,8 +128,34 @@ it up via `test:setup` (db push regenerates the client).**
 
 ---
 
-## Phase E — Cross-entity linking + @mentions
+## Phase E — @mentions  ✅ IMPLEMENTED  ·  entity (#) linking → E.2 (deferred)
 No new feed model; mentions reuse the notification system.
+
+**As built (@mentions).** Chosen a **chip-based** mention field over inline `@`
+autocomplete: mentions are picked from a dropdown and kept as removable chips
+separate from the comment text, so the textarea stays clean (no markup) and there's
+no fragile caret/markup parsing. Selected ids are sent alongside the comment.
+- Backend: `GET /users/mention-search?q=` (auth-only, returns up to 8 {id,name,
+  employeeId}); `feedService.resolveMentions`/`mentionIdsFromMetadata`;
+  `postFeedComment`/`postTaskComment` validate ids → real users, store
+  `metadata.mentions` (int[]), and call `notificationService.notifyMentions` (new
+  `FEED_MENTION` type + config key; deep-links on TASK/WP/FINDING). Reads
+  (`getFeed`/`getTaskActivity`) resolve mention names into `post.mentions`.
+- Frontend: shared `MentionField` (picker + chips) in all three composers; shared
+  `MentionsLine` renders "@Name, …" under each comment; `userApi.mentionSearch`.
+- Tests (feed.test.ts): mentions stored + returned + resolved on read; mentioned
+  user notified; author (self-mention) never notified; non-existent ids dropped.
+- Verified: frontend `tsc` + lint clean.
+- **Manual-QA note:** the mention picker dropdown/debounce is UI not exercised by
+  type-checks — smoke-test the picker, chip add/remove, and that a mentioned user
+  sees the inbox notification.
+
+**Deferred to E.2 — entity (#) hyperlinks.** Reliable inline linking of TASK/WP/
+FINDING references needs code→numeric-id resolution (business codes differ from the
+route ids), so it's a focused follow-up: a `#`-sigil picker (or a read-time
+resolution map) that emits links to `/dashboard/...`. Not blocking @mentions.
+
+### Original plan notes
 
 **Auto-linking (render-time, safe)**
 - `frontend/src/utils/feedHelpers.ts`: a tokenizer that splits comment text into plain spans + recognised tokens — `#TASK-<code>`, `WP-<code>`, `Finding F-<code>`, and `@<name/employeeId>` — and a renderer that maps tokens to `<Link>`s. Plain text otherwise. No HTML injection.

@@ -34,6 +34,7 @@ export type NotificationType =
   | 'FINDING_CREATED'
   | 'FINDING_OVERDUE'
   | 'FEED_ACTIVITY'
+  | 'FEED_MENTION'
   | 'BLUEPRINT_LAUNCHED'
   | 'TASKS_GENERATED';
 
@@ -123,6 +124,7 @@ function eventKeyOf(input: NotificationInput): NotificationEventKey | null {
     if (input.linkScope === 'TASK') return 'FEED_ACTIVITY_TASK';
     return null;
   }
+  if (input.type === 'FEED_MENTION') return 'FEED_MENTION';
   return isNotificationEventKey(input.type) ? input.type : null;
 }
 
@@ -274,6 +276,48 @@ export async function notifyFeedWatchers(
     await createNotifications(client, inputs, [authorId]);
   } catch (err) {
     console.error('[notifications] notifyFeedWatchers failed (non-fatal):', err);
+  }
+}
+
+/**
+ * Notifies users @mentioned in a feed comment (FEED_MENTION), skipping the author.
+ * Mentions are explicit (the client sends the resolved user ids), so this just
+ * fans out — best-effort, like the other notification helpers. A deep link is set
+ * only for the scopes that have a notification link target (TASK/WP/FINDING);
+ * DIVISION/ORG mentions notify without a link.
+ */
+export async function notifyMentions(
+  client: PrismaLike,
+  mentionUserIds: number[],
+  authorId: number,
+  scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG' | 'FINDING',
+  scopeId: number | null,
+  content: string,
+  authorName: string
+): Promise<void> {
+  try {
+    const recipients = Array.from(new Set(mentionUserIds)).filter((id) => id !== authorId);
+    if (recipients.length === 0) return;
+
+    const linkScope: NotificationLinkScope | null =
+      scope === 'TASK' || scope === 'WP' || scope === 'FINDING' ? scope : null;
+    const linkId = linkScope != null ? scopeId : null;
+
+    const excerpt = content.trim();
+    const body = excerpt.length > 140 ? `${excerpt.slice(0, 140)}…` : excerpt;
+
+    const inputs: NotificationInput[] = recipients.map((userId) => ({
+      userId,
+      type: 'FEED_MENTION',
+      title: `${authorName} mentioned you`,
+      body,
+      linkScope,
+      linkId,
+    }));
+
+    await createNotifications(client, inputs, [authorId]);
+  } catch (err) {
+    console.error('[notifications] notifyMentions failed (non-fatal):', err);
   }
 }
 

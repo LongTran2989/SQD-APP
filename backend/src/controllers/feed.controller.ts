@@ -9,10 +9,12 @@ import {
   parseFeedLimit,
   parseFeedBefore,
   parseFeedTypes,
+  resolveMentions,
+  mentionIdsFromMetadata,
   FeedScope,
 } from '../services/feedService';
 import { canActionFlag } from '../services/escalationService';
-import { notifyFeedWatchers } from '../services/notificationService';
+import { notifyFeedWatchers, notifyMentions } from '../services/notificationService';
 
 import { prisma } from '../lib/prisma';
 
@@ -114,7 +116,15 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
     // canActionFlag the action endpoint uses (single source of truth); every
     // ESCALATION_CARD on a feed shares the feed's scope + division, so it's
     // resolved once and only when a card is actually present.
-    const authorIds = [...new Set(posts.map((p) => p.authorId).filter((id): id is number => typeof id === 'number'))];
+    // Mentioned user ids referenced across the page (Phase E) — resolved to names
+    // alongside authors so a comment can render its "mentions" chips.
+    const mentionIdsByPost = new Map(posts.map((p) => [p.id, mentionIdsFromMetadata(p.metadata)]));
+    const allMentionIds = [...new Set([...mentionIdsByPost.values()].flat())];
+
+    const authorIds = [...new Set([
+      ...posts.map((p) => p.authorId).filter((id): id is number => typeof id === 'number'),
+      ...allMentionIds,
+    ])];
     const flagIds = [...new Set(posts.map((p) => p.flagId).filter((id): id is number => typeof id === 'number'))];
     const hasEscalationCard = posts.some((p) => p.type === 'ESCALATION_CARD');
     const needsWpDivision = !!req.user && hasEscalationCard && target.scope === 'WP' && target.scopeId != null;
@@ -153,6 +163,9 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       canAction: p.type === 'ESCALATION_CARD' ? viewerCanAction : false,
       hidden: p.hiddenAt != null,
       pinned: p.pinnedAt != null,
+      mentions: (mentionIdsByPost.get(p.id) ?? [])
+        .filter((id) => authorMap.has(id))
+        .map((id) => ({ id, name: authorMap.get(id) ?? null })),
     })));
   } catch (error) {
     console.error('Error fetching feed:', error);
@@ -191,12 +204,18 @@ export const postFeedComment = async (req: Request, res: Response): Promise<void
       return;
     }
 
+    // @mentions (Phase E): validate the client-supplied ids → real users only,
+    // store on the post (metadata.mentions) and notify them after creation.
+    const mentions = await resolveMentions(prisma, req.body?.mentionUserIds);
+    const mentionIds = mentions.map((m) => m.id);
+
     const post = await createFeedPost(prisma, {
       type: 'COMMENT',
       scope: target.scope,
       scopeId: target.scopeId,
       content: content.trim(),
       authorId: userId,
+      metadata: mentionIds.length ? { mentions: mentionIds } : undefined,
     });
 
     // Notify the feed's watchers of the new comment (TASK/WP only) — best-effort.
@@ -204,9 +223,13 @@ export const postFeedComment = async (req: Request, res: Response): Promise<void
 
     const author = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true } });
 
+    // Notify the mentioned users (excludes the author) — best-effort.
+    await notifyMentions(prisma, mentionIds, userId, target.scope, target.scopeId, content.trim(), author?.name ?? `User ${userId}`);
+
     res.status(201).json({
       ...post,
       author: author ? { id: author.id, name: author.name } : null,
+      mentions,
     });
   } catch (error) {
     console.error('Error posting feed comment:', error);

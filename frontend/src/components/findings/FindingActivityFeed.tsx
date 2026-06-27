@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { FeedPostEnriched, FeedPostType, User } from '../../types';
+import { FeedPostEnriched, FeedPostType, User, MentionUser } from '../../types';
 import { getFeedPage, postFeedComment } from '../../api/feedApi';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 import FeedFilterBar from '../feed/FeedFilterBar';
 import CommentModerationMenu from '../feed/CommentModerationMenu';
+import MentionField from '../feed/MentionField';
+import MentionsLine from '../feed/MentionsLine';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
@@ -31,6 +33,7 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
+  const [mentionSel, setMentionSel] = useState<MentionUser[]>([]);
 
   const canModerate = currentUser.role === 'Director' || currentUser.role === 'Admin';
 
@@ -99,9 +102,10 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
     if (!comment.trim()) return;
     setPosting(true);
     try {
-      const newPost = await postFeedComment('FINDING', findingId, comment.trim());
+      const newPost = await postFeedComment('FINDING', findingId, comment.trim(), mentionSel.map((m) => m.id));
       setPosts((prev) => [...prev, newPost]);
       setComment('');
+      setMentionSel([]);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg || 'Failed to post comment');
@@ -212,6 +216,7 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
                   }`}>
                     {entry.content}
                   </div>
+                  <MentionsLine mentions={entry.mentions} />
                 </div>
               </div>
             );
@@ -247,6 +252,9 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
               )}
             </button>
           </div>
+        </div>
+        <div className="mt-2 pl-10">
+          <MentionField selected={mentionSel} onChange={setMentionSel} />
         </div>
       </div>
     </div>

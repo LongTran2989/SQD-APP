@@ -393,4 +393,44 @@ describe('Feed API (Phase 2)', () => {
       expect(taskPin.status).toBe(400);
     });
   });
+
+  // ─── @mentions (Phase E) ─────────────────────────────────────────────────────
+
+  describe('@mentions', () => {
+    beforeEach(async () => {
+      await prisma.notification.deleteMany({ where: { type: 'FEED_MENTION' } });
+    });
+
+    it('stores + returns mentions and notifies the mentioned user (never the author)', async () => {
+      // Staff comments mentioning the Manager AND themselves (self must not notify).
+      const res = await request(app)
+        .post(`/api/feeds/WP/${wpId}/posts`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ content: 'please review', mentionUserIds: [managerUserId, staffUserId] });
+      expect(res.status).toBe(201);
+      expect(res.body.mentions.map((m: { id: number }) => m.id)).toEqual(expect.arrayContaining([managerUserId, staffUserId]));
+
+      // Manager received a FEED_MENTION notification.
+      const mgrNotif = await prisma.notification.findFirst({ where: { userId: managerUserId, type: 'FEED_MENTION' } });
+      expect(mgrNotif).not.toBeNull();
+
+      // The author (self-mentioned) did NOT.
+      const selfNotif = await prisma.notification.findFirst({ where: { userId: staffUserId, type: 'FEED_MENTION' } });
+      expect(selfNotif).toBeNull();
+
+      // The read resolves mention names.
+      const read = await request(app).get(`/api/feeds/WP/${wpId}`).set('Authorization', `Bearer ${staffToken}`);
+      const posted = read.body.find((p: { id: number }) => p.id === res.body.id);
+      expect(posted.mentions.map((m: { id: number }) => m.id)).toEqual(expect.arrayContaining([managerUserId]));
+    });
+
+    it('drops non-existent mention ids', async () => {
+      const res = await request(app)
+        .post(`/api/feeds/WP/${wpId}/posts`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ content: 'x', mentionUserIds: [99999999] });
+      expect(res.status).toBe(201);
+      expect(res.body.mentions).toEqual([]);
+    });
+  });
 });

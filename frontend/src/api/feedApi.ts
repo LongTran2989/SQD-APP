@@ -71,9 +71,12 @@ export const unpinPost = (postId: number): Promise<void> =>
 export const postFeedComment = (
   scope: FeedScope,
   scopeId: number | null | undefined,
-  content: string
+  content: string,
+  mentionUserIds?: number[]
 ): Promise<FeedPostEnriched> =>
-  apiClient.post(`${feedPath(scope, scopeId)}/posts`, { content }).then((r) => r.data);
+  apiClient
+    .post(`${feedPath(scope, scopeId)}/posts`, { content, ...(mentionUserIds?.length ? { mentionUserIds } : {}) })
+    .then((r) => r.data);
 
 /**
  * Client-side mirror of the backend feed posting RBAC (feedService.canPostToFeed)

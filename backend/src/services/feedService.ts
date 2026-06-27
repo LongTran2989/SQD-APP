@@ -84,6 +84,34 @@ export function isFeedScope(value: string): value is FeedScope {
 
 export const FEED_POST_TYPES: FeedPostType[] = ['COMMENT', 'SYSTEM_EVENT', 'ESCALATION_CARD', 'INFO_CARD'];
 
+// ─── @mentions (Phase E) ──────────────────────────────────────────────────────
+// Mentions are explicit: the client sends the resolved user ids alongside a
+// comment. They are stored on the post as metadata.mentions (int[]) and surfaced
+// on reads as { id, name }. Validation drops ids that aren't real, non-deleted
+// users, so the stored set is always trustworthy.
+
+/** Validates raw mention ids → ordered, de-duped [{id,name}] of real users. */
+export async function resolveMentions(
+  client: PrismaLike,
+  raw: unknown
+): Promise<{ id: number; name: string | null }[]> {
+  if (!Array.isArray(raw)) return [];
+  const ids = [...new Set(raw.filter((n): n is number => typeof n === 'number' && Number.isInteger(n)))];
+  if (ids.length === 0) return [];
+  const users = await client.user.findMany({
+    where: { id: { in: ids }, deletedAt: null },
+    select: { id: true, name: true },
+  });
+  const byId = new Map(users.map((u) => [u.id, u.name]));
+  return ids.filter((id) => byId.has(id)).map((id) => ({ id, name: byId.get(id) ?? null }));
+}
+
+/** Extracts the stored mention ids from a FeedPost.metadata value (read path). */
+export function mentionIdsFromMetadata(metadata: unknown): number[] {
+  const m = (metadata as { mentions?: unknown } | null)?.mentions;
+  return Array.isArray(m) ? m.filter((n): n is number => typeof n === 'number') : [];
+}
+
 // Feed read pagination (H2). Reads are keyset-paginated newest-first on the
 // primary key (FeedPost.id is monotonic with creation, so id-desc == createdAt-
 // desc) and the controller reverses the page to ascending for chat-style display.
