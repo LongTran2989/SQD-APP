@@ -12,6 +12,7 @@ export interface FeedQueryOptions {
   limit?: number;
   before?: number | null; // page strictly older than this post id
   types?: FeedPostType[];
+  includeHidden?: boolean; // Director/Admin only — include soft-hidden comments
 }
 
 export interface FeedPage {
@@ -24,6 +25,7 @@ const buildFeedParams = (opts: FeedQueryOptions): Record<string, string> => {
   if (opts.limit != null) params.limit = String(opts.limit);
   if (opts.before != null) params.before = String(opts.before);
   if (opts.types && opts.types.length) params.types = opts.types.join(',');
+  if (opts.includeHidden) params.includeHidden = 'true';
   return params;
 };
 
@@ -42,6 +44,29 @@ export const getFeedPage = (
     posts: r.data as FeedPostEnriched[],
     nextCursor: r.headers['x-next-cursor'] ? Number(r.headers['x-next-cursor']) : null,
   }));
+
+// ─── Moderation (Phase D) ─────────────────────────────────────────────────────
+
+const pinnedPath = (scope: FeedScope, scopeId?: number | null): string =>
+  scope === 'ORG' ? '/feeds/pinned/ORG' : `/feeds/pinned/${scope}/${scopeId}`;
+
+// Pinned comments for a WP / Division / Org feed (TASK / FINDING → always empty).
+export const getPinnedFeed = (scope: FeedScope, scopeId?: number | null): Promise<FeedPostEnriched[]> =>
+  apiClient.get(pinnedPath(scope, scopeId)).then((r) => r.data);
+
+// Director/Admin only. reason is optional.
+export const hidePost = (postId: number, reason?: string): Promise<void> =>
+  apiClient.post(`/feeds/posts/${postId}/hide`, reason ? { reason } : {}).then(() => undefined);
+
+export const unhidePost = (postId: number): Promise<void> =>
+  apiClient.post(`/feeds/posts/${postId}/unhide`, {}).then(() => undefined);
+
+// Scope-gated (mirrors posting rights); WP / Division / Org comments only.
+export const pinPost = (postId: number): Promise<void> =>
+  apiClient.post(`/feeds/posts/${postId}/pin`, {}).then(() => undefined);
+
+export const unpinPost = (postId: number): Promise<void> =>
+  apiClient.post(`/feeds/posts/${postId}/unpin`, {}).then(() => undefined);
 
 export const postFeedComment = (
   scope: FeedScope,

@@ -7,6 +7,7 @@ import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 import FeedFilterBar from '../feed/FeedFilterBar';
+import CommentModerationMenu from '../feed/CommentModerationMenu';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
@@ -26,20 +27,24 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
   const [cursor, setCursor] = useState<number | null>(null);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [hidden, setHidden] = useState<Set<FeedPostType>>(new Set());
+  const [showHidden, setShowHidden] = useState(false); // Director/Admin: reveal soft-hidden comments
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
 
-  // Load the newest page on mount. setState lives in promise callbacks (not
-  // synchronously in the effect body) to satisfy react-hooks/set-state-in-effect.
+  const canModerate = currentUser.role === 'Director' || currentUser.role === 'Admin';
+
+  // Load the newest page on mount (and when Show-hidden toggles). setState lives in
+  // promise callbacks (not synchronously in the effect body) to satisfy
+  // react-hooks/set-state-in-effect.
   useEffect(() => {
     let cancelled = false;
-    getFeedPage('FINDING', findingId)
+    getFeedPage('FINDING', findingId, { includeHidden: showHidden })
       .then((page) => { if (!cancelled) { setPosts(page.posts); setCursor(page.nextCursor); } })
       .catch(() => { if (!cancelled) { setPosts([]); setCursor(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [findingId]);
+  }, [findingId, showHidden]);
 
   // Auto-scroll to newest only when the BOTTOM entry changes (initial load or an
   // appended post) — never when older posts are prepended via "Load earlier".
@@ -54,7 +59,7 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
 
   // Reload helper (called by realtime refresh + parent onRefresh).
   const reloadFeed = () => {
-    getFeedPage('FINDING', findingId)
+    getFeedPage('FINDING', findingId, { includeHidden: showHidden })
       .then((page) => { setPosts(page.posts); setCursor(page.nextCursor); })
       .catch(() => {});
     onRefresh?.();
@@ -66,7 +71,7 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
     const el = feedRef.current;
     const prevHeight = el?.scrollHeight ?? 0;
     try {
-      const page = await getFeedPage('FINDING', findingId, { before: cursor });
+      const page = await getFeedPage('FINDING', findingId, { before: cursor, includeHidden: showHidden });
       setPosts((prev) => [...page.posts, ...prev]);
       setCursor(page.nextCursor);
       requestAnimationFrame(() => {
@@ -119,7 +124,15 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
         <MessageCircle className="w-4 h-4 text-slate-400" />
         <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Activity Feed</h2>
         <span className="ml-auto text-xs text-slate-400">{posts.length} entries</span>
-        <div className="w-full"><FeedFilterBar hidden={hidden} onToggle={toggleHidden} options={FINDING_FILTER_OPTIONS} /></div>
+        <div className="w-full flex items-center justify-between gap-2">
+          <FeedFilterBar hidden={hidden} onToggle={toggleHidden} options={FINDING_FILTER_OPTIONS} />
+          {canModerate && (
+            <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer select-none">
+              <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="accent-rose-500" />
+              Show hidden
+            </label>
+          )}
+        </div>
       </div>
 
       {/* Feed list */}
@@ -178,9 +191,22 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
                   <div className={`flex items-center gap-2 mb-1 ${isSelf ? 'flex-row-reverse' : ''}`}>
                     <span className="text-xs font-semibold text-slate-700">{isSelf ? 'You' : authorName}</span>
                     <span className="text-[10px] text-slate-400">{formatTimestamp(entry.createdAt)}</span>
+                    {entry.hidden && (
+                      <span className="text-[10px] font-medium text-rose-500 italic" title="Hidden — visible to Director/Admin only">Hidden</span>
+                    )}
+                    <CommentModerationMenu
+                      postId={entry.id}
+                      isHidden={!!entry.hidden}
+                      isPinned={false}
+                      canModerate={canModerate}
+                      canPin={false}
+                      onChanged={reloadFeed}
+                    />
                   </div>
                   <div className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed max-w-full break-words ${
-                    isSelf
+                    entry.hidden
+                      ? 'bg-slate-50 text-slate-400 italic border border-dashed border-slate-200'
+                      : isSelf
                       ? 'bg-blue-600 text-white rounded-tr-sm'
                       : 'bg-slate-100 text-slate-800 rounded-tl-sm'
                   }`}>

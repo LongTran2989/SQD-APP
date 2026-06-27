@@ -339,6 +339,8 @@ export interface TaskActivity {
 // Enriched — server-side joined author name
 export interface TaskActivityEnriched extends TaskActivity {
   author: { id: number; name: string | null } | null;
+  hidden?: boolean; // soft-hidden (M4) — only ever present/true for Director/Admin reads
+  pinned?: boolean; // always false for TASK feeds (not pinnable); kept for shape parity
 }
 
 // ── Unified feed (Phase 2) — generic across all four scopes ──────────────────
@@ -372,6 +374,10 @@ export interface FeedPostEnriched extends FeedPost {
   // server-side (canActionFlag) so the UI gate matches backend RBAC exactly,
   // including the Manager own-division rule the client can't resolve alone.
   canAction?: boolean;
+  // Moderation flags (Phase D). `hidden` is only ever true on Director/Admin reads
+  // (others never receive hidden posts); `pinned` marks a pinned comment.
+  hidden?: boolean;
+  pinned?: boolean;
 }
 
 // ── Escalation (Phase 3) ─────────────────────────────────────────────────────

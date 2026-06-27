@@ -905,9 +905,21 @@ model FeedPost {
   flag              EscalationFlag? @relation(fields: [flagId], references: [id])
   taggedDivisionIds Json? // Org Feed only — int array of tagged divisions
 
+  // ── Moderation flags (Phase D) ──────────────────────────────────────────────
+  // Soft-hide (M4): a hidden COMMENT is kept (immutable audit trail) but excluded
+  // from feed reads. Director/Admin only; reversible via unhide. Pinning: a COMMENT
+  // pinned to a WP/DIVISION/ORG feed surfaces in a "Pinned" strip. Both are
+  // post-level admin flags — never physical deletes.
+  hiddenAt       DateTime?
+  hiddenByUserId Int?
+  hiddenReason   String?
+  pinnedAt       DateTime?
+  pinnedByUserId Int?
+
   createdAt DateTime @default(now())
 
   @@index([scope, scopeId, createdAt])
+  @@index([scope, scopeId, pinnedAt]) // pinned-posts lookup per feed
   @@index([flagId])
 }
 

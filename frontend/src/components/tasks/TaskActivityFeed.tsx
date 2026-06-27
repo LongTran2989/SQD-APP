@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
 import FlagButton from '../feed/FlagButton';
 import FeedFilterBar from '../feed/FeedFilterBar';
+import CommentModerationMenu from '../feed/CommentModerationMenu';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
@@ -52,26 +53,59 @@ export default function TaskActivityFeed({
   const [cursor, setCursor] = useState<number | null | undefined>(undefined);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [hidden, setHidden] = useState<Set<FeedPostType>>(new Set());
+  // Director/Admin "Show hidden" moderation view: a self-fetched newest page that
+  // INCLUDES soft-hidden comments (the parent-owned `activities` never carries
+  // hidden ones). When active it replaces the normal merged list (load-earlier off).
+  const [showHidden, setShowHidden] = useState(false);
+  const [modView, setModView] = useState<TaskActivityEnriched[] | null>(null);
+
+  const canModerate = currentUser.role === 'Director' || currentUser.role === 'Admin';
 
   // The parent re-fetches the newest page on task change; drop any locally loaded
-  // older entries so we never show a stale/mismatched history for a new task.
-  // Reset during render (React's "adjust state when a prop changes" pattern) so
-  // we avoid a setState-in-effect cascade.
+  // older entries (and the moderation view) so we never show a stale/mismatched
+  // history for a new task. Reset during render (React's "adjust state when a prop
+  // changes" pattern) so we avoid a setState-in-effect cascade.
   const [trackedTaskId, setTrackedTaskId] = useState(task.id);
   if (trackedTaskId !== task.id) {
     setTrackedTaskId(task.id);
     setEarlier([]);
     setCursor(undefined);
+    setShowHidden(false);
+    setModView(null);
   }
+
+  // Fetch the moderation view when Show-hidden is on. We never clear it here (that
+  // would be a setState-in-effect); `merged` simply ignores modView while
+  // showHidden is off, and the task-change render guard resets it across tasks.
+  useEffect(() => {
+    if (!(showHidden && canModerate)) return;
+    let cancelled = false;
+    getTaskActivityPage(task.id, { includeHidden: true, limit: 100 })
+      .then((p) => { if (!cancelled) setModView(p.activities); })
+      .catch(() => { if (!cancelled) setModView([]); });
+    return () => { cancelled = true; };
+  }, [showHidden, canModerate, task.id]);
 
   // Live activity on this task's feed → "new updates" pill + focus-refetch,
   // using the parent's refetch (no-op when the parent doesn't supply one).
   const { hasNew, refresh } = useRealtimeRefresh(feedKey('TASK', task.id), () => onRefresh?.());
 
+  // After a hide/unhide: refresh the parent (drops the hidden comment from the
+  // normal view) and, if open, the moderation view.
+  const onModerated = () => {
+    onRefresh?.();
+    if (showHidden && canModerate) {
+      getTaskActivityPage(task.id, { includeHidden: true, limit: 100 }).then((p) => setModView(p.activities)).catch(() => {});
+    }
+  };
+
   // Merge older + newest page, de-duping by id (the newest page wins), then apply
   // the client-side type filter. `earlier` are strictly older than `activities`.
+  // When the moderation view is active it takes over (already a full newest page).
   const activityIds = new Set(activities.map((a) => a.id));
-  const merged = [...earlier.filter((e) => !activityIds.has(e.id)), ...activities];
+  const merged = showHidden && modView != null
+    ? modView
+    : [...earlier.filter((e) => !activityIds.has(e.id)), ...activities];
   const visibleActivities = merged.filter((a) => !hidden.has(a.type as FeedPostType));
 
   const handleLoadEarlier = async () => {
@@ -150,7 +184,15 @@ export default function TaskActivityFeed({
         <MessageCircle className="w-4 h-4 text-slate-400" />
         <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Activity Feed</h2>
         <span className="ml-auto text-xs text-slate-400">{merged.length} entries</span>
-        <div className="w-full"><FeedFilterBar hidden={hidden} onToggle={toggleHidden} options={TASK_FILTER_OPTIONS} /></div>
+        <div className="w-full flex items-center justify-between gap-2">
+          <FeedFilterBar hidden={hidden} onToggle={toggleHidden} options={TASK_FILTER_OPTIONS} />
+          {canModerate && (
+            <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer select-none">
+              <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="accent-rose-500" />
+              Show hidden
+            </label>
+          )}
+        </div>
       </div>
 
       {/* Feed list */}
@@ -159,7 +201,7 @@ export default function TaskActivityFeed({
         className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0"
       >
         {onRefresh && <NewUpdatesPill show={hasNew} onClick={refresh} />}
-        {cursor !== null && merged.length > 0 && (
+        {!showHidden && cursor !== null && merged.length > 0 && (
           <div className="flex justify-center">
             <button
               onClick={handleLoadEarlier}
@@ -213,10 +255,23 @@ export default function TaskActivityFeed({
                   <div className={`flex items-center gap-2 mb-1 ${isSelf ? 'flex-row-reverse' : ''}`}>
                     <span className="text-xs font-semibold text-slate-700">{isSelf ? 'You' : authorName}</span>
                     <span className="text-[10px] text-slate-400">{formatTimestamp(entry.createdAt)}</span>
+                    {entry.hidden && (
+                      <span className="text-[10px] font-medium text-rose-500 italic" title="Hidden — visible to Director/Admin only">Hidden</span>
+                    )}
                     <FlagButton postId={entry.id} targets={taskFlagTargets} />
+                    <CommentModerationMenu
+                      postId={entry.id}
+                      isHidden={!!entry.hidden}
+                      isPinned={false}
+                      canModerate={canModerate}
+                      canPin={false}
+                      onChanged={onModerated}
+                    />
                   </div>
                   <div className={`px-3.5 py-2.5 rounded-2xl text-sm text-slate-700 leading-relaxed max-w-full break-words ${
-                    isSelf
+                    entry.hidden
+                      ? 'bg-slate-50 text-slate-400 italic border border-dashed border-slate-200'
+                      : isSelf
                       ? 'bg-blue-600 text-white rounded-tr-sm'
                       : 'bg-slate-100 text-slate-800 rounded-tl-sm'
                   }`}>

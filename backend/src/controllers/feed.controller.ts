@@ -87,9 +87,15 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
     const before = parseFeedBefore(req.query.before);
     const types = parseFeedTypes(req.query.types);
 
+    // Hidden COMMENTs (M4) are excluded from reads. Director/Admin may opt in with
+    // ?includeHidden=true (e.g. to review/unhide); everyone else never sees them.
+    const isDirectorOrAdmin = req.user?.role === 'Director' || req.user?.role === 'Admin';
+    const includeHidden = isDirectorOrAdmin && req.query.includeHidden === 'true';
+
     const where: Prisma.FeedPostWhereInput = buildFeedPostScope(target.scope, target.scopeId);
     if (types) where.type = { in: types };
     if (before != null) where.id = { lt: before };
+    if (!includeHidden) where.hiddenAt = null;
 
     const rows = await prisma.feedPost.findMany({
       where,
@@ -145,6 +151,8 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       author: p.authorId ? { id: p.authorId, name: authorMap.get(p.authorId) ?? null } : null,
       flagStatus: p.flagId != null ? statusMap.get(p.flagId) ?? null : null,
       canAction: p.type === 'ESCALATION_CARD' ? viewerCanAction : false,
+      hidden: p.hiddenAt != null,
+      pinned: p.pinnedAt != null,
     })));
   } catch (error) {
     console.error('Error fetching feed:', error);
@@ -202,6 +210,203 @@ export const postFeedComment = async (req: Request, res: Response): Promise<void
     });
   } catch (error) {
     console.error('Error posting feed comment:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── Moderation: hide / unhide (M4) & pin / unpin (Phase D) ───────────────────
+// All operate on a COMMENT only (system events and escalation cards are never
+// moderated) and dual-write AuditLog + a SYSTEM_EVENT on the post's own feed.
+
+const PINNABLE_SCOPES: FeedScope[] = ['WP', 'DIVISION', 'ORG'];
+
+function parsePostId(raw: string | string[] | undefined): number | null {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  const n = parseInt(v ?? '', 10);
+  return Number.isNaN(n) ? null : n;
+}
+
+// ─── POST /api/feeds/posts/:id/hide ───────────────────────────────────────────
+// Director/Admin only. Soft-hides a comment: it is kept (immutable trail) but
+// dropped from feed reads. Reversible via /unhide.
+export const hidePost = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role } = req.user!;
+    if (role !== 'Director' && role !== 'Admin') {
+      res.status(403).json({ message: 'Only a Director or Admin can hide a comment.' });
+      return;
+    }
+    const postId = parsePostId(req.params.id);
+    if (postId === null) { res.status(400).json({ message: 'A numeric post id is required.' }); return; }
+    const reason = typeof req.body?.reason === 'string' && req.body.reason.trim() ? req.body.reason.trim() : null;
+
+    const post = await prisma.feedPost.findUnique({ where: { id: postId } });
+    if (!post) { res.status(404).json({ message: 'Comment not found.' }); return; }
+    if (post.type !== 'COMMENT') { res.status(400).json({ message: 'Only comments can be hidden.' }); return; }
+    if (post.hiddenAt) { res.status(400).json({ message: 'This comment is already hidden.' }); return; }
+
+    await prisma.$transaction(async (tx) => {
+      const actor = await tx.user.findFirst({ where: { id: userId, deletedAt: null }, select: { name: true } });
+      const actorName = actor?.name ?? `User ${userId}`;
+      await tx.feedPost.update({ where: { id: postId }, data: { hiddenAt: new Date(), hiddenByUserId: userId, hiddenReason: reason } });
+      await tx.auditLog.create({
+        data: { actionType: 'FEED_POST_HIDDEN', entityType: 'FeedPost', entityId: String(postId), performedByUserId: userId, details: { reason } as any },
+      });
+      await createFeedPost(tx, {
+        type: 'SYSTEM_EVENT', scope: post.scope as FeedScope, scopeId: post.scopeId,
+        content: `${actorName} hid a comment${reason ? `: ${reason}` : ''}.`, authorId: null,
+      });
+    });
+
+    res.json({ id: postId, hidden: true });
+  } catch (error) {
+    console.error('Error hiding post:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── POST /api/feeds/posts/:id/unhide ─────────────────────────────────────────
+export const unhidePost = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role } = req.user!;
+    if (role !== 'Director' && role !== 'Admin') {
+      res.status(403).json({ message: 'Only a Director or Admin can unhide a comment.' });
+      return;
+    }
+    const postId = parsePostId(req.params.id);
+    if (postId === null) { res.status(400).json({ message: 'A numeric post id is required.' }); return; }
+
+    const post = await prisma.feedPost.findUnique({ where: { id: postId } });
+    if (!post) { res.status(404).json({ message: 'Comment not found.' }); return; }
+    if (!post.hiddenAt) { res.status(400).json({ message: 'This comment is not hidden.' }); return; }
+
+    await prisma.$transaction(async (tx) => {
+      const actor = await tx.user.findFirst({ where: { id: userId, deletedAt: null }, select: { name: true } });
+      const actorName = actor?.name ?? `User ${userId}`;
+      await tx.feedPost.update({ where: { id: postId }, data: { hiddenAt: null, hiddenByUserId: null, hiddenReason: null } });
+      await tx.auditLog.create({
+        data: { actionType: 'FEED_POST_UNHIDDEN', entityType: 'FeedPost', entityId: String(postId), performedByUserId: userId, details: {} as any },
+      });
+      await createFeedPost(tx, {
+        type: 'SYSTEM_EVENT', scope: post.scope as FeedScope, scopeId: post.scopeId,
+        content: `${actorName} restored a previously hidden comment.`, authorId: null,
+      });
+    });
+
+    res.json({ id: postId, hidden: false });
+  } catch (error) {
+    console.error('Error unhiding post:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── POST /api/feeds/posts/:id/pin ────────────────────────────────────────────
+// Pins a comment to a WP / Division / Org feed. RBAC mirrors posting rights for
+// that scope (canPostToFeed) — Director/Admin any; Manager Org; own-division for
+// Division. TASK / FINDING feeds are not pinnable.
+export const pinPost = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role, divisionId } = req.user!;
+    const postId = parsePostId(req.params.id);
+    if (postId === null) { res.status(400).json({ message: 'A numeric post id is required.' }); return; }
+
+    const post = await prisma.feedPost.findUnique({ where: { id: postId } });
+    if (!post) { res.status(404).json({ message: 'Comment not found.' }); return; }
+    if (post.type !== 'COMMENT') { res.status(400).json({ message: 'Only comments can be pinned.' }); return; }
+    if (!PINNABLE_SCOPES.includes(post.scope as FeedScope)) {
+      res.status(400).json({ message: 'Only Work Package, Division and Org comments can be pinned.' });
+      return;
+    }
+    if (!canPostToFeed({ role, divisionId }, post.scope as FeedScope, post.scopeId)) {
+      res.status(403).json({ message: 'You do not have permission to pin on this feed.' });
+      return;
+    }
+    if (post.hiddenAt) { res.status(400).json({ message: 'A hidden comment cannot be pinned.' }); return; }
+    if (post.pinnedAt) { res.status(400).json({ message: 'This comment is already pinned.' }); return; }
+
+    await prisma.$transaction(async (tx) => {
+      const actor = await tx.user.findFirst({ where: { id: userId, deletedAt: null }, select: { name: true } });
+      const actorName = actor?.name ?? `User ${userId}`;
+      await tx.feedPost.update({ where: { id: postId }, data: { pinnedAt: new Date(), pinnedByUserId: userId } });
+      await tx.auditLog.create({
+        data: { actionType: 'FEED_POST_PINNED', entityType: 'FeedPost', entityId: String(postId), performedByUserId: userId, details: {} as any },
+      });
+      await createFeedPost(tx, {
+        type: 'SYSTEM_EVENT', scope: post.scope as FeedScope, scopeId: post.scopeId,
+        content: `${actorName} pinned a comment.`, authorId: null,
+      });
+    });
+
+    res.json({ id: postId, pinned: true });
+  } catch (error) {
+    console.error('Error pinning post:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── POST /api/feeds/posts/:id/unpin ──────────────────────────────────────────
+export const unpinPost = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, role, divisionId } = req.user!;
+    const postId = parsePostId(req.params.id);
+    if (postId === null) { res.status(400).json({ message: 'A numeric post id is required.' }); return; }
+
+    const post = await prisma.feedPost.findUnique({ where: { id: postId } });
+    if (!post) { res.status(404).json({ message: 'Comment not found.' }); return; }
+    if (!canPostToFeed({ role, divisionId }, post.scope as FeedScope, post.scopeId)) {
+      res.status(403).json({ message: 'You do not have permission to unpin on this feed.' });
+      return;
+    }
+    if (!post.pinnedAt) { res.status(400).json({ message: 'This comment is not pinned.' }); return; }
+
+    await prisma.$transaction(async (tx) => {
+      const actor = await tx.user.findFirst({ where: { id: userId, deletedAt: null }, select: { name: true } });
+      const actorName = actor?.name ?? `User ${userId}`;
+      await tx.feedPost.update({ where: { id: postId }, data: { pinnedAt: null, pinnedByUserId: null } });
+      await tx.auditLog.create({
+        data: { actionType: 'FEED_POST_UNPINNED', entityType: 'FeedPost', entityId: String(postId), performedByUserId: userId, details: {} as any },
+      });
+      await createFeedPost(tx, {
+        type: 'SYSTEM_EVENT', scope: post.scope as FeedScope, scopeId: post.scopeId,
+        content: `${actorName} unpinned a comment.`, authorId: null,
+      });
+    });
+
+    res.json({ id: postId, pinned: false });
+  } catch (error) {
+    console.error('Error unpinning post:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/feeds/pinned/:scope/:scopeId? ───────────────────────────────────
+// Returns the (non-hidden) pinned comments for a WP / Division / Org feed, newest
+// pin first. TASK / FINDING feeds are not pinnable → always empty.
+export const getPinnedFeed = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const target = await resolveFeedTarget(req.params.scope, req.params.scopeId);
+    if (!target.ok) { res.status(target.status).json({ message: target.message }); return; }
+    if (!PINNABLE_SCOPES.includes(target.scope)) { res.json([]); return; }
+
+    const pinned = await prisma.feedPost.findMany({
+      where: { ...buildFeedPostScope(target.scope, target.scopeId), pinnedAt: { not: null }, hiddenAt: null },
+      orderBy: { pinnedAt: 'desc' },
+    });
+
+    const authorIds = [...new Set(pinned.map((p) => p.authorId).filter((id): id is number => typeof id === 'number'))];
+    const authors = authorIds.length
+      ? await prisma.user.findMany({ where: { id: { in: authorIds }, deletedAt: null }, select: { id: true, name: true } })
+      : [];
+    const authorMap = new Map(authors.map((a) => [a.id, a.name]));
+
+    res.json(pinned.map((p) => ({
+      ...p,
+      author: p.authorId ? { id: p.authorId, name: authorMap.get(p.authorId) ?? null } : null,
+      hidden: false,
+      pinned: true,
+    })));
+  } catch (error) {
+    console.error('Error fetching pinned feed:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

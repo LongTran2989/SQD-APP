@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { MessageCircle, Send } from 'lucide-react';
+import { MessageCircle, Send, Pin } from 'lucide-react';
 import { FeedPostEnriched, FeedScope, FeedPostType, EscalationTargetScope, User } from '../../types';
-import { getFeedPage, postFeedComment, canPostToFeed } from '../../api/feedApi';
+import { getFeedPage, getPinnedFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
 import { getApiErrorMessage } from '../../utils/apiError';
 import FeedPostItem from './FeedPostItem';
 import FeedFilterBar from './FeedFilterBar';
@@ -29,25 +29,47 @@ interface FeedPanelProps {
 export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed', readOnly = false }: FeedPanelProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const [posts, setPosts] = useState<FeedPostEnriched[]>([]);
+  const [pinned, setPinned] = useState<FeedPostEnriched[]>([]);
   const [cursor, setCursor] = useState<number | null>(null); // next `before` for older posts; null = start of feed
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [hidden, setHidden] = useState<Set<FeedPostType>>(new Set());
+  const [showHidden, setShowHidden] = useState(false); // Director/Admin: reveal soft-hidden comments
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
 
-  // Load the newest page on mount / scope change. setState lives in the promise
-  // callbacks (not synchronously in the effect body) — mirrors the Sidebar's
-  // badge-polling pattern. A 404 (missing target) or transient error just
+  // Moderation rights (Phase D). Hide/unhide is Director/Admin; pin/unpin mirrors
+  // posting rights and is only offered on the pinnable (WP/Division/Org) scopes.
+  const canModerate = currentUser.role === 'Director' || currentUser.role === 'Admin';
+  const isPinnableScope = scope === 'WP' || scope === 'DIVISION' || scope === 'ORG';
+  const canPin = isPinnableScope && canPostToFeed(currentUser.role, currentUser.divisionId, scope, scopeId);
+
+  const loadPinned = () => {
+    if (!isPinnableScope) return;
+    getPinnedFeed(scope, scopeId).then(setPinned).catch(() => {});
+  };
+
+  // Load the newest page on mount / scope change (and when Show-hidden toggles).
+  // setState lives in the promise callbacks (not synchronously in the effect body)
+  // — mirrors the Sidebar's badge-polling pattern. A 404 / transient error just
   // leaves an empty feed.
   useEffect(() => {
     let cancelled = false;
-    getFeedPage(scope, scopeId)
+    getFeedPage(scope, scopeId, { includeHidden: showHidden })
       .then((page) => { if (!cancelled) { setPosts(page.posts); setCursor(page.nextCursor); } })
       .catch(() => { if (!cancelled) { setPosts([]); setCursor(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [scope, scopeId]);
+  }, [scope, scopeId, showHidden]);
+
+  // Pinned strip loads independently of pagination/hidden state.
+  useEffect(() => {
+    let cancelled = false;
+    if (isPinnableScope) {
+      getPinnedFeed(scope, scopeId).then((p) => { if (!cancelled) setPinned(p); }).catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [scope, scopeId, isPinnableScope]);
 
   // Older posts are prepended above the current page; the scroll container keeps
   // its position (we only grow the top), so the reader isn't yanked.
@@ -57,7 +79,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
     const el = feedRef.current;
     const prevHeight = el?.scrollHeight ?? 0;
     try {
-      const page = await getFeedPage(scope, scopeId, { before: cursor });
+      const page = await getFeedPage(scope, scopeId, { before: cursor, includeHidden: showHidden });
       setPosts((prev) => [...page.posts, ...prev]);
       setCursor(page.nextCursor);
       // Preserve the reader's view by restoring the scroll offset after growth.
@@ -102,10 +124,13 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
   // Re-fetch after an escalation so the source-feed SYSTEM_EVENT (and any card
   // landing on this same feed) appears. Mirrors the load effect's setState.
   const reloadFeed = () => {
-    getFeedPage(scope, scopeId)
+    getFeedPage(scope, scopeId, { includeHidden: showHidden })
       .then((page) => { setPosts(page.posts); setCursor(page.nextCursor); })
       .catch(() => {});
   };
+
+  // After a hide/unhide/pin/unpin: refresh both the feed and the pinned strip.
+  const onModerated = () => { reloadFeed(); loadPinned(); };
 
   // Live activity: surface a "new updates" pill (and refetch on tab refocus)
   // rather than yanking new posts in while the user is reading.
@@ -139,8 +164,35 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
         <MessageCircle className="w-4 h-4 text-slate-400" />
         <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{title}</h2>
         <span className="ml-auto text-xs text-slate-400">{posts.length} entries</span>
-        <div className="w-full"><FeedFilterBar hidden={hidden} onToggle={toggleHidden} /></div>
+        <div className="w-full flex items-center justify-between gap-2">
+          <FeedFilterBar hidden={hidden} onToggle={toggleHidden} />
+          {canModerate && (
+            <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer select-none">
+              <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="accent-rose-500" />
+              Show hidden
+            </label>
+          )}
+        </div>
       </div>
+
+      {/* Pinned strip */}
+      {pinned.length > 0 && (
+        <div className="px-4 py-3 border-b border-amber-100 bg-amber-50/50 space-y-3 flex-shrink-0 max-h-48 overflow-y-auto">
+          <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-700 uppercase tracking-wide">
+            <Pin className="w-3 h-3" /> Pinned
+          </div>
+          {pinned.map((post) => (
+            <FeedPostItem
+              key={`pin-${post.id}`}
+              post={post}
+              currentUserId={currentUser.id}
+              canModerate={canModerate}
+              canPin={canPin}
+              onModerated={onModerated}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Feed list */}
       <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
@@ -173,6 +225,9 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
               flagTargets={flagTargets}
               onFlagged={reloadFeed}
               onActioned={reloadFeed}
+              canModerate={canModerate}
+              canPin={canPin}
+              onModerated={onModerated}
             />
           ))
         )}

@@ -330,4 +330,67 @@ describe('Feed API (Phase 2)', () => {
       await prisma.workPackageAssignment.deleteMany({ where: { wpId, userId: staffUserId } });
     });
   });
+
+  // ─── Moderation: hide & pin (Phase D) ────────────────────────────────────────
+
+  describe('Moderation — hide & pin', () => {
+    it('hides a comment from reads; Director sees it only with includeHidden; unhide restores', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'to hide', authorId: staffUserId } });
+
+      // Non-Director/Admin cannot hide.
+      const forbidden = await request(app).post(`/api/feeds/posts/${c.id}/hide`).set('Authorization', `Bearer ${staffToken}`).send({ reason: 'x' });
+      expect(forbidden.status).toBe(403);
+
+      // Director hides.
+      const hid = await request(app).post(`/api/feeds/posts/${c.id}/hide`).set('Authorization', `Bearer ${directorToken}`).send({ reason: 'off-topic' });
+      expect(hid.status).toBe(200);
+
+      // Excluded from a normal read.
+      const staffRead = await request(app).get(`/api/feeds/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(staffRead.body.find((p: { id: number }) => p.id === c.id)).toBeUndefined();
+
+      // includeHidden (Director) reveals it, marked hidden.
+      const dirRead = await request(app).get(`/api/feeds/DIVISION/${divisionId}?includeHidden=true`).set('Authorization', `Bearer ${directorToken}`);
+      const found = dirRead.body.find((p: { id: number }) => p.id === c.id);
+      expect(found).toBeTruthy();
+      expect(found.hidden).toBe(true);
+
+      // includeHidden is ignored for non-privileged roles.
+      const staffTry = await request(app).get(`/api/feeds/DIVISION/${divisionId}?includeHidden=true`).set('Authorization', `Bearer ${staffToken}`);
+      expect(staffTry.body.find((p: { id: number }) => p.id === c.id)).toBeUndefined();
+
+      // Unhide restores it for everyone.
+      const un = await request(app).post(`/api/feeds/posts/${c.id}/unhide`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(un.status).toBe(200);
+      const staffRead2 = await request(app).get(`/api/feeds/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(staffRead2.body.find((p: { id: number }) => p.id === c.id)).toBeTruthy();
+    });
+
+    it('pins a Division comment, surfaces it in the pinned feed, unpins; rejects cross-division and TASK', async () => {
+      const divComment = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'pin me', authorId: staffUserId } });
+
+      // A user from another division cannot pin on this division board.
+      const cross = await request(app).post(`/api/feeds/posts/${divComment.id}/pin`).set('Authorization', `Bearer ${staffBToken}`).send({});
+      expect(cross.status).toBe(403);
+
+      // Director pins.
+      const pin = await request(app).post(`/api/feeds/posts/${divComment.id}/pin`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(pin.status).toBe(200);
+
+      // Pinned feed lists it.
+      const pinnedFeed = await request(app).get(`/api/feeds/pinned/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(pinnedFeed.body.map((p: { id: number }) => p.id)).toContain(divComment.id);
+
+      // Unpin removes it from the pinned feed.
+      const unpin = await request(app).post(`/api/feeds/posts/${divComment.id}/unpin`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(unpin.status).toBe(200);
+      const pinnedFeed2 = await request(app).get(`/api/feeds/pinned/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(pinnedFeed2.body.map((p: { id: number }) => p.id)).not.toContain(divComment.id);
+
+      // A TASK comment is not pinnable.
+      const taskComment = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'TASK', scopeId: taskId, content: 'task c', authorId: staffUserId } });
+      const taskPin = await request(app).post(`/api/feeds/posts/${taskComment.id}/pin`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(taskPin.status).toBe(400);
+    });
+  });
 });

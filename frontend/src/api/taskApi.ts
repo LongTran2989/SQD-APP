@@ -218,12 +218,13 @@ export interface TaskActivityPage {
 
 export const getTaskActivityPage = (
   id: number,
-  opts: { limit?: number; before?: number | null; types?: string[] } = {}
+  opts: { limit?: number; before?: number | null; types?: string[]; includeHidden?: boolean } = {}
 ): Promise<TaskActivityPage> => {
   const params: Record<string, string> = {};
   if (opts.limit != null) params.limit = String(opts.limit);
   if (opts.before != null) params.before = String(opts.before);
   if (opts.types && opts.types.length) params.types = opts.types.join(',');
+  if (opts.includeHidden) params.includeHidden = 'true';
   return apiClient.get(`/tasks/${id}/activity`, { params }).then((r) => ({
     activities: r.data as TaskActivityEnriched[],
     nextCursor: r.headers['x-next-cursor'] ? Number(r.headers['x-next-cursor']) : null,

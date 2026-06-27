@@ -82,7 +82,32 @@ Backend read path + three feed components.
 
 ---
 
-## Phase D — FeedPost flags: soft-hide (M4) + pinning  *(one migration)*
+## Phase D — FeedPost flags: soft-hide (M4) + pinning  ✅ IMPLEMENTED  *(one migration)*
+
+**As built.** Schema: `FeedPost` gains `hiddenAt`/`hiddenByUserId`/`hiddenReason` +
+`pinnedAt`/`pinnedByUserId` and index `[scope, scopeId, pinnedAt]` (additive,
+reversible). **Run `npm run migrate:dev` + `npx prisma generate` for dev; tests pick
+it up via `test:setup` (db push regenerates the client).**
+- Endpoints (`feed.controller` + `feed.routes`): `POST /feeds/posts/:id/hide|unhide`
+  (Director/Admin), `…/pin|unpin` (scope-gated via `canPostToFeed`, WP/DIV/ORG only),
+  `GET /feeds/pinned/:scope/:scopeId?`. All COMMENT-only, rate-limited, dual-write
+  AuditLog + a SYSTEM_EVENT.
+- **Hidden filter applied to EVERY feed read** (the Rule-2-style obligation): `getFeed`,
+  `getTaskActivity`, dashboard `getFeed` + `getOngoingWorks`, and the task-list
+  `getLastActivityMap` + `getRecentActivitiesMap`. Default excludes hidden; Director/
+  Admin may pass `?includeHidden=true` (getFeed/getTaskActivity) to review them.
+- Frontend: shared `CommentModerationMenu` (pin/hide icons), pinned strip + "Show
+  hidden" toggle in `FeedPanel`; `FindingActivityFeed` gets hide/unhide + show-hidden
+  (self-contained); `TaskActivityFeed` gets hide/unhide + a self-fetched "Show hidden"
+  moderation view (parent page untouched). `getFeed`/`getTaskActivity` return
+  `hidden`/`pinned` flags. Verified: frontend `tsc` + lint clean.
+- Tests (feed.test.ts): hide excludes from reads / includeHidden reveals for Director /
+  non-privileged ignored / unhide restores; pin→pinned-feed→unpin; cross-division pin
+  403; TASK pin 400.
+- Known limitation: pinning is COMMENT-only and WP/DIV/ORG-only (TASK/FINDING not
+  pinnable, by design).
+
+### Original plan notes
 **Migration (additive, reversible):** on `model FeedPost` add
 `hiddenAt DateTime?`, `hiddenByUserId Int?`, `hiddenReason String?`,
 `pinnedAt DateTime?`, `pinnedByUserId Int?`. Add index `@@index([scope, scopeId, pinnedAt])`.

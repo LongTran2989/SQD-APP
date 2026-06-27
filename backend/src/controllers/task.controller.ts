@@ -237,7 +237,7 @@ async function getLastActivityMap(taskIds: number[]): Promise<Map<number, Date>>
 
   const grouped = await prisma.feedPost.groupBy({
     by: ['scopeId'],
-    where: { scope: 'TASK', scopeId: { in: taskIds } },
+    where: { scope: 'TASK', scopeId: { in: taskIds }, hiddenAt: null }, // exclude soft-hidden (M4)
     _max: { createdAt: true }
   });
   for (const g of grouped) {
@@ -260,7 +260,7 @@ async function getRecentActivitiesMap(taskIds: number[], limit = 2): Promise<Map
   if (taskIds.length === 0) return map;
 
   const posts = await prisma.feedPost.findMany({
-    where: { scope: 'TASK', scopeId: { in: taskIds } },
+    where: { scope: 'TASK', scopeId: { in: taskIds }, hiddenAt: null }, // exclude soft-hidden (M4)
     orderBy: [{ scopeId: 'asc' }, { createdAt: 'desc' }],
     select: { scopeId: true, content: true, createdAt: true, authorId: true }
   });
@@ -2432,9 +2432,14 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
     const before = parseFeedBefore(req.query.before);
     const types = parseFeedTypes(req.query.types);
 
+    // Hidden COMMENTs (M4) are excluded; Director/Admin may opt in to review them.
+    const isDirectorOrAdmin = role === 'Director' || role === 'Admin';
+    const includeHidden = isDirectorOrAdmin && req.query.includeHidden === 'true';
+
     const where: Prisma.FeedPostWhereInput = { scope: 'TASK', scopeId: id };
     if (types) where.type = { in: types };
     if (before != null) where.id = { lt: before };
+    if (!includeHidden) where.hiddenAt = null;
 
     const rows = await prisma.feedPost.findMany({
       where,
@@ -2458,7 +2463,9 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
 
     const enriched = activities.map(a => ({
       ...a,
-      author: a.authorId ? { id: a.authorId, name: authorMap.get(a.authorId) ?? null } : null
+      author: a.authorId ? { id: a.authorId, name: authorMap.get(a.authorId) ?? null } : null,
+      hidden: a.hiddenAt != null,
+      pinned: a.pinnedAt != null, // always false for TASK (not pinnable) — kept for shape parity
     }));
 
     res.json(enriched);
