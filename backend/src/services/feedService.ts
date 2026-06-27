@@ -61,6 +61,39 @@ export function isFeedScope(value: string): value is FeedScope {
   return (FEED_SCOPES as string[]).includes(value);
 }
 
+export const FEED_POST_TYPES: FeedPostType[] = ['COMMENT', 'SYSTEM_EVENT', 'ESCALATION_CARD', 'INFO_CARD'];
+
+// Feed read pagination (H2). Reads are keyset-paginated newest-first on the
+// primary key (FeedPost.id is monotonic with creation, so id-desc == createdAt-
+// desc) and the controller reverses the page to ascending for chat-style display.
+export const DEFAULT_FEED_LIMIT = 30;
+export const MAX_FEED_LIMIT = 100;
+
+/** Clamps a requested page size to [1, MAX_FEED_LIMIT], defaulting when absent/invalid. */
+export function parseFeedLimit(raw: unknown): number {
+  const n = parseInt(String(raw ?? ''), 10);
+  if (Number.isNaN(n) || n < 1) return DEFAULT_FEED_LIMIT;
+  return Math.min(n, MAX_FEED_LIMIT);
+}
+
+/** Parses the keyset cursor: the id to page *before* (older than). Null when absent/invalid. */
+export function parseFeedBefore(raw: unknown): number | null {
+  const n = parseInt(String(raw ?? ''), 10);
+  return Number.isNaN(n) || n < 1 ? null : n;
+}
+
+/**
+ * Parses an optional `types` filter ("COMMENT,SYSTEM_EVENT") into a validated,
+ * de-duplicated FeedPostType[]. Returns null when absent/empty/all-invalid so the
+ * caller omits the type filter entirely (= all types).
+ */
+export function parseFeedTypes(raw: unknown): FeedPostType[] | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const parts = raw.split(',').map((s) => s.trim().toUpperCase());
+  const valid = parts.filter((p): p is FeedPostType => (FEED_POST_TYPES as string[]).includes(p));
+  return valid.length > 0 ? [...new Set(valid)] : null;
+}
+
 /**
  * Maximum length of a single feed COMMENT. Mirrors the cap the Task feed has
  * always enforced (task.controller's MAX_COMMENT_LEN). Centralised here so EVERY

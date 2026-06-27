@@ -182,6 +182,47 @@ describe('Feed API (Phase 2)', () => {
     });
   });
 
+  // ─── Pagination & filters (Phase B / H2) ─────────────────────────────────────
+
+  describe('GET feeds — pagination & filters', () => {
+    it('caps the page size and returns the newest page with an X-Next-Cursor header', async () => {
+      for (let i = 1; i <= 5; i++) {
+        await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: `c${i}`, authorId: staffUserId } });
+      }
+      const res = await request(app).get(`/api/feeds/DIVISION/${divisionId}?limit=2`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.length).toBe(2);
+      // Page is ascending; the newest two posts are c4 then c5.
+      expect(res.body.map((p: { content: string }) => p.content)).toEqual(['c4', 'c5']);
+      expect(res.headers['x-next-cursor']).toBeTruthy();
+    });
+
+    it('pages backward via the before cursor until exhausted', async () => {
+      const ids: number[] = [];
+      for (let i = 1; i <= 3; i++) {
+        const p = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: `p${i}`, authorId: staffUserId } });
+        ids.push(p.id);
+      }
+      const first = await request(app).get(`/api/feeds/DIVISION/${divisionId}?limit=2`).set('Authorization', `Bearer ${staffToken}`);
+      expect(first.body.map((p: { content: string }) => p.content)).toEqual(['p2', 'p3']);
+      const cursor = first.headers['x-next-cursor'];
+      expect(Number(cursor)).toBe(ids[1]); // p2's id = oldest in the first page
+
+      const second = await request(app).get(`/api/feeds/DIVISION/${divisionId}?limit=2&before=${cursor}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(second.body.map((p: { content: string }) => p.content)).toEqual(['p1']);
+      expect(second.headers['x-next-cursor']).toBe(''); // start of feed reached
+    });
+
+    it('filters by type', async () => {
+      await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'a comment', authorId: staffUserId } });
+      await prisma.feedPost.create({ data: { type: 'SYSTEM_EVENT', scope: 'DIVISION', scopeId: divisionId, content: 'an event' } });
+      const res = await request(app).get(`/api/feeds/DIVISION/${divisionId}?types=SYSTEM_EVENT`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.length).toBe(1);
+      expect(res.body[0].type).toBe('SYSTEM_EVENT');
+    });
+  });
+
   // ─── Posting RBAC ────────────────────────────────────────────────────────────
 
   describe('POST feeds — comment RBAC', () => {

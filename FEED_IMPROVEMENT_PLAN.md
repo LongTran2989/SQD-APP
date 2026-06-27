@@ -55,20 +55,21 @@ No schema changes.
 
 ---
 
-## Phase B — Pagination (H2) + Feed filters
-Backend read path + two feed components.
+## Phase B — Pagination (H2) + Feed filters  ✅ IMPLEMENTED
+Backend read path + three feed components.
 
-**H2 — keyset pagination**
-- `backend/src/controllers/feed.controller.getFeed`: accept `?limit` (default 30, max 100) + `?before` cursor (`createdAt`+`id`). Fetch newest-first on the `[scope, scopeId, createdAt]` index, return `{ posts, nextCursor }`. Keep response enrichment (author/flag/canAction) unchanged.
-- `backend/src/controllers/task.controller.getTaskActivity`: same cursor treatment.
-- `frontend/src/api/feedApi.ts` + `taskApi.ts`: thread `limit`/`before`, return cursor.
-- `frontend/src/components/feed/FeedPanel.tsx` + `components/tasks/TaskActivityFeed.tsx`: "load earlier" on scroll-to-top; keep newest-at-bottom chat layout; preserve scroll position when prepending.
-- Tests: cursor correctness, page boundaries, empty/last page.
+**H2 — keyset pagination (as built)**
+- **Cursor by primary key, returned via header** (not a `{posts,nextCursor}` body) to stay backward-compatible with the many existing array-consuming callers (quickview previews, the task detail page's 6 call sites) and existing tests. Response **body stays an array**; the cursor rides `X-Next-Cursor` (exposed in CORS, `index.ts`).
+- `feedService.ts`: shared `parseFeedLimit` (default 30, max 100), `parseFeedBefore`, `parseFeedTypes`, `FEED_POST_TYPES`.
+- `feed.controller.getFeed` + `task.controller.getTaskActivity`: `WHERE scope/scopeId [+ type in] [+ id < before] ORDER BY id DESC LIMIT n`, then reverse to ascending; `nextCursor` = oldest id when the page is full, else null → `X-Next-Cursor`.
+- `frontend/src/api/feedApi.ts`: `getFeed` (array, unchanged) + new `getFeedPage` (reads header). `taskApi.ts`: `getTaskActivity` (array) + `getTaskActivityPage`.
+- `FeedPanel.tsx` + `FindingActivityFeed.tsx`: paginate via `getFeedPage`, **"Load earlier"** button that prepends older posts with scroll-position preservation; auto-scroll-to-bottom fires only when the bottom entry changes. `TaskActivityFeed.tsx`: keeps parent-owned `activities` (newest page) and manages an internal `earlier` list + cursor (optimistic), so the big task page is untouched.
 
-**Feed filters**
-- Backend: optional `?types=COMMENT,SYSTEM_EVENT,ESCALATION_CARD,INFO_CARD` filter in `getFeed`/`getTaskActivity` (validated against allowed set).
-- Frontend: a small filter control in `FeedPanel`/`TaskActivityFeed` header (Comments / Events / Escalations). Client passes `types`; default = all.
-- Tests: filtered reads return only requested types.
+**Feed filters (as built)**
+- Backend supports `?types=` (validated subset) for server-side use.
+- UI uses a shared **client-side** `FeedFilterBar` (hidden-set semantics) in all three feeds — Comments / Events / (Escalations / Info on FeedPanel) — no refetch, no cursor interaction.
+- Tests added (feed.test.ts): page-size cap + `X-Next-Cursor`, backward paging via `before` to exhaustion, `types` filter.
+- Verified: frontend `tsc --noEmit` + `npm run lint` clean on changed files. Backend jest not run in-container (Prisma engine egress-blocked + no PG) — run locally.
 
 ---
 

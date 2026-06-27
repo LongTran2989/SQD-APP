@@ -1,14 +1,18 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { FeedPostEnriched, User } from '../../types';
-import { getFeed, postFeedComment } from '../../api/feedApi';
+import { FeedPostEnriched, FeedPostType, User } from '../../types';
+import { getFeedPage, postFeedComment } from '../../api/feedApi';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
+import FeedFilterBar from '../feed/FeedFilterBar';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
+
+// Finding feeds only carry comments and system events (no escalation cards).
+const FINDING_FILTER_OPTIONS: FeedPostType[] = ['COMMENT', 'SYSTEM_EVENT'];
 
 interface FindingActivityFeedProps {
   findingId: number;
@@ -19,35 +23,70 @@ interface FindingActivityFeedProps {
 export default function FindingActivityFeed({ findingId, currentUser, onRefresh }: FindingActivityFeedProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const [posts, setPosts] = useState<FeedPostEnriched[]>([]);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [hidden, setHidden] = useState<Set<FeedPostType>>(new Set());
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
 
-  // Load on mount. setState lives in promise callbacks (not synchronously in
-  // the effect body) to satisfy react-hooks/set-state-in-effect.
+  // Load the newest page on mount. setState lives in promise callbacks (not
+  // synchronously in the effect body) to satisfy react-hooks/set-state-in-effect.
   useEffect(() => {
     let cancelled = false;
-    getFeed('FINDING', findingId)
-      .then((data) => { if (!cancelled) setPosts(data); })
-      .catch(() => { if (!cancelled) setPosts([]); })
+    getFeedPage('FINDING', findingId)
+      .then((page) => { if (!cancelled) { setPosts(page.posts); setCursor(page.nextCursor); } })
+      .catch(() => { if (!cancelled) { setPosts([]); setCursor(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [findingId]);
 
-  // Auto-scroll to newest on load / new entries.
+  // Auto-scroll to newest only when the BOTTOM entry changes (initial load or an
+  // appended post) — never when older posts are prepended via "Load earlier".
+  const lastIdRef = useRef<number | null>(null);
   useEffect(() => {
-    if (feedRef.current) {
-      feedRef.current.scrollTop = feedRef.current.scrollHeight;
+    const lastId = posts.length ? posts[posts.length - 1].id : null;
+    if (lastId !== lastIdRef.current) {
+      if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+      lastIdRef.current = lastId;
     }
-  }, [posts.length]);
+  }, [posts]);
 
   // Reload helper (called by realtime refresh + parent onRefresh).
   const reloadFeed = () => {
-    getFeed('FINDING', findingId)
-      .then(setPosts)
+    getFeedPage('FINDING', findingId)
+      .then((page) => { setPosts(page.posts); setCursor(page.nextCursor); })
       .catch(() => {});
     onRefresh?.();
   };
+
+  const handleLoadEarlier = async () => {
+    if (cursor == null || loadingEarlier) return;
+    setLoadingEarlier(true);
+    const el = feedRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    try {
+      const page = await getFeedPage('FINDING', findingId, { before: cursor });
+      setPosts((prev) => [...page.posts, ...prev]);
+      setCursor(page.nextCursor);
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop += el.scrollHeight - prevHeight;
+      });
+    } catch {
+      /* transient */
+    } finally {
+      setLoadingEarlier(false);
+    }
+  };
+
+  const toggleHidden = (t: FeedPostType) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t); else next.add(t);
+      return next;
+    });
+
+  const visiblePosts = posts.filter((p) => !hidden.has(p.type));
 
   const { hasNew, refresh } = useRealtimeRefresh(feedKey('FINDING', findingId), reloadFeed);
 
@@ -76,26 +115,38 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100 flex-shrink-0">
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b border-slate-100 flex-shrink-0">
         <MessageCircle className="w-4 h-4 text-slate-400" />
         <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Activity Feed</h2>
         <span className="ml-auto text-xs text-slate-400">{posts.length} entries</span>
+        <div className="w-full"><FeedFilterBar hidden={hidden} onToggle={toggleHidden} options={FINDING_FILTER_OPTIONS} /></div>
       </div>
 
       {/* Feed list */}
       <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
         <NewUpdatesPill show={hasNew} onClick={refresh} />
+        {!loading && cursor != null && (
+          <div className="flex justify-center">
+            <button
+              onClick={handleLoadEarlier}
+              disabled={loadingEarlier}
+              className="px-3 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-full border border-blue-200 transition-colors disabled:opacity-50"
+            >
+              {loadingEarlier ? 'Loading…' : 'Load earlier'}
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-500" />
           </div>
-        ) : posts.length === 0 ? (
+        ) : visiblePosts.length === 0 ? (
           <div className="text-center text-slate-400 text-sm py-8">
             No activity yet. Actions and comments will appear here.
           </div>
         ) : (
-          posts.map((entry) => {
+          visiblePosts.map((entry) => {
             const isSystem = entry.type === 'SYSTEM_EVENT';
 
             if (isSystem) {

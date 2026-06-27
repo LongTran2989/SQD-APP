@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { MessageCircle, Send } from 'lucide-react';
-import { FeedPostEnriched, FeedScope, EscalationTargetScope, User } from '../../types';
-import { getFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
+import { FeedPostEnriched, FeedScope, FeedPostType, EscalationTargetScope, User } from '../../types';
+import { getFeedPage, postFeedComment, canPostToFeed } from '../../api/feedApi';
 import { getApiErrorMessage } from '../../utils/apiError';
 import FeedPostItem from './FeedPostItem';
+import FeedFilterBar from './FeedFilterBar';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
@@ -28,29 +29,67 @@ interface FeedPanelProps {
 export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed', readOnly = false }: FeedPanelProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const [posts, setPosts] = useState<FeedPostEnriched[]>([]);
+  const [cursor, setCursor] = useState<number | null>(null); // next `before` for older posts; null = start of feed
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [hidden, setHidden] = useState<Set<FeedPostType>>(new Set());
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
 
-  // Load the feed on mount / scope change. setState lives in the promise
+  // Load the newest page on mount / scope change. setState lives in the promise
   // callbacks (not synchronously in the effect body) — mirrors the Sidebar's
   // badge-polling pattern. A 404 (missing target) or transient error just
   // leaves an empty feed.
   useEffect(() => {
     let cancelled = false;
-    getFeed(scope, scopeId)
-      .then((data) => { if (!cancelled) setPosts(data); })
-      .catch(() => { if (!cancelled) setPosts([]); })
+    getFeedPage(scope, scopeId)
+      .then((page) => { if (!cancelled) { setPosts(page.posts); setCursor(page.nextCursor); } })
+      .catch(() => { if (!cancelled) { setPosts([]); setCursor(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [scope, scopeId]);
 
-  // Auto-scroll to newest on load / new entries.
-  useEffect(() => {
-    if (feedRef.current) {
-      feedRef.current.scrollTop = feedRef.current.scrollHeight;
+  // Older posts are prepended above the current page; the scroll container keeps
+  // its position (we only grow the top), so the reader isn't yanked.
+  const handleLoadEarlier = async () => {
+    if (cursor == null || loadingEarlier) return;
+    setLoadingEarlier(true);
+    const el = feedRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    try {
+      const page = await getFeedPage(scope, scopeId, { before: cursor });
+      setPosts((prev) => [...page.posts, ...prev]);
+      setCursor(page.nextCursor);
+      // Preserve the reader's view by restoring the scroll offset after growth.
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop += el.scrollHeight - prevHeight;
+      });
+    } catch {
+      /* transient — leave the feed as-is */
+    } finally {
+      setLoadingEarlier(false);
     }
-  }, [posts.length]);
+  };
+
+  const toggleHidden = (t: FeedPostType) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t); else next.add(t);
+      return next;
+    });
+
+  const visiblePosts = posts.filter((p) => !hidden.has(p.type));
+
+  // Auto-scroll to newest only when the BOTTOM entry changes (initial load or an
+  // appended post) — never when older posts are prepended via "Load earlier".
+  const lastIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    const lastId = posts.length ? posts[posts.length - 1].id : null;
+    if (lastId !== lastIdRef.current) {
+      if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+      lastIdRef.current = lastId;
+    }
+  }, [posts]);
 
   const canPost = !readOnly && canPostToFeed(currentUser.role, currentUser.divisionId, scope, scopeId);
 
@@ -63,8 +102,8 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
   // Re-fetch after an escalation so the source-feed SYSTEM_EVENT (and any card
   // landing on this same feed) appears. Mirrors the load effect's setState.
   const reloadFeed = () => {
-    getFeed(scope, scopeId)
-      .then(setPosts)
+    getFeedPage(scope, scopeId)
+      .then((page) => { setPosts(page.posts); setCursor(page.nextCursor); })
       .catch(() => {});
   };
 
@@ -96,25 +135,37 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100 flex-shrink-0">
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b border-slate-100 flex-shrink-0">
         <MessageCircle className="w-4 h-4 text-slate-400" />
         <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{title}</h2>
         <span className="ml-auto text-xs text-slate-400">{posts.length} entries</span>
+        <div className="w-full"><FeedFilterBar hidden={hidden} onToggle={toggleHidden} /></div>
       </div>
 
       {/* Feed list */}
       <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
         <NewUpdatesPill show={hasNew} onClick={refresh} />
+        {!loading && cursor != null && (
+          <div className="flex justify-center">
+            <button
+              onClick={handleLoadEarlier}
+              disabled={loadingEarlier}
+              className="px-3 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-full border border-blue-200 transition-colors disabled:opacity-50"
+            >
+              {loadingEarlier ? 'Loading…' : 'Load earlier'}
+            </button>
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : posts.length === 0 ? (
+        ) : visiblePosts.length === 0 ? (
           <div className="text-center text-slate-400 text-sm py-8">
             No activity yet. Comments and events will appear here.
           </div>
         ) : (
-          posts.map((post) => (
+          visiblePosts.map((post) => (
             <FeedPostItem
               key={post.id}
               post={post}

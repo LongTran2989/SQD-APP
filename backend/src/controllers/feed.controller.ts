@@ -1,11 +1,14 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import {
   createFeedPost,
   buildFeedPostScope,
   canPostToFeed,
   commentLengthError,
   isFeedScope,
+  parseFeedLimit,
+  parseFeedBefore,
+  parseFeedTypes,
   FeedScope,
 } from '../services/feedService';
 import { canActionFlag } from '../services/escalationService';
@@ -77,10 +80,27 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const posts = await prisma.feedPost.findMany({
-      where: buildFeedPostScope(target.scope, target.scopeId),
-      orderBy: { createdAt: 'asc' },
+    // Keyset pagination (H2): newest-first on the primary key, capped page size,
+    // optional `before` cursor (page older than an id) and `types` filter. The
+    // page is reversed to ascending below for chat-style (oldest-at-top) render.
+    const limit = parseFeedLimit(req.query.limit);
+    const before = parseFeedBefore(req.query.before);
+    const types = parseFeedTypes(req.query.types);
+
+    const where: Prisma.FeedPostWhereInput = buildFeedPostScope(target.scope, target.scopeId);
+    if (types) where.type = { in: types };
+    if (before != null) where.id = { lt: before };
+
+    const rows = await prisma.feedPost.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: limit,
     });
+    // A full page implies there may be older posts: the oldest row's id is the
+    // next `before` cursor. A short page means we reached the start of the feed.
+    const nextCursor = rows.length === limit ? rows[rows.length - 1].id : null;
+    res.setHeader('X-Next-Cursor', nextCursor != null ? String(nextCursor) : '');
+    const posts = rows.reverse();
 
     // Author names, live flag statuses, and the (WP-only) feed division are all
     // independent of one another — batch them in a single round-trip rather than

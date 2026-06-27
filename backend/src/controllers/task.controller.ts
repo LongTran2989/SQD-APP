@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
-import { createFeedPost } from '../services/feedService';
+import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes } from '../services/feedService';
 import { createNotifications, notifyFeedWatchers } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS, TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
@@ -2424,10 +2424,26 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
     // Access control: Transparent viewing model
     // All authenticated users can view the task activity feed.
 
-    const activities = await prisma.feedPost.findMany({
-      where: { scope: 'TASK', scopeId: id },
-      orderBy: { createdAt: 'asc' }
+    // Keyset pagination (H2) — mirrors feed.controller.getFeed: newest-first on
+    // the primary key, capped page size, optional `before` cursor + `types`
+    // filter, page reversed to ascending for chat-style render. Cursor returned
+    // via the X-Next-Cursor header (exposed in CORS).
+    const limit = parseFeedLimit(req.query.limit);
+    const before = parseFeedBefore(req.query.before);
+    const types = parseFeedTypes(req.query.types);
+
+    const where: Prisma.FeedPostWhereInput = { scope: 'TASK', scopeId: id };
+    if (types) where.type = { in: types };
+    if (before != null) where.id = { lt: before };
+
+    const rows = await prisma.feedPost.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: limit,
     });
+    const nextCursor = rows.length === limit ? rows[rows.length - 1].id : null;
+    res.setHeader('X-Next-Cursor', nextCursor != null ? String(nextCursor) : '');
+    const activities = rows.reverse();
 
     // Enrich with author name where authorId is present
     const authorIds = [...new Set(activities.map(a => a.authorId).filter(Boolean))] as number[];

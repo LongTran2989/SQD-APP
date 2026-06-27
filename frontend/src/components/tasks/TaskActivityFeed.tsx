@@ -1,15 +1,19 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { TaskEnriched, TaskActivityEnriched, EscalationTargetScope, User } from '../../types';
-import { postTaskComment } from '../../api/taskApi';
+import { TaskEnriched, TaskActivityEnriched, FeedPostType, EscalationTargetScope, User } from '../../types';
+import { postTaskComment, getTaskActivityPage } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
 import FlagButton from '../feed/FlagButton';
+import FeedFilterBar from '../feed/FeedFilterBar';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
+
+// Task feeds carry comments and system events (no escalation cards on the feed).
+const TASK_FILTER_OPTIONS: FeedPostType[] = ['COMMENT', 'SYSTEM_EVENT'];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,10 +44,63 @@ export default function TaskActivityFeed({
   const feedRef = useRef<HTMLDivElement>(null);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
+  // Older entries loaded via "Load earlier" — kept separate from the parent-owned
+  // `activities` (the newest page) so the parent's refresh logic stays untouched.
+  // cursor: undefined = unknown (button shown optimistically), number = more
+  // available, null = start of feed reached.
+  const [earlier, setEarlier] = useState<TaskActivityEnriched[]>([]);
+  const [cursor, setCursor] = useState<number | null | undefined>(undefined);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [hidden, setHidden] = useState<Set<FeedPostType>>(new Set());
+
+  // The parent re-fetches the newest page on task change; drop any locally loaded
+  // older entries so we never show a stale/mismatched history for a new task.
+  // Reset during render (React's "adjust state when a prop changes" pattern) so
+  // we avoid a setState-in-effect cascade.
+  const [trackedTaskId, setTrackedTaskId] = useState(task.id);
+  if (trackedTaskId !== task.id) {
+    setTrackedTaskId(task.id);
+    setEarlier([]);
+    setCursor(undefined);
+  }
 
   // Live activity on this task's feed → "new updates" pill + focus-refetch,
   // using the parent's refetch (no-op when the parent doesn't supply one).
   const { hasNew, refresh } = useRealtimeRefresh(feedKey('TASK', task.id), () => onRefresh?.());
+
+  // Merge older + newest page, de-duping by id (the newest page wins), then apply
+  // the client-side type filter. `earlier` are strictly older than `activities`.
+  const activityIds = new Set(activities.map((a) => a.id));
+  const merged = [...earlier.filter((e) => !activityIds.has(e.id)), ...activities];
+  const visibleActivities = merged.filter((a) => !hidden.has(a.type as FeedPostType));
+
+  const handleLoadEarlier = async () => {
+    if (cursor === null || loadingEarlier) return;
+    const before = (earlier[0]?.id ?? activities[0]?.id);
+    if (before == null) { setCursor(null); return; }
+    setLoadingEarlier(true);
+    const el = feedRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    try {
+      const page = await getTaskActivityPage(task.id, { before });
+      setEarlier((prev) => [...page.activities, ...prev]);
+      setCursor(page.nextCursor);
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop += el.scrollHeight - prevHeight;
+      });
+    } catch {
+      /* transient — leave as-is */
+    } finally {
+      setLoadingEarlier(false);
+    }
+  };
+
+  const toggleHidden = (t: FeedPostType) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t); else next.add(t);
+      return next;
+    });
 
   // Auto-scroll to bottom on mount and when activities change
   useEffect(() => {
@@ -89,10 +146,11 @@ export default function TaskActivityFeed({
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100 flex-shrink-0">
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b border-slate-100 flex-shrink-0">
         <MessageCircle className="w-4 h-4 text-slate-400" />
         <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Activity Feed</h2>
-        <span className="ml-auto text-xs text-slate-400">{activities.length} entries</span>
+        <span className="ml-auto text-xs text-slate-400">{merged.length} entries</span>
+        <div className="w-full"><FeedFilterBar hidden={hidden} onToggle={toggleHidden} options={TASK_FILTER_OPTIONS} /></div>
       </div>
 
       {/* Feed list */}
@@ -101,12 +159,23 @@ export default function TaskActivityFeed({
         className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0"
       >
         {onRefresh && <NewUpdatesPill show={hasNew} onClick={refresh} />}
-        {activities.length === 0 ? (
+        {cursor !== null && merged.length > 0 && (
+          <div className="flex justify-center">
+            <button
+              onClick={handleLoadEarlier}
+              disabled={loadingEarlier}
+              className="px-3 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-full border border-blue-200 transition-colors disabled:opacity-50"
+            >
+              {loadingEarlier ? 'Loading…' : 'Load earlier'}
+            </button>
+          </div>
+        )}
+        {visibleActivities.length === 0 ? (
           <div className="text-center text-slate-400 text-sm py-8">
             No activity yet. Actions and comments will appear here.
           </div>
         ) : (
-          activities.map((entry) => {
+          visibleActivities.map((entry) => {
             const isSystem = entry.type === 'SYSTEM_EVENT';
 
             if (isSystem) {

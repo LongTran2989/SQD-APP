@@ -51,7 +51,9 @@ app.set('trust proxy', 1);
 // explicit origin (a wildcard origin is incompatible with credentialed
 // requests). Configure FRONTEND_ORIGIN per environment.
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
-app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
+// `X-Next-Cursor` is exposed so the browser can read the feed pagination cursor
+// from cross-origin responses (custom headers are hidden by CORS otherwise).
+app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true, exposedHeaders: ['X-Next-Cursor'] }));
 app.use(express.json());
 app.use(cookieParser());
 
