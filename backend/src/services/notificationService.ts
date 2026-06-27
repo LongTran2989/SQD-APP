@@ -323,6 +323,27 @@ export async function resolveWpWatchers(client: PrismaLike, wpId: number): Promi
 }
 
 /**
+ * Watchers of a finding feed: the reporter, the closer (if any), plus the source
+ * task's watchers (issuer + assignee). Used to scope the realtime feed SIGNAL for
+ * FINDING feeds (M1) — NOT for inbox notifications (findings are intentionally not
+ * in notifyFeedWatchers, which covers only TASK/WP).
+ */
+export async function resolveFindingWatchers(client: PrismaLike, findingId: number): Promise<number[]> {
+  const finding = await client.finding.findUnique({
+    where: { id: findingId, deletedAt: null },
+    select: { reportedByUserId: true, closedByUserId: true, sourceTaskId: true },
+  });
+  if (!finding) return [];
+  const ids = [finding.reportedByUserId, finding.closedByUserId].filter(
+    (id): id is number => typeof id === 'number'
+  );
+  if (finding.sourceTaskId != null) {
+    ids.push(...(await resolveTaskWatchers(client, finding.sourceTaskId)));
+  }
+  return Array.from(new Set(ids));
+}
+
+/**
  * Resolves the set of users who hold a given privilege, honouring the same
  * scope rule as escalation/finding review: Director/Admin reach across all
  * divisions; every other privileged role is limited to `divisionId`. Pass

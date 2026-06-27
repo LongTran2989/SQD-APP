@@ -26,7 +26,9 @@ export const REALTIME_CHANNEL = 'sqd_realtime';
 export type RealtimeEvent =
   | { kind: 'notification'; userId: number }
   | { kind: 'escalation'; userId: number }
-  | { kind: 'feed'; scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG' | 'FINDING'; scopeId: number | null };
+  // M1: `userIds` scopes a feed signal to a feed's watchers (TASK/WP/FINDING).
+  // When omitted, the signal is broadcast to all clients (DIVISION/ORG).
+  | { kind: 'feed'; scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG' | 'FINDING'; scopeId: number | null; userIds?: number[] };
 
 // Postgres pg_notify has an 8000-byte payload limit (hard limit in the backend).
 // Signals here are signals only ({kind, userId} or {kind, scope, scopeId}) and
@@ -45,7 +47,14 @@ export async function emitRealtimeEvent(client: PrismaLike, evt: RealtimeEvent):
   try {
     const payload = JSON.stringify(evt);
     if (Buffer.byteLength(payload, 'utf8') > MAX_NOTIFY_BYTES) {
-      // Should never happen — guard exists to catch future signal-shape drift.
+      // A feed signal with an unusually large watcher set (e.g. a WP with very many
+      // assignees) can overflow the payload. Rather than drop the signal, fall back
+      // to a broadcast (omit userIds) so watchers still get refreshed.
+      if (evt.kind === 'feed' && evt.userIds) {
+        await emitRealtimeEvent(client, { ...evt, userIds: undefined });
+        return;
+      }
+      // Should never happen otherwise — guard catches future signal-shape drift.
       console.error('[realtime] emit skipped — payload exceeds pg_notify limit:', Buffer.byteLength(payload, 'utf8'), 'bytes');
       return;
     }
@@ -62,7 +71,9 @@ export async function emitRealtimeEvent(client: PrismaLike, evt: RealtimeEvent):
 let listenClient: import('pg').PoolClient | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
 
-function dispatch(raw: string): void {
+// Exported for unit testing the routing logic (the live path is the NOTIFY
+// listener in startRealtimeListener, which calls this with the raw payload).
+export function dispatch(raw: string): void {
   let evt: RealtimeEvent;
   try {
     evt = JSON.parse(raw) as RealtimeEvent;
@@ -76,11 +87,19 @@ function dispatch(raw: string): void {
     case 'escalation':
       publishToUser(evt.userId, { type: 'escalation', data: {} });
       return;
-    case 'feed':
-      // Feed signals have no single owner — broadcast and let each client decide
-      // (via its open views + RBAC-scoped refetch) whether the signal is relevant.
-      publishToAll({ type: 'feed', data: { scope: evt.scope, scopeId: evt.scopeId } });
+    case 'feed': {
+      // M1: a scoped feed signal (TASK/WP/FINDING) carries its watcher userIds —
+      // fan out to just those clients. A broadcast feed signal (DIVISION/ORG, no
+      // userIds) goes to everyone; each client decides relevance via its open
+      // views + RBAC-scoped refetch.
+      const frame = { type: 'feed', data: { scope: evt.scope, scopeId: evt.scopeId } };
+      if (evt.userIds && evt.userIds.length > 0) {
+        for (const uid of evt.userIds) publishToUser(uid, frame);
+      } else {
+        publishToAll(frame);
+      }
       return;
+    }
     default: {
       // Exhaustiveness guard: a new event kind that forgets a dispatch case (or a
       // malformed payload) must surface in logs rather than vanish silently.

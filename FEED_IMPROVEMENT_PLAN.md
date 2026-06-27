@@ -73,9 +73,11 @@ Backend read path + three feed components.
 
 ---
 
-## Phase C — SSE signal scoping (M1)
-- `backend/src/realtime/pgEvents.ts` `dispatch`: keep `publishToAll` for **DIVISION/ORG** (genuinely shared), but route **TASK/WP/FINDING** feed signals to their watcher set via `publishToUser` (reuse `resolveTaskWatchers`/`resolveWpWatchers`; add a finding watcher resolver).
-- **DECIDED: resolve watchers at emit time.** `emitRealtimeEvent` resolves the watcher userIds (one producer-side DB hit) and includes them in the NOTIFY payload (still << limit); `dispatch` fans out to those users for TASK/WP/FINDING and broadcasts for DIVISION/ORG.
+## Phase C — SSE signal scoping (M1)  ✅ IMPLEMENTED
+- **Resolved at emit time** in `feedService.createFeedPost` (the single feed-write chokepoint): for TASK/WP/FINDING it resolves the watcher userIds (`resolveTaskWatchers`/`resolveWpWatchers`/new `resolveFindingWatchers` in notificationService) and passes them on the realtime event; DIVISION/ORG omit userIds. Resolution is best-effort (wrapped, never breaks the write) and skipped under test.
+- `pgEvents.ts`: `RealtimeEvent` feed variant gains optional `userIds`; `dispatch` fans out to those users via `publishToUser`, else `publishToAll`. Payload-overflow on a huge watcher set falls back to a broadcast (omit userIds) instead of dropping the signal. `dispatch` is now exported for unit testing.
+- `resolveFindingWatchers` = reporter + closer + source-task watchers.
+- Tests: `realtime.test.ts` (DB-free) asserts scoped TASK signal reaches only listed watchers, ORG broadcasts to all, empty userIds falls back to broadcast.
 - Tests: signal fan-out unit test (watchers only for TASK/WP/FINDING; broadcast for DIVISION/ORG).
 
 ---

@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { emitRealtimeEvent } from '../realtime/pgEvents';
+import { resolveTaskWatchers, resolveWpWatchers, resolveFindingWatchers } from './notificationService';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
@@ -50,7 +51,27 @@ export async function createFeedPost(client: PrismaLike, input: CreateFeedPostIn
   // Realtime SIGNAL for the "new updates" pill + soft refetch. Rides the
   // caller's transaction client so the NOTIFY only fires on COMMIT (no refetch
   // race), is best-effort (never throws), and is a no-op under NODE_ENV=test.
-  await emitRealtimeEvent(client, { kind: 'feed', scope: input.scope, scopeId: input.scopeId ?? null });
+  //
+  // M1: scope the signal. TASK/WP/FINDING feeds have a bounded watcher set, so we
+  // resolve it here (emit-time) and fan out to just those users — instead of the
+  // old broadcast-to-everyone, which was O(comments × connected users). DIVISION/
+  // ORG are genuinely shared feeds and stay a broadcast (userIds omitted). Watcher
+  // resolution is wrapped so it can never break the feed write (best-effort like
+  // the emit itself), and skipped entirely under test where emit is a no-op.
+  if (process.env.NODE_ENV !== 'test') {
+    try {
+      const sid = input.scopeId ?? null;
+      let userIds: number[] | undefined;
+      if (sid != null) {
+        if (input.scope === 'TASK') userIds = await resolveTaskWatchers(client, sid);
+        else if (input.scope === 'WP') userIds = await resolveWpWatchers(client, sid);
+        else if (input.scope === 'FINDING') userIds = await resolveFindingWatchers(client, sid);
+      }
+      await emitRealtimeEvent(client, { kind: 'feed', scope: input.scope, scopeId: sid, userIds });
+    } catch (err) {
+      console.error('[realtime] feed signal scoping failed (non-fatal):', err);
+    }
+  }
 
   return post;
 }
