@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { requirePrivilege } from '../middleware/rbac.middleware';
+import { createMutationRateLimiter } from '../middleware/rateLimit.middleware';
 import {
   getTasks,
   getMyTasks,
@@ -82,8 +83,11 @@ router.put('/:id/deadline/decide', decideDeadlineExtension);
 router.put('/:id/rate', rateTask);
 
 // ─── Activity feed (Phase 5.3 endpoints included here per plan) ──────
+// Per-user write limiter on the comment endpoint (mirrors feed.routes); reads
+// stay unthrottled. See H3 in FEED_FEATURES_AUDIT.md.
+const taskCommentLimiter = createMutationRateLimiter();
 router.get('/:id/activity', getTaskActivity);
-router.post('/:id/activity', postTaskComment);
+router.post('/:id/activity', taskCommentLimiter, postTaskComment);
 
 // ─── Time Booking (Phase 5.6) ─────────────────────────────────────────
 router.post('/:id/time-booking', createTimeBooking);

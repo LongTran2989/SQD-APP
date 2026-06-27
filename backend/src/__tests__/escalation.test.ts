@@ -572,6 +572,22 @@ describe('Escalation core (Phase 3)', () => {
       expect(orgCard?.taggedDivisionIds).toEqual([divBId]);
     });
 
+    it('DISSEMINATE sanitises taggedDivisionIds — dedupes and drops unknown ids (M3)', async () => {
+      const f = (await flag(wpAComment, 'DIVISION', staffToken)).body.flag.id;
+      const res = await action(f, { action: 'DISSEMINATE', payload: { taggedDivisionIds: [divBId, divBId, 999999] } });
+      expect(res.status).toBe(200);
+      const orgCard = await prisma.feedPost.findFirst({ where: { type: 'ESCALATION_CARD', scope: 'ORG', flagId: f } });
+      expect(orgCard?.taggedDivisionIds).toEqual([divBId]); // deduped; unknown 999999 dropped
+    });
+
+    it('DISSEMINATE with only unknown taggedDivisionIds stores null (M3)', async () => {
+      const f = (await flag(wpAComment, 'DIVISION', staffToken)).body.flag.id;
+      const res = await action(f, { action: 'DISSEMINATE', payload: { taggedDivisionIds: [888888] } });
+      expect(res.status).toBe(200);
+      const orgCard = await prisma.feedPost.findFirst({ where: { type: 'ESCALATION_CARD', scope: 'ORG', flagId: f } });
+      expect(orgCard?.taggedDivisionIds).toBeNull();
+    });
+
     it('final-state flags are not re-actionable (400)', async () => {
       const f = (await flag(taskComment, 'WP', staffToken)).body.flag.id;
       expect((await action(f, { action: 'ACKNOWLEDGE' })).status).toBe(200);

@@ -436,9 +436,21 @@ export const actionEscalation = async (req: Request, res: Response): Promise<voi
 
         case 'DISSEMINATE': {
           // Reuse the SAME flag — post an ESCALATION_CARD to ORG; do NOT create a second flag.
-          const taggedDivisionIds = Array.isArray(payload.taggedDivisionIds)
-            ? (payload.taggedDivisionIds as unknown[]).filter((n): n is number => typeof n === 'number')
-            : null;
+          // Tags are INFORMATIONAL only (org-wide transparency is intentional, M2) — they
+          // do not scope visibility — but we still validate them: coerce to numbers, dedupe,
+          // and drop any id that isn't a real Division. Empty → null (no tags).
+          const requestedDivisionIds = Array.isArray(payload.taggedDivisionIds)
+            ? [...new Set((payload.taggedDivisionIds as unknown[]).filter((n): n is number => typeof n === 'number'))]
+            : [];
+          let taggedDivisionIds: number[] | null = null;
+          if (requestedDivisionIds.length > 0) {
+            const existing = await tx.division.findMany({
+              where: { id: { in: requestedDivisionIds } },
+              select: { id: true },
+            });
+            const existingIds = requestedDivisionIds.filter((id) => existing.some((d) => d.id === id));
+            taggedDivisionIds = existingIds.length > 0 ? existingIds : null;
+          }
           await createFeedPost(tx, {
             type: 'ESCALATION_CARD',
             scope: 'ORG',

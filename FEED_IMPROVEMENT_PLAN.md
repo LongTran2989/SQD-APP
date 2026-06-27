@@ -73,8 +73,8 @@ Backend read path + two feed components.
 ---
 
 ## Phase C — SSE signal scoping (M1)
-- `backend/src/realtime/pgEvents.ts` `dispatch`: keep `publishToAll` for **DIVISION/ORG** (genuinely shared), but route **TASK/WP/FINDING** feed signals to their watcher set via `publishToUser` (reuse `resolveTaskWatchers`/`resolveWpWatchers`; add a finding watcher resolver). Requires the NOTIFY payload to carry enough to resolve watchers, OR resolve watchers at emit time and include `userIds` in the signal (payload still << limit).
-- Decision to confirm during build: resolve-at-emit (simpler, one DB hit in the producer) vs resolve-at-dispatch. Lean resolve-at-emit.
+- `backend/src/realtime/pgEvents.ts` `dispatch`: keep `publishToAll` for **DIVISION/ORG** (genuinely shared), but route **TASK/WP/FINDING** feed signals to their watcher set via `publishToUser` (reuse `resolveTaskWatchers`/`resolveWpWatchers`; add a finding watcher resolver).
+- **DECIDED: resolve watchers at emit time.** `emitRealtimeEvent` resolves the watcher userIds (one producer-side DB hit) and includes them in the NOTIFY payload (still << limit); `dispatch` fans out to those users for TASK/WP/FINDING and broadcasts for DIVISION/ORG.
 - Tests: signal fan-out unit test (watchers only for TASK/WP/FINDING; broadcast for DIVISION/ORG).
 
 ---
@@ -131,7 +131,7 @@ Reuse the existing local-disk `StorageAdapter` + soft-deleted `Attachment` model
 For ORG/DIVISION (and optionally WP) directives — compliance "I have read this."
 
 **Migration (new table):** `model FeedPostAcknowledgement { id, feedPostId, userId, acknowledgedAt, @@unique([feedPostId, userId]) }`. Immutable (no `deletedAt`).
-- `POST /api/feeds/posts/:id/ack` (idempotent via the unique constraint). Dual-write AuditLog + SYSTEM_EVENT optional (likely AuditLog only to avoid feed spam — confirm during build).
+- `POST /api/feeds/posts/:id/ack` (idempotent via the unique constraint). **DECIDED: dual-write both** AuditLog + a feed `SYSTEM_EVENT` (Rule 3 consistency over spam-avoidance; mitigate noise by only emitting the SYSTEM_EVENT on the *first* ack per user, which the unique constraint already gives us).
 - `getFeed`: include `ackCount` + `viewerHasAcked` per eligible post.
 - Frontend: "Acknowledge" button + "Acknowledged by N" on pinned/announcement posts.
 - Tests: idempotent ack, count accuracy, RBAC (any authenticated user may ack).

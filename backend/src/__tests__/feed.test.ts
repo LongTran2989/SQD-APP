@@ -200,6 +200,19 @@ describe('Feed API (Phase 2)', () => {
       expect(res.status).toBe(400);
     });
 
+    it('rejects a comment exceeding the max length (H1)', async () => {
+      const tooLong = 'a'.repeat(5001); // MAX_COMMENT_LEN is 5000
+      const res = await request(app).post(`/api/feeds/WP/${wpId}/posts`).set('Authorization', `Bearer ${staffToken}`).send({ content: tooLong });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/too long/i);
+    });
+
+    it('accepts a comment at exactly the max length (H1 boundary)', async () => {
+      const atLimit = 'a'.repeat(5000);
+      const res = await request(app).post(`/api/feeds/WP/${wpId}/posts`).set('Authorization', `Bearer ${staffToken}`).send({ content: atLimit });
+      expect(res.status).toBe(201);
+    });
+
     it('lets a Staff post to their OWN division board', async () => {
       const res = await request(app).post(`/api/feeds/DIVISION/${divisionId}/posts`).set('Authorization', `Bearer ${staffToken}`).send({ content: 'own div' });
       expect(res.status).toBe(201);

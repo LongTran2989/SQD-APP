@@ -4,6 +4,7 @@ import {
   createFeedPost,
   buildFeedPostScope,
   canPostToFeed,
+  commentLengthError,
   isFeedScope,
   FeedScope,
 } from '../services/feedService';
@@ -142,6 +143,12 @@ export const postFeedComment = async (req: Request, res: Response): Promise<void
 
     if (!content || !content.trim()) {
       res.status(400).json({ message: 'content is required' });
+      return;
+    }
+
+    const lenErr = commentLengthError(content);
+    if (lenErr) {
+      res.status(400).json({ message: lenErr });
       return;
     }
 

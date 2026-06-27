@@ -62,6 +62,26 @@ export function isFeedScope(value: string): value is FeedScope {
 }
 
 /**
+ * Maximum length of a single feed COMMENT. Mirrors the cap the Task feed has
+ * always enforced (task.controller's MAX_COMMENT_LEN). Centralised here so EVERY
+ * comment path (task, WP, division, org, finding) shares one ceiling — see H1 in
+ * FEED_FEATURES_AUDIT.md: the generic feed endpoint previously had no cap.
+ */
+export const MAX_COMMENT_LEN = 5000;
+
+/**
+ * Validates a comment body's length. Returns an error message string when the
+ * (trimmed) content exceeds MAX_COMMENT_LEN, or null when it is acceptable.
+ * Callers handle the empty/whitespace case separately (a 400 "content required").
+ */
+export function commentLengthError(content: string): string | null {
+  if (content.trim().length > MAX_COMMENT_LEN) {
+    return `Comment is too long (max ${MAX_COMMENT_LEN} characters).`;
+  }
+  return null;
+}
+
+/**
  * Builds the Prisma WHERE clause that selects every post on a single feed.
  * scopeId is polymorphic (taskId / wpId / divisionId) and ignored for the
  * singleton ORG feed (always scopeId NULL). Reads are open to all authenticated
