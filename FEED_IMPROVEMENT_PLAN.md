@@ -128,8 +128,24 @@ it up via `test:setup` (db push regenerates the client).**
 
 ---
 
-## Phase E — @mentions  ✅ IMPLEMENTED  ·  entity (#) linking → E.2 (deferred)
+## Phase E — @mentions  ✅  ·  E.2 entity (#) hyperlinks  ✅ IMPLEMENTED
 No new feed model; mentions reuse the notification system.
+
+**E.2 as built (entity # hyperlinks).** No composer picker and no stored markup —
+users type a business code with a leading `#` (e.g. `#FED-000001`); the text stays
+plain. Reads resolve any code that maps to a real, non-deleted Task.taskId /
+WorkPackage.wpId / Finding.findingId into `{ type, id }` and the client linkifies it
+to the numeric detail route; unknown codes render as plain text.
+- Backend (`feedService`): `extractEntityRefs` + `resolveEntityLinks` +
+  `resolveEntityLinksForPosts`; `getFeed` / `getTaskActivity` / `getPinnedFeed`
+  attach a per-post `entityLinks` map.
+- Frontend: `CommentContent` tokenizes `#CODE` and renders `<Link>`s (React
+  elements only — XSS-safe per DEF-1); wired into all three comment renderers;
+  composer placeholders hint at `#CODE`.
+- Tests: feed.test.ts resolves #task/#wp codes, drops unknown. Verified live
+  (`#SMOKE-WP-2` → WP link; `#NOPE-9` unlinked) and via full suite 612/612.
+- Routes: TASK→/dashboard/tasks/:id, WP→/dashboard/work-packages/:id,
+  FINDING→/dashboard/findings/:id.
 
 **As built (@mentions).** Chosen a **chip-based** mention field over inline `@`
 autocomplete: mentions are picked from a dropdown and kept as removable chips

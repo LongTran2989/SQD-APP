@@ -10,6 +10,7 @@ import FeedFilterBar from '../feed/FeedFilterBar';
 import CommentModerationMenu from '../feed/CommentModerationMenu';
 import MentionField from '../feed/MentionField';
 import MentionsLine from '../feed/MentionsLine';
+import CommentContent from '../feed/CommentContent';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
@@ -279,7 +280,7 @@ export default function TaskActivityFeed({
                       ? 'bg-blue-600 text-white rounded-tr-sm'
                       : 'bg-slate-100 text-slate-800 rounded-tl-sm'
                   }`}>
-                    {entry.content}
+                    <CommentContent content={entry.content} entityLinks={entry.entityLinks} />
                   </div>
                   <MentionsLine mentions={entry.mentions} />
                 </div>
@@ -302,7 +303,7 @@ export default function TaskActivityFeed({
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Write a comment... (Ctrl+Enter to send)"
+                placeholder="Write a comment… (#CODE links a task/WP/finding · Ctrl+Enter to send)"
                 rows={2}
                 className="w-full px-3.5 py-2.5 pr-12 border border-slate-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
               />

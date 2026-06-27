@@ -117,6 +117,74 @@ export function mentionIdsFromMetadata(metadata: unknown): number[] {
   return Array.isArray(m) ? m.filter((n): n is number => typeof n === 'number') : [];
 }
 
+// ─── Inline entity links (#CODE) — Phase E.2 ──────────────────────────────────
+// Users reference a Task / Work Package / Finding by its business code with a
+// leading '#' (e.g. "#QCH-015"). The reference is NOT stored as markup — it stays
+// plain text; reads resolve any code that maps to a real, non-deleted entity into
+// { type, id } so the client can linkify it to the numeric detail route. Unknown
+// codes resolve to nothing and render as plain text.
+
+export type EntityRefType = 'TASK' | 'WP' | 'FINDING';
+export interface EntityLink { type: EntityRefType; id: number; }
+
+// '#' followed by an alphanumeric run (codes are letters/digits/_/-). Brackets and
+// whitespace terminate the token, so prose like "#1 priority" matches '#1' only.
+const ENTITY_REF_REGEX = /#([A-Za-z0-9][A-Za-z0-9_-]*)/g;
+
+/** Pulls the distinct #CODE references out of a comment body. */
+export function extractEntityRefs(content: string): string[] {
+  const out = new Set<string>();
+  for (const m of content.matchAll(ENTITY_REF_REGEX)) {
+    if (m[1]) out.add(m[1]);
+  }
+  return [...out];
+}
+
+/**
+ * Resolves candidate codes → { type, id } for the ones that match a real,
+ * non-deleted Task.taskId / WorkPackage.wpId / Finding.findingId. Code namespaces
+ * are distinct in practice; on the rare collision, Task wins (assigned last).
+ */
+export async function resolveEntityLinks(
+  client: PrismaLike,
+  codes: string[]
+): Promise<Record<string, EntityLink>> {
+  const map: Record<string, EntityLink> = {};
+  const unique = [...new Set(codes)];
+  if (unique.length === 0) return map;
+
+  const [tasks, wps, findings] = await Promise.all([
+    client.task.findMany({ where: { taskId: { in: unique }, deletedAt: null }, select: { id: true, taskId: true } }),
+    client.workPackage.findMany({ where: { wpId: { in: unique }, deletedAt: null }, select: { id: true, wpId: true } }),
+    client.finding.findMany({ where: { findingId: { in: unique }, deletedAt: null }, select: { id: true, findingId: true } }),
+  ]);
+
+  for (const f of findings) if (f.findingId) map[f.findingId] = { type: 'FINDING', id: f.id };
+  for (const w of wps) if (w.wpId) map[w.wpId] = { type: 'WP', id: w.id };
+  for (const t of tasks) if (t.taskId) map[t.taskId] = { type: 'TASK', id: t.id };
+  return map;
+}
+
+/**
+ * Convenience for a read path: resolve the entity links for a page of posts and
+ * return a per-post map (only the codes found in that post that actually resolve).
+ */
+export async function resolveEntityLinksForPosts<T extends { id: number; content: string }>(
+  client: PrismaLike,
+  posts: T[]
+): Promise<Map<number, Record<string, EntityLink>>> {
+  const refsByPost = new Map(posts.map((p) => [p.id, extractEntityRefs(p.content)]));
+  const allRefs = [...new Set([...refsByPost.values()].flat())];
+  const linkMap = await resolveEntityLinks(client, allRefs);
+  const out = new Map<number, Record<string, EntityLink>>();
+  for (const [postId, refs] of refsByPost) {
+    const entry: Record<string, EntityLink> = {};
+    for (const code of refs) if (linkMap[code]) entry[code] = linkMap[code]!;
+    out.set(postId, entry);
+  }
+  return out;
+}
+
 // Feed read pagination (H2). Reads are keyset-paginated newest-first on the
 // primary key (FeedPost.id is monotonic with creation, so id-desc == createdAt-
 // desc) and the controller reverses the page to ascending for chat-style display.

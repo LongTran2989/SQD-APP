@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
-import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes, resolveMentions, mentionIdsFromMetadata } from '../services/feedService';
+import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes, resolveMentions, mentionIdsFromMetadata, resolveEntityLinksForPosts } from '../services/feedService';
 import { createNotifications, notifyFeedWatchers, notifyMentions } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS, TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
@@ -2466,6 +2466,9 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
 
     const authorMap = new Map(authors.map(a => [a.id, a.name]));
 
+    // Inline #CODE entity links (Phase E.2).
+    const entityLinksByPost = await resolveEntityLinksForPosts(prisma, activities);
+
     const enriched = activities.map(a => ({
       ...a,
       author: a.authorId ? { id: a.authorId, name: authorMap.get(a.authorId) ?? null } : null,
@@ -2474,6 +2477,7 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
       mentions: (mentionIdsByPost.get(a.id) ?? [])
         .filter((id) => authorMap.has(id))
         .map((id) => ({ id, name: authorMap.get(id) ?? null })),
+      entityLinks: entityLinksByPost.get(a.id) ?? {},
     }));
 
     res.json(enriched);

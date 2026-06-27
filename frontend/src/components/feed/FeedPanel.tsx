@@ -248,7 +248,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Write a comment... (Ctrl+Enter to send)"
+                placeholder="Write a comment… (#CODE links a task/WP/finding · Ctrl+Enter to send)"
                 rows={2}
                 className="w-full px-3.5 py-2.5 pr-12 border border-slate-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
               />

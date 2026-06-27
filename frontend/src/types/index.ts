@@ -343,12 +343,21 @@ export interface MentionUser {
   employeeId?: string | null;
 }
 
+// A resolved inline #CODE reference in a comment (Phase E.2) → its detail route.
+export interface EntityLink {
+  type: 'TASK' | 'WP' | 'FINDING';
+  id: number;
+}
+// Map of #CODE (without the '#') → link target, attached to enriched comments.
+export type EntityLinkMap = Record<string, EntityLink>;
+
 // Enriched — server-side joined author name
 export interface TaskActivityEnriched extends TaskActivity {
   author: { id: number; name: string | null } | null;
   hidden?: boolean; // soft-hidden (M4) — only ever present/true for Director/Admin reads
   pinned?: boolean; // always false for TASK feeds (not pinnable); kept for shape parity
   mentions?: MentionUser[]; // @mentioned users resolved to names (Phase E)
+  entityLinks?: EntityLinkMap; // resolved #CODE references (Phase E.2)
 }
 
 // ── Unified feed (Phase 2) — generic across all four scopes ──────────────────
@@ -388,6 +397,8 @@ export interface FeedPostEnriched extends FeedPost {
   pinned?: boolean;
   // @mentioned users resolved to names (Phase E).
   mentions?: MentionUser[];
+  // Resolved #CODE references (Phase E.2).
+  entityLinks?: EntityLinkMap;
 }
 
 // ── Escalation (Phase 3) ─────────────────────────────────────────────────────

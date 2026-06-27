@@ -7,6 +7,7 @@ import InfoCard from './InfoCard';
 import FlagButton from './FlagButton';
 import CommentModerationMenu from './CommentModerationMenu';
 import MentionsLine from './MentionsLine';
+import CommentContent from './CommentContent';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -99,7 +100,7 @@ export default function FeedPostItem({ post, currentUserId, flagTargets, onFlagg
               : isSelf ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-slate-100 text-slate-800 rounded-tl-sm'
           }`}
         >
-          {post.content}
+          <CommentContent content={post.content} entityLinks={post.entityLinks} />
         </div>
         <MentionsLine mentions={post.mentions} />
       </div>

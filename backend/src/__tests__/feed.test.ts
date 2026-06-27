@@ -433,4 +433,22 @@ describe('Feed API (Phase 2)', () => {
       expect(res.body.mentions).toEqual([]);
     });
   });
+
+  // ─── Inline entity links #CODE (Phase E.2) ───────────────────────────────────
+
+  describe('Inline entity links (#CODE)', () => {
+    it('resolves #task / #wp codes in a comment and leaves unknown codes unlinked', async () => {
+      const res = await request(app)
+        .post('/api/feeds/ORG/posts')
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ content: 'see #FED-000001 and #FED-WP-000001 but not #NOPE-999' });
+      expect(res.status).toBe(201);
+
+      const read = await request(app).get('/api/feeds/ORG').set('Authorization', `Bearer ${directorToken}`);
+      const posted = read.body.find((p: { id: number }) => p.id === res.body.id);
+      expect(posted.entityLinks['FED-000001']).toEqual({ type: 'TASK', id: taskId });
+      expect(posted.entityLinks['FED-WP-000001']).toEqual({ type: 'WP', id: wpId });
+      expect(posted.entityLinks['NOPE-999']).toBeUndefined();
+    });
+  });
 });

@@ -11,6 +11,7 @@ import {
   parseFeedTypes,
   resolveMentions,
   mentionIdsFromMetadata,
+  resolveEntityLinksForPosts,
   FeedScope,
 } from '../services/feedService';
 import { canActionFlag } from '../services/escalationService';
@@ -144,6 +145,9 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
     const authorMap = new Map(authors.map((a) => [a.id, a.name]));
     const statusMap = new Map(flags.map((f) => [f.id, f.status]));
 
+    // Inline #CODE entity links (Phase E.2) — resolve across the page once.
+    const entityLinksByPost = await resolveEntityLinksForPosts(prisma, posts);
+
     let viewerCanAction = false;
     if (req.user && hasEscalationCard) {
       const feedDivisionId =
@@ -166,6 +170,7 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       mentions: (mentionIdsByPost.get(p.id) ?? [])
         .filter((id) => authorMap.has(id))
         .map((id) => ({ id, name: authorMap.get(id) ?? null })),
+      entityLinks: entityLinksByPost.get(p.id) ?? {},
     })));
   } catch (error) {
     console.error('Error fetching feed:', error);
@@ -421,12 +426,14 @@ export const getPinnedFeed = async (req: Request, res: Response): Promise<void> 
       ? await prisma.user.findMany({ where: { id: { in: authorIds }, deletedAt: null }, select: { id: true, name: true } })
       : [];
     const authorMap = new Map(authors.map((a) => [a.id, a.name]));
+    const entityLinksByPost = await resolveEntityLinksForPosts(prisma, pinned);
 
     res.json(pinned.map((p) => ({
       ...p,
       author: p.authorId ? { id: p.authorId, name: authorMap.get(p.authorId) ?? null } : null,
       hidden: false,
       pinned: true,
+      entityLinks: entityLinksByPost.get(p.id) ?? {},
     })));
   } catch (error) {
     console.error('Error fetching pinned feed:', error);
