@@ -212,14 +212,13 @@ it's noise + scale risk). *Fix: route feed signals to the relevant watcher/room
 set, or at least debounce per feedKey server-side.*
 
 **M2 — Transparent reads expose every comment org-wide, including escalation
-excerpts.** Per-feed reads are open to all authenticated users by design, but that
-means any Staff user can read every Division/Org/WP/Finding comment and every
-escalation excerpt across the whole company. This is an intentional "transparency
-model," but it is a **business-risk decision that should be explicitly
-re-confirmed**, because the escalation feature deliberately stores only excerpts to
-limit propagation — yet the *origin* comment is fully readable to anyone who can
-guess/iterate the feed URL. *Fix: confirm with product; if tightened, add a scope
-check in `resolveFeedTarget` (mirrors the open `DEF-6` pattern for attachments).*
+excerpts. — CONFIRMED INTENTIONAL (2026-06-27).** Per-feed reads are open to all
+authenticated users by design; any user can read every Division/Org/WP/Finding
+comment. The product owner has **confirmed this transparency is intentional** and
+is NOT to be tightened — it is a core design principle of the app, not a defect.
+Recorded here so future sessions do not "fix" it. (The escalation excerpt-only
+propagation remains a separate, deliberate choice about what is *amplified*, not
+about read access.)
 
 **M3 — `DISSEMINATE` accepts `taggedDivisionIds` without validating they exist or
 are distinct, and they're never enforced on read.** The action stores arbitrary
