@@ -67,7 +67,12 @@ export async function createFeedPost(client: PrismaLike, input: CreateFeedPostIn
         else if (input.scope === 'WP') userIds = await resolveWpWatchers(client, sid);
         else if (input.scope === 'FINDING') userIds = await resolveFindingWatchers(client, sid);
       }
-      await emitRealtimeEvent(client, { kind: 'feed', scope: input.scope, scopeId: sid, userIds });
+      await emitRealtimeEvent(
+        client,
+        userIds
+          ? { kind: 'feed', scope: input.scope, scopeId: sid, userIds }
+          : { kind: 'feed', scope: input.scope, scopeId: sid }
+      );
     } catch (err) {
       console.error('[realtime] feed signal scoping failed (non-fatal):', err);
     }

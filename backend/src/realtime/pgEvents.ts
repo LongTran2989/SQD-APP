@@ -51,7 +51,7 @@ export async function emitRealtimeEvent(client: PrismaLike, evt: RealtimeEvent):
       // assignees) can overflow the payload. Rather than drop the signal, fall back
       // to a broadcast (omit userIds) so watchers still get refreshed.
       if (evt.kind === 'feed' && evt.userIds) {
-        await emitRealtimeEvent(client, { ...evt, userIds: undefined });
+        await emitRealtimeEvent(client, { kind: 'feed', scope: evt.scope, scopeId: evt.scopeId });
         return;
       }
       // Should never happen otherwise — guard catches future signal-shape drift.

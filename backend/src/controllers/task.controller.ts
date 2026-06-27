@@ -2446,7 +2446,7 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
       orderBy: { id: 'desc' },
       take: limit,
     });
-    const nextCursor = rows.length === limit ? rows[rows.length - 1].id : null;
+    const nextCursor = rows.length === limit ? (rows[rows.length - 1]?.id ?? null) : null;
     res.setHeader('X-Next-Cursor', nextCursor != null ? String(nextCursor) : '');
     const activities = rows.reverse();
 

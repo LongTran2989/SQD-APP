@@ -106,7 +106,7 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
     });
     // A full page implies there may be older posts: the oldest row's id is the
     // next `before` cursor. A short page means we reached the start of the feed.
-    const nextCursor = rows.length === limit ? rows[rows.length - 1].id : null;
+    const nextCursor = rows.length === limit ? (rows[rows.length - 1]?.id ?? null) : null;
     res.setHeader('X-Next-Cursor', nextCursor != null ? String(nextCursor) : '');
     const posts = rows.reverse();
 
