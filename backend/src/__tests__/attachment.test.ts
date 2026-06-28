@@ -436,4 +436,40 @@ describe('Attachments / File Upload infrastructure', () => {
     const res = await request(app).patch('/api/attachments/1').send({ caption: 'nope' });
     expect(res.status).toBe(401);
   });
+
+  // ─── Comment attachments (Phase F) ──────────────────────────────────────────
+  it('A23 — attaches a file to a feed COMMENT; it surfaces on the activity read', async () => {
+    const comment = await prisma.feedPost.create({
+      data: { type: 'COMMENT', scope: 'TASK', scopeId: taskId, content: 'see attached', authorId: uploaderId },
+    });
+
+    const up = await request(app)
+      .post('/api/attachments')
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'FEED_POST')
+      .field('entityId', String(comment.id))
+      .attach('file', Buffer.from('%PDF-1.4 evidence'), { filename: 'note.pdf', contentType: PDF });
+    expect(up.status).toBe(201);
+
+    const read = await request(app)
+      .get(`/api/tasks/${taskId}/activity`)
+      .set('Authorization', `Bearer ${uploaderToken}`);
+    expect(read.status).toBe(200);
+    const posted = read.body.find((p: { id: number }) => p.id === comment.id);
+    expect(posted.attachments).toHaveLength(1);
+    expect(posted.attachments[0].fileName).toBe('note.pdf');
+  });
+
+  it('A24 — rejects attaching to a non-COMMENT feed post (404)', async () => {
+    const sysEvent = await prisma.feedPost.create({
+      data: { type: 'SYSTEM_EVENT', scope: 'TASK', scopeId: taskId, content: 'system note' },
+    });
+    const up = await request(app)
+      .post('/api/attachments')
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'FEED_POST')
+      .field('entityId', String(sysEvent.id))
+      .attach('file', Buffer.from('%PDF-1.4 x'), { filename: 'x.pdf', contentType: PDF });
+    expect(up.status).toBe(404);
+  });
 });

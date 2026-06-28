@@ -187,7 +187,7 @@ describe('Notification event configuration', () => {
       .set('Authorization', `Bearer ${directorToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.catalog)).toBe(true);
-    expect(res.body.configs).toHaveLength(9);
+    expect(res.body.configs).toHaveLength(11); // includes FEED_MENTION (Phase E) + FEED_DIGEST (Phase H)
   });
 
   it('updates a config row and writes an audit log entry', async () => {

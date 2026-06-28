@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
-import { createFeedPost } from '../services/feedService';
-import { createNotifications, notifyFeedWatchers } from '../services/notificationService';
+import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes, resolveMentions, mentionIdsFromMetadata, resolveEntityLinksForPosts, resolveAttachmentsForPosts, MAX_COMMENT_LEN as FEED_MAX_COMMENT_LEN } from '../services/feedService';
+import { createNotifications, notifyFeedWatchers, notifyMentions } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS, TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
 import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
@@ -26,7 +26,9 @@ function parseTaskId(raw: string | string[] | undefined): number | null {
 // detail) while still blocking unbounded-storage / DoS via giant payloads.
 const MAX_TITLE_LEN = 300;       // task titles are short labels
 const MAX_REASON_LEN = 2000;     // reassign / inactivate / reopen / extension reasons
-const MAX_COMMENT_LEN = 5000;    // review comments + activity-feed comments
+// Single source of truth for the comment cap lives in feedService (shared by every
+// feed comment path); re-exported alias keeps the local lengthError call sites tidy.
+const MAX_COMMENT_LEN = FEED_MAX_COMMENT_LEN; // review comments + activity-feed comments
 
 // Dynamic task data (saveTaskData). `data` is arbitrary JSON shaped by the
 // template's schemaSnapshot, so we cap generically rather than per declared type:
@@ -237,7 +239,7 @@ async function getLastActivityMap(taskIds: number[]): Promise<Map<number, Date>>
 
   const grouped = await prisma.feedPost.groupBy({
     by: ['scopeId'],
-    where: { scope: 'TASK', scopeId: { in: taskIds } },
+    where: { scope: 'TASK', scopeId: { in: taskIds }, hiddenAt: null }, // exclude soft-hidden (M4)
     _max: { createdAt: true }
   });
   for (const g of grouped) {
@@ -260,7 +262,7 @@ async function getRecentActivitiesMap(taskIds: number[], limit = 2): Promise<Map
   if (taskIds.length === 0) return map;
 
   const posts = await prisma.feedPost.findMany({
-    where: { scope: 'TASK', scopeId: { in: taskIds } },
+    where: { scope: 'TASK', scopeId: { in: taskIds }, hiddenAt: null }, // exclude soft-hidden (M4)
     orderBy: [{ scopeId: 'asc' }, { createdAt: 'desc' }],
     select: { scopeId: true, content: true, createdAt: true, authorId: true }
   });
@@ -2424,25 +2426,64 @@ export const getTaskActivity = async (req: Request, res: Response): Promise<void
     // Access control: Transparent viewing model
     // All authenticated users can view the task activity feed.
 
-    const activities = await prisma.feedPost.findMany({
-      where: { scope: 'TASK', scopeId: id },
-      orderBy: { createdAt: 'asc' }
-    });
+    // Keyset pagination (H2) — mirrors feed.controller.getFeed: newest-first on
+    // the primary key, capped page size, optional `before` cursor + `types`
+    // filter, page reversed to ascending for chat-style render. Cursor returned
+    // via the X-Next-Cursor header (exposed in CORS).
+    const limit = parseFeedLimit(req.query.limit);
+    const before = parseFeedBefore(req.query.before);
+    const types = parseFeedTypes(req.query.types);
 
-    // Enrich with author name where authorId is present
-    const authorIds = [...new Set(activities.map(a => a.authorId).filter(Boolean))] as number[];
+    // Hidden COMMENTs (M4) are excluded; Director/Admin may opt in to review them.
+    const isDirectorOrAdmin = role === 'Director' || role === 'Admin';
+    const includeHidden = isDirectorOrAdmin && req.query.includeHidden === 'true';
+
+    const where: Prisma.FeedPostWhereInput = { scope: 'TASK', scopeId: id };
+    if (types) where.type = { in: types };
+    if (before != null) where.id = { lt: before };
+    if (!includeHidden) where.hiddenAt = null;
+
+    const rows = await prisma.feedPost.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: limit,
+    });
+    const nextCursor = rows.length === limit ? (rows[rows.length - 1]?.id ?? null) : null;
+    res.setHeader('X-Next-Cursor', nextCursor != null ? String(nextCursor) : '');
+    const activities = rows.reverse();
+
+    // Enrich with author name + mention names (Phase E) where present.
+    const mentionIdsByPost = new Map(activities.map(a => [a.id, mentionIdsFromMetadata(a.metadata)]));
+    const allMentionIds = [...new Set([...mentionIdsByPost.values()].flat())];
+    const authorIds = [...new Set([
+      ...activities.map(a => a.authorId).filter((id): id is number => typeof id === 'number'),
+      ...allMentionIds,
+    ])];
     const authors = authorIds.length > 0
       ? await prisma.user.findMany({
-          where: { id: { in: authorIds } },
+          where: { id: { in: authorIds }, deletedAt: null },
           select: { id: true, name: true }
         })
       : [];
 
     const authorMap = new Map(authors.map(a => [a.id, a.name]));
 
+    // Inline #CODE entity links (Phase E.2) + comment attachments (Phase F).
+    const [entityLinksByPost, attachmentsByPost] = await Promise.all([
+      resolveEntityLinksForPosts(prisma, activities),
+      resolveAttachmentsForPosts(prisma, activities.map(a => a.id)),
+    ]);
+
     const enriched = activities.map(a => ({
       ...a,
-      author: a.authorId ? { id: a.authorId, name: authorMap.get(a.authorId) ?? null } : null
+      author: a.authorId ? { id: a.authorId, name: authorMap.get(a.authorId) ?? null } : null,
+      hidden: a.hiddenAt != null,
+      pinned: a.pinnedAt != null, // always false for TASK (not pinnable) — kept for shape parity
+      mentions: (mentionIdsByPost.get(a.id) ?? [])
+        .filter((id) => authorMap.has(id))
+        .map((id) => ({ id, name: authorMap.get(id) ?? null })),
+      entityLinks: entityLinksByPost.get(a.id) ?? {},
+      attachments: attachmentsByPost.get(a.id) ?? [],
     }));
 
     res.json(enriched);
@@ -2484,12 +2525,17 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
 
     // Access control: Anyone can comment on tasks (Transparent commenting model)
 
+    // @mentions (Phase E): validate ids → real users, store + notify.
+    const mentions = await resolveMentions(prisma, req.body?.mentionUserIds);
+    const mentionIds = mentions.map((m) => m.id);
+
     const activity = await createFeedPost(prisma, {
       type: 'COMMENT',
       scope: 'TASK',
       scopeId: id,
       content: content.trim(),
-      authorId: userId
+      authorId: userId,
+      metadata: mentionIds.length ? { mentions: mentionIds } : undefined,
     });
 
     // Notify task watchers (issuer + assignee) of the new comment — best-effort.
@@ -2501,9 +2547,13 @@ export const postTaskComment = async (req: Request, res: Response): Promise<void
       select: { id: true, name: true }
     });
 
+    // Notify mentioned users (excludes the author) — best-effort.
+    await notifyMentions(prisma, mentionIds, userId, 'TASK', id, content.trim(), author?.name ?? `User ${userId}`);
+
     res.status(201).json({
       ...activity,
-      author: author ? { id: author.id, name: author.name } : null
+      author: author ? { id: author.id, name: author.name } : null,
+      mentions,
     });
   } catch (error) {
     console.error('Error posting task comment:', error);

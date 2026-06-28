@@ -9,6 +9,7 @@ import {
   updateUserRole,
   updateMyPreferences,
   updateMyProfile,
+  mentionSearch,
 } from '../controllers/user.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { requirePrivilege, requireAnyPrivilege } from '../middleware/rbac.middleware';
@@ -19,6 +20,9 @@ const router = Router();
 router.patch('/me/profile', authenticateJWT, updateMyProfile);
 router.patch('/me/preferences', authenticateJWT, updateMyPreferences);
 router.patch('/me/password', authenticateJWT, changePassword);
+
+// @mention picker lookup — any authenticated user (no privilege gate).
+router.get('/mention-search', authenticateJWT, mentionSearch);
 
 // Admin: list and manage users.
 // Listing is reachable by either user privilege; the route guard enforces this

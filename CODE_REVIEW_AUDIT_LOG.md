@@ -305,3 +305,26 @@ User triaged: fix #1, #4, #5, #6; accept #3; #2 is a deploy-pipeline question (f
 | 2026-06-10 | `claude/vigilant-mendel-3sajt0` | Phase 8 Time-Booking Workflow Refinements | `/code-review`. Findings: LOGGABLE_STATUSES constant, `In Review` banner copy. All fixed. No new tests (UX-only changes). |
 | 2026-06-12 | `claude/exciting-darwin-gyohuf` | Phase 7 Deferred Items (User Management, Settings, Taxonomy) | `/security-review` + `/code-review`. Findings: session revocation on credential change (H1), route-level privilege guard (M1), default password not disclosed in UI (M2), whitespace-only name validation (M3), max-length on taxonomy inputs (L1), numeric divisionId validation (L2), Prisma singleton (L3). All fixed. |
 | 2026-05-29 | Pre-Phase-5 | Auth controller | Manual audit. 5 findings (updatePassword, enumeration, rate limiting, JWT fallback, plaintext token). All fixed in `claude/amazing-ritchie-soasus`. See §11 of `CLAUDE_HANDOVER.md`. |
+
+---
+
+## Session: 2026-06-28 — Feed workstream `/code-review` (Phases A–H)
+
+**Branch:** `claude/feed-features-audit-iac2uw`
+**Scope:** High-effort, recall-biased `/code-review` of the entire feed improvement workstream (~3,200 lines / 44 files): comment length cap + per-user write rate-limit + disseminate validation (A), keyset pagination + filters (B), scoped SSE feed signals (C), soft-hide + pinning (D), @mentions (E), inline `#CODE` entity links (E.2), comment attachments (F), acknowledgement/read-receipts (G), feed search + daily digest (H).
+**Tests after fixes:** Backend **621/621** (was 619; +2 regression tests). Frontend `tsc --noEmit` + lint clean on changed files. Verified live against a Postgres + backend + Next.js sandbox stack.
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| F1 | Medium (correctness) | `frontend/.../feed/CommentContent.tsx` | `entityLinks[code]` on a plain-object map resolves reserved keys (`#toString`, `#constructor`, `#__proto__`…) to inherited prototype members, rendering `<Link href="undefined/undefined">`. | ✅ Fixed — `Object.prototype.hasOwnProperty.call(entityLinks, code)` guard. |
+| F2 | Medium (moderation bypass) | `feed.controller.ts` `ackPost` | No `hiddenAt` guard, so a Director-hidden comment could be acknowledged and re-surfaced via a SYSTEM_EVENT (inconsistent with `pinPost`). | ✅ Fixed — select `hiddenAt`, reject hidden with 400. Test added. |
+| F3 | Medium (correctness) | `notificationService.ts` `buildFeedDigests` | Digest counts filtered only `scope+hiddenAt+createdAt`, so pin/ack/hide SYSTEM_EVENT noise inflated "N new feed updates". | ✅ Fixed — added `type:'COMMENT'` to both count queries. Test strengthened (SYSTEM_EVENT excluded). |
+| F4 | Low-med (amplification) | `feedService.ts` `resolveMentions` | Unbounded `mentionUserIds` → huge `IN` query + mass notification fan-out. | ✅ Fixed — `MAX_MENTIONS_PER_COMMENT = 50` cap. |
+| F5 | Low (consistency) | `feed.controller.ts` `getPinnedFeed` | Omitted the `mentions` enrichment `getFeed` has, so pinned comments dropped their @mention line. | ✅ Fixed — mirror getFeed's mention resolution. Test added. |
+| F6 | Low (edge) | `escalation.controller.ts` DISSEMINATE | `taggedDivisionIds` filter `typeof n === 'number'` admitted non-integers (`3.5`) into an `Int` `IN`. | ✅ Fixed — `&& Number.isInteger(n)` (matches `resolveMentions`). |
+| F7 | Low (info shape) | `feed.controller.ts` getFeed/getPinnedFeed | `...p` spread emits internal columns (`hiddenReason`, `hiddenByUserId`, `pinnedByUserId`, raw `metadata`). | ✔ Accepted-as-is — `hiddenReason` only reaches Director/Admin (hidden posts are gated); who-moderated is already public via the SYSTEM_EVENT. Fix's fragility (destructure/lint) not worth near-zero value. |
+| F8 | Low-med (UX) | `frontend/.../feed/FeedPanel.tsx` | A pinned comment rendered in both the pinned strip and the inline list, with two independent moderation menus. | ✅ Fixed — exclude `pinnedIds` from `visiblePosts`. |
+| F9 | Low (cleanup) | `task.controller.ts` | `MAX_COMMENT_LEN = 5000` duplicated the "centralised" `feedService` constant. | ✅ Fixed — import `MAX_COMMENT_LEN` from `feedService`. |
+| F10 | Low (UX) | `frontend/.../feed/FeedPanel.tsx` | Posting-with-attachments / moderation calls `reloadFeed()`, discarding loaded "Load earlier" history. | ⏭ Deferred — same tradeoff as the existing moderation/escalation reload paths; the correct fix (append the enriched new comment) is fiddly for marginal benefit. |
+
+**Cut at the review cap (low severity, not actioned):** `MentionField` keeps stale `q/results/open` after a post; task-feed auto-scroll edge cases; a `cursor===null` "Load earlier" wedge when `activities` is momentarily empty; minor efficiency nits (entity/attachment/ack `Promise.all` issued after the author await; sequential `notifyFeedWatchers`→author→`notifyMentions`).

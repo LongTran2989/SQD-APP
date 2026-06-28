@@ -217,8 +217,9 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
       };
     }
 
+    // Exclude soft-hidden comments (M4) from the aggregate dashboard feed.
     const posts = await prisma.feedPost.findMany({
-      where: feedWhere,
+      where: { ...feedWhere, hiddenAt: null },
       orderBy: { createdAt: 'desc' },
       take: 20,
       include: { author: { select: { name: true } } }
@@ -326,13 +327,13 @@ export const getOngoingWorks = async (req: Request, res: Response): Promise<void
 
     const [wpFeeds, taskFeeds] = await Promise.all([
       wpIds.length ? prisma.feedPost.findMany({
-        where: { scope: 'WP', scopeId: { in: wpIds } },
+        where: { scope: 'WP', scopeId: { in: wpIds }, hiddenAt: null },
         orderBy: { createdAt: 'desc' },
         take: MAX_RESULTS,
         include: { author: { select: { name: true } } }
       }) : [],
       taskIds.length ? prisma.feedPost.findMany({
-        where: { scope: 'TASK', scopeId: { in: taskIds } },
+        where: { scope: 'TASK', scopeId: { in: taskIds }, hiddenAt: null },
         orderBy: { createdAt: 'desc' },
         take: MAX_RESULTS,
         include: { author: { select: { name: true } } }

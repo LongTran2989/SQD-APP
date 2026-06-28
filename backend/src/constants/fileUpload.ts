@@ -22,7 +22,7 @@ const MB = 1024 * 1024;
 export const ABSOLUTE_MAX_UPLOAD_BYTES = 100 * MB;
 
 /** Entity types a file may be attached to. */
-export const ATTACHMENT_ENTITY_TYPES = ['TASK', 'FINDING', 'TEMPLATE', 'WP'] as const;
+export const ATTACHMENT_ENTITY_TYPES = ['TASK', 'FINDING', 'TEMPLATE', 'WP', 'FEED_POST'] as const;
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number];
 
 export function isAttachmentEntityType(value: unknown): value is AttachmentEntityType {
@@ -35,6 +35,7 @@ export const ENTITY_BUCKET: Record<AttachmentEntityType, string> = {
   WP: 'sqd-tasks',
   FINDING: 'sqd-findings',
   TEMPLATE: 'sqd-templates',
+  FEED_POST: 'sqd-feed', // attachments on a feed COMMENT (Phase F)
 };
 
 // Derived from ENTITY_BUCKET so a new entity→bucket mapping is initialised by

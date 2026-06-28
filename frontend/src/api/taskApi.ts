@@ -205,14 +205,40 @@ export const rateTask = (id: number, rating: number): Promise<TaskEnriched> =>
 
 // ─── Activity feed ─────────────────────────────────────────────────────────────
 
+// Backward-compatible: returns the NEWEST page (ascending) as an array. The task
+// activity feed is keyset-paginated (H2); the cursor for older entries rides the
+// X-Next-Cursor header — use getTaskActivityPage when you need to page back.
 export const getTaskActivity = (id: number): Promise<TaskActivityEnriched[]> =>
   apiClient.get(`/tasks/${id}/activity`).then((r) => r.data);
 
+export interface TaskActivityPage {
+  activities: TaskActivityEnriched[];
+  nextCursor: number | null;
+}
+
+export const getTaskActivityPage = (
+  id: number,
+  opts: { limit?: number; before?: number | null; types?: string[]; includeHidden?: boolean } = {}
+): Promise<TaskActivityPage> => {
+  const params: Record<string, string> = {};
+  if (opts.limit != null) params.limit = String(opts.limit);
+  if (opts.before != null) params.before = String(opts.before);
+  if (opts.types && opts.types.length) params.types = opts.types.join(',');
+  if (opts.includeHidden) params.includeHidden = 'true';
+  return apiClient.get(`/tasks/${id}/activity`, { params }).then((r) => ({
+    activities: r.data as TaskActivityEnriched[],
+    nextCursor: r.headers['x-next-cursor'] ? Number(r.headers['x-next-cursor']) : null,
+  }));
+};
+
 export const postTaskComment = (
   id: number,
-  content: string
+  content: string,
+  mentionUserIds?: number[]
 ): Promise<TaskActivityEnriched> =>
-  apiClient.post(`/tasks/${id}/activity`, { content }).then((r) => r.data);
+  apiClient
+    .post(`/tasks/${id}/activity`, { content, ...(mentionUserIds?.length ? { mentionUserIds } : {}) })
+    .then((r) => r.data);
 
 // ─── Time Booking (Phase 5.6) ─────────────────────────────────────────────────
 
