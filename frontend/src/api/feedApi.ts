@@ -68,6 +68,10 @@ export const pinPost = (postId: number): Promise<void> =>
 export const unpinPost = (postId: number): Promise<void> =>
   apiClient.post(`/feeds/posts/${postId}/unpin`, {}).then(() => undefined);
 
+// Acknowledge ("I have read this") a comment — idempotent (Phase G).
+export const ackPost = (postId: number): Promise<{ id: number; acknowledged: boolean; ackCount: number }> =>
+  apiClient.post(`/feeds/posts/${postId}/ack`, {}).then((r) => r.data);
+
 export const postFeedComment = (
   scope: FeedScope,
   scopeId: number | null | undefined,

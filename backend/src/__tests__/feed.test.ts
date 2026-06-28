@@ -451,4 +451,43 @@ describe('Feed API (Phase 2)', () => {
       expect(posted.entityLinks['NOPE-999']).toBeUndefined();
     });
   });
+
+  // ─── Acknowledgements (Phase G) ──────────────────────────────────────────────
+
+  describe('Acknowledgements', () => {
+    it('acks a comment idempotently; count + viewer flag + one SYSTEM_EVENT per acker', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'directive', authorId: directorUserId } });
+
+      const a1 = await request(app).post(`/api/feeds/posts/${c.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
+      expect(a1.status).toBe(200);
+      expect(a1.body.ackCount).toBe(1);
+      expect(a1.body.acknowledged).toBe(true);
+
+      // Idempotent: the same user acking again does not double-count.
+      const a2 = await request(app).post(`/api/feeds/posts/${c.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
+      expect(a2.body.ackCount).toBe(1);
+
+      // A different user pushes the count to 2.
+      const a3 = await request(app).post(`/api/feeds/posts/${c.id}/ack`).set('Authorization', `Bearer ${managerToken}`).send({});
+      expect(a3.body.ackCount).toBe(2);
+
+      // Exactly one SYSTEM_EVENT per DISTINCT acker (first-ack only).
+      const sysEvents = await prisma.feedPost.findMany({
+        where: { scope: 'DIVISION', scopeId: divisionId, type: 'SYSTEM_EVENT', content: { contains: 'acknowledged' } },
+      });
+      expect(sysEvents).toHaveLength(2);
+
+      // The read reflects the count and the viewer's own flag.
+      const read = await request(app).get(`/api/feeds/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      const posted = read.body.find((p: { id: number }) => p.id === c.id);
+      expect(posted.ackCount).toBe(2);
+      expect(posted.acknowledged).toBe(true);
+    });
+
+    it('rejects acknowledging a non-COMMENT post (400)', async () => {
+      const sys = await prisma.feedPost.create({ data: { type: 'SYSTEM_EVENT', scope: 'DIVISION', scopeId: divisionId, content: 'sys' } });
+      const res = await request(app).post(`/api/feeds/posts/${sys.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
+      expect(res.status).toBe(400);
+    });
+  });
 });

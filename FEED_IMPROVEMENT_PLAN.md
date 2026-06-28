@@ -220,8 +220,23 @@ rules apply unchanged (Rule 10).
 
 ---
 
-## Phase G — Acknowledgement / read-receipts
+## Phase G — Acknowledgement / read-receipts  ✅ IMPLEMENTED
 For ORG/DIVISION (and optionally WP) directives — compliance "I have read this."
+
+**As built.** New `FeedPostAcknowledgement` model (`@@unique([feedPostId, userId])`,
+immutable, cascade-deletes with the post). `POST /feeds/posts/:id/ack` — any
+authenticated user, COMMENT-only, idempotent (a concurrent duplicate aborts on the
+unique constraint → treated as a no-op). **Dual-writes both** AuditLog +
+SYSTEM_EVENT, but only on the FIRST ack per user (the unique constraint gives us
+that, so a re-ack adds no noise). Reads (`getFeed`/`getPinnedFeed`) batch-resolve
+`resolveAcksForPosts` → `ackCount` + viewer `acknowledged` per comment.
+- Frontend: `feedApi.ackPost`; shared `AckControl` ("Acknowledge · N" → "✓
+  Acknowledged · N total") wired into `FeedPostItem`, so it surfaces on the
+  WP/Division/Org feeds + pinned strip (not the operational task/finding feeds).
+- Migration: `npm run migrate:dev` + `npx prisma generate` (tests via `test:setup`).
+- Tests: feed.test.ts — idempotent count, one SYSTEM_EVENT per distinct acker,
+  read reflects count + viewer flag, non-COMMENT → 400. Full suite 616/616;
+  frontend tsc + lint clean. Verified live + screenshot.
 
 **Migration (new table):** `model FeedPostAcknowledgement { id, feedPostId, userId, acknowledgedAt, @@unique([feedPostId, userId]) }`. Immutable (no `deletedAt`).
 - `POST /api/feeds/posts/:id/ack` (idempotent via the unique constraint). **DECIDED: dual-write both** AuditLog + a feed `SYSTEM_EVENT` (Rule 3 consistency over spam-avoidance; mitigate noise by only emitting the SYSTEM_EVENT on the *first* ack per user, which the unique constraint already gives us).

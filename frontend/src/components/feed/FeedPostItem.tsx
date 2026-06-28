@@ -9,6 +9,7 @@ import CommentModerationMenu from './CommentModerationMenu';
 import MentionsLine from './MentionsLine';
 import CommentContent from './CommentContent';
 import CommentAttachments from './CommentAttachments';
+import AckControl from './AckControl';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ export default function FeedPostItem({ post, currentUserId, flagTargets, onFlagg
         </div>
         <CommentAttachments attachments={post.attachments} />
         <MentionsLine mentions={post.mentions} />
+        <AckControl postId={post.id} ackCount={post.ackCount} acknowledged={post.acknowledged} onChanged={onModerated} />
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ import {
   mentionIdsFromMetadata,
   resolveEntityLinksForPosts,
   resolveAttachmentsForPosts,
+  resolveAcksForPosts,
   FeedScope,
 } from '../services/feedService';
 import { canActionFlag } from '../services/escalationService';
@@ -146,10 +147,12 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
     const authorMap = new Map(authors.map((a) => [a.id, a.name]));
     const statusMap = new Map(flags.map((f) => [f.id, f.status]));
 
-    // Inline #CODE entity links (Phase E.2) + comment attachments (Phase F).
-    const [entityLinksByPost, attachmentsByPost] = await Promise.all([
+    // Inline #CODE entity links (E.2) + comment attachments (F) + acks (G).
+    const commentIds = posts.filter((p) => p.type === 'COMMENT').map((p) => p.id);
+    const [entityLinksByPost, attachmentsByPost, acksByPost] = await Promise.all([
       resolveEntityLinksForPosts(prisma, posts),
       resolveAttachmentsForPosts(prisma, posts.map((p) => p.id)),
+      resolveAcksForPosts(prisma, commentIds, req.user?.userId ?? null),
     ]);
 
     let viewerCanAction = false;
@@ -176,6 +179,8 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
         .map((id) => ({ id, name: authorMap.get(id) ?? null })),
       entityLinks: entityLinksByPost.get(p.id) ?? {},
       attachments: attachmentsByPost.get(p.id) ?? [],
+      ackCount: acksByPost.get(p.id)?.ackCount ?? 0,
+      acknowledged: acksByPost.get(p.id)?.acknowledged ?? false,
     })));
   } catch (error) {
     console.error('Error fetching feed:', error);
@@ -412,6 +417,48 @@ export const unpinPost = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+// ─── POST /api/feeds/posts/:id/ack ────────────────────────────────────────────
+// Any authenticated user acknowledges ("I have read this") a COMMENT. Idempotent
+// via the unique (feedPostId,userId) constraint; the dual-write (AuditLog +
+// SYSTEM_EVENT) fires only on the FIRST ack per user.
+export const ackPost = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId } = req.user!;
+    const postId = parsePostId(req.params.id);
+    if (postId === null) { res.status(400).json({ message: 'A numeric post id is required.' }); return; }
+
+    const post = await prisma.feedPost.findUnique({ where: { id: postId }, select: { id: true, type: true, scope: true, scopeId: true } });
+    if (!post) { res.status(404).json({ message: 'Comment not found.' }); return; }
+    if (post.type !== 'COMMENT') { res.status(400).json({ message: 'Only comments can be acknowledged.' }); return; }
+
+    // Attempt the first-ack write atomically; a concurrent duplicate aborts on the
+    // unique constraint (P2002) and is treated as an already-acknowledged no-op.
+    try {
+      await prisma.$transaction(async (tx) => {
+        const actor = await tx.user.findFirst({ where: { id: userId, deletedAt: null }, select: { name: true } });
+        const actorName = actor?.name ?? `User ${userId}`;
+        await tx.feedPostAcknowledgement.create({ data: { feedPostId: postId, userId } });
+        await tx.auditLog.create({
+          data: { actionType: 'FEED_POST_ACKNOWLEDGED', entityType: 'FeedPost', entityId: String(postId), performedByUserId: userId, details: {} as any },
+        });
+        await createFeedPost(tx, {
+          type: 'SYSTEM_EVENT', scope: post.scope as FeedScope, scopeId: post.scopeId,
+          content: `${actorName} acknowledged a comment.`, authorId: null,
+        });
+      });
+    } catch (err) {
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) throw err;
+      // already acknowledged — fall through and just return the current count
+    }
+
+    const ackCount = await prisma.feedPostAcknowledgement.count({ where: { feedPostId: postId } });
+    res.json({ id: postId, acknowledged: true, ackCount });
+  } catch (error) {
+    console.error('Error acknowledging post:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // ─── GET /api/feeds/pinned/:scope/:scopeId? ───────────────────────────────────
 // Returns the (non-hidden) pinned comments for a WP / Division / Org feed, newest
 // pin first. TASK / FINDING feeds are not pinnable → always empty.
@@ -431,9 +478,11 @@ export const getPinnedFeed = async (req: Request, res: Response): Promise<void> 
       ? await prisma.user.findMany({ where: { id: { in: authorIds }, deletedAt: null }, select: { id: true, name: true } })
       : [];
     const authorMap = new Map(authors.map((a) => [a.id, a.name]));
-    const [entityLinksByPost, attachmentsByPost] = await Promise.all([
+    const pinnedIds = pinned.map((p) => p.id);
+    const [entityLinksByPost, attachmentsByPost, acksByPost] = await Promise.all([
       resolveEntityLinksForPosts(prisma, pinned),
-      resolveAttachmentsForPosts(prisma, pinned.map((p) => p.id)),
+      resolveAttachmentsForPosts(prisma, pinnedIds),
+      resolveAcksForPosts(prisma, pinnedIds, req.user?.userId ?? null),
     ]);
 
     res.json(pinned.map((p) => ({
@@ -443,6 +492,8 @@ export const getPinnedFeed = async (req: Request, res: Response): Promise<void> 
       pinned: true,
       entityLinks: entityLinksByPost.get(p.id) ?? {},
       attachments: attachmentsByPost.get(p.id) ?? [],
+      ackCount: acksByPost.get(p.id)?.ackCount ?? 0,
+      acknowledged: acksByPost.get(p.id)?.acknowledged ?? false,
     })));
   } catch (error) {
     console.error('Error fetching pinned feed:', error);

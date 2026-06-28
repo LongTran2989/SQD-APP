@@ -178,6 +178,39 @@ export interface FeedAttachment {
   caption: string | null;
 }
 
+// ─── Acknowledgements (Phase G) ───────────────────────────────────────────────
+
+export interface FeedAckSummary {
+  ackCount: number;
+  acknowledged: boolean; // whether the requesting viewer has acknowledged
+}
+
+/** Batched ack count + viewer's ack flag for a page of posts, keyed by post id. */
+export async function resolveAcksForPosts(
+  client: PrismaLike,
+  postIds: number[],
+  viewerId: number | null
+): Promise<Map<number, FeedAckSummary>> {
+  const out = new Map<number, FeedAckSummary>();
+  if (postIds.length === 0) return out;
+  const [counts, viewerAcks] = await Promise.all([
+    client.feedPostAcknowledgement.groupBy({
+      by: ['feedPostId'],
+      where: { feedPostId: { in: postIds } },
+      _count: { _all: true },
+    }),
+    viewerId != null
+      ? client.feedPostAcknowledgement.findMany({ where: { feedPostId: { in: postIds }, userId: viewerId }, select: { feedPostId: true } })
+      : Promise.resolve([] as { feedPostId: number }[]),
+  ]);
+  const viewerSet = new Set(viewerAcks.map((a) => a.feedPostId));
+  const countMap = new Map(counts.map((c) => [c.feedPostId, c._count._all]));
+  for (const pid of postIds) {
+    out.set(pid, { ackCount: countMap.get(pid) ?? 0, acknowledged: viewerSet.has(pid) });
+  }
+  return out;
+}
+
 /** Batched: the non-deleted attachments for a page of posts, keyed by post id. */
 export async function resolveAttachmentsForPosts(
   client: PrismaLike,

@@ -369,6 +369,8 @@ export interface TaskActivityEnriched extends TaskActivity {
   mentions?: MentionUser[]; // @mentioned users resolved to names (Phase E)
   entityLinks?: EntityLinkMap; // resolved #CODE references (Phase E.2)
   attachments?: FeedAttachment[]; // files attached to this comment (Phase F)
+  ackCount?: number; // how many users acknowledged this comment (Phase G)
+  acknowledged?: boolean; // whether the viewer has acknowledged it
 }
 
 // ── Unified feed (Phase 2) — generic across all four scopes ──────────────────
@@ -412,6 +414,9 @@ export interface FeedPostEnriched extends FeedPost {
   entityLinks?: EntityLinkMap;
   // Files attached to this comment (Phase F).
   attachments?: FeedAttachment[];
+  // Acknowledgement receipts (Phase G).
+  ackCount?: number;
+  acknowledged?: boolean;
 }
 
 // ── Escalation (Phase 3) ─────────────────────────────────────────────────────
