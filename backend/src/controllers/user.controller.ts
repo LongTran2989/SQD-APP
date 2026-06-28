@@ -446,7 +446,7 @@ export const updateMyProfile = async (req: Request, res: Response): Promise<void
 };
 
 // Top-level keys the client is allowed to persist in User.preferences.
-const ALLOWED_PREFERENCE_KEYS = ['taskColumns', 'taskFilters'] as const;
+const ALLOWED_PREFERENCE_KEYS = ['taskColumns', 'taskFilters', 'feedDigest'] as const;
 // Hard cap on the serialized preferences blob (defensive — it is user-controlled).
 const MAX_PREFERENCES_BYTES = 16 * 1024;
 
@@ -499,6 +499,34 @@ export const updateMyPreferences = async (req: Request, res: Response): Promise<
     res.json({ preferences: updated.preferences });
   } catch (error) {
     console.error('Error updating preferences:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/users/mention-search?q= ─────────────────────────────────────────
+// Lightweight, auth-only user lookup powering the @mention picker. Returns a small
+// page of non-deleted users matching name/employeeId. No privilege gate — mention
+// targeting is open (consistent with the transparency model); it only notifies.
+export const mentionSearch = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (q.length < 1) { res.json([]); return; }
+
+    const users = await prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { employeeId: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      select: { id: true, name: true, employeeId: true },
+      orderBy: { name: 'asc' },
+      take: 8,
+    });
+    res.json(users);
+  } catch (error) {
+    console.error('Error in mention search:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

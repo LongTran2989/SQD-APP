@@ -110,6 +110,9 @@ model User {
   // Files this user uploaded (Attachment owner back-relation).
   uploadedAttachments Attachment[] @relation("AttachmentUploadedBy")
 
+  // Feed comment acknowledgements this user made (Phase G).
+  feedAcknowledgements FeedPostAcknowledgement[] @relation("UserFeedAcks")
+
   // Auto-generate ownership (Template Sets / WP Blueprints this user owns).
   ownedTemplateSets TemplateSet[] @relation("TemplateSetOwner")
   ownedBlueprints   WpBlueprint[] @relation("WpBlueprintOwner")
@@ -905,10 +908,39 @@ model FeedPost {
   flag              EscalationFlag? @relation(fields: [flagId], references: [id])
   taggedDivisionIds Json? // Org Feed only — int array of tagged divisions
 
+  // ── Moderation flags (Phase D) ──────────────────────────────────────────────
+  // Soft-hide (M4): a hidden COMMENT is kept (immutable audit trail) but excluded
+  // from feed reads. Director/Admin only; reversible via unhide. Pinning: a COMMENT
+  // pinned to a WP/DIVISION/ORG feed surfaces in a "Pinned" strip. Both are
+  // post-level admin flags — never physical deletes.
+  hiddenAt       DateTime?
+  hiddenByUserId Int?
+  hiddenReason   String?
+  pinnedAt       DateTime?
+  pinnedByUserId Int?
+
   createdAt DateTime @default(now())
 
+  acknowledgements FeedPostAcknowledgement[]
+
   @@index([scope, scopeId, createdAt])
+  @@index([scope, scopeId, pinnedAt]) // pinned-posts lookup per feed
   @@index([flagId])
+}
+
+// A user's acknowledgement ("I have read this") of a feed COMMENT — Phase G.
+// Immutable, idempotent (one per user per post via the unique constraint). Used
+// for compliance read-receipts on directives/announcements.
+model FeedPostAcknowledgement {
+  id             Int      @id @default(autoincrement())
+  feedPostId     Int
+  feedPost       FeedPost @relation(fields: [feedPostId], references: [id], onDelete: Cascade)
+  userId         Int
+  user           User     @relation("UserFeedAcks", fields: [userId], references: [id])
+  acknowledgedAt DateTime @default(now())
+
+  @@unique([feedPostId, userId])
+  @@index([feedPostId])
 }
 
 // One flag tracks an escalation through its entire lifecycle (no flag chains).

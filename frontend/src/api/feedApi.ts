@@ -1,20 +1,114 @@
 import { apiClient } from './client';
-import { FeedScope, FeedPostEnriched } from '../types';
+import { FeedScope, FeedPostEnriched, FeedPostType } from '../types';
 
 // ORG is the singleton feed (no scopeId); the other scopes take a polymorphic
 // scopeId (taskId / wpId / divisionId).
 const feedPath = (scope: FeedScope, scopeId?: number | null): string =>
   scope === 'ORG' ? '/feeds/ORG' : `/feeds/${scope}/${scopeId}`;
 
+// Reads return the NEWEST page (ascending for chat-style render); the keyset
+// cursor for loading older posts rides the X-Next-Cursor response header (H2).
+export interface FeedQueryOptions {
+  limit?: number;
+  before?: number | null; // page strictly older than this post id
+  types?: FeedPostType[];
+  includeHidden?: boolean; // Director/Admin only — include soft-hidden comments
+}
+
+export interface FeedPage {
+  posts: FeedPostEnriched[];
+  nextCursor: number | null; // pass back as `before` to load the previous page; null = start of feed
+}
+
+const buildFeedParams = (opts: FeedQueryOptions): Record<string, string> => {
+  const params: Record<string, string> = {};
+  if (opts.limit != null) params.limit = String(opts.limit);
+  if (opts.before != null) params.before = String(opts.before);
+  if (opts.types && opts.types.length) params.types = opts.types.join(',');
+  if (opts.includeHidden) params.includeHidden = 'true';
+  return params;
+};
+
+// Backward-compatible: still returns the (newest) page as a plain array. Used by
+// lightweight callers (quickview previews) that don't paginate.
 export const getFeed = (scope: FeedScope, scopeId?: number | null): Promise<FeedPostEnriched[]> =>
   apiClient.get(feedPath(scope, scopeId)).then((r) => r.data);
+
+// Paginating callers: returns the page plus the next cursor read from the header.
+export const getFeedPage = (
+  scope: FeedScope,
+  scopeId: number | null | undefined,
+  opts: FeedQueryOptions = {}
+): Promise<FeedPage> =>
+  apiClient.get(feedPath(scope, scopeId), { params: buildFeedParams(opts) }).then((r) => ({
+    posts: r.data as FeedPostEnriched[],
+    nextCursor: r.headers['x-next-cursor'] ? Number(r.headers['x-next-cursor']) : null,
+  }));
+
+// ─── Search (Phase H) ─────────────────────────────────────────────────────────
+
+export interface FeedSearchResult {
+  id: number;
+  scope: FeedScope;
+  scopeId: number | null;
+  content: string;
+  createdAt: string;
+  author: { id: number; name: string | null } | null;
+}
+
+// Searches COMMENT bodies (newest first). Omit scope for a global search; pass
+// scope[/scopeId] to search within one feed. Cursor rides the X-Next-Cursor header.
+export const searchFeed = (
+  q: string,
+  opts: { scope?: FeedScope; scopeId?: number | null; limit?: number; before?: number | null } = {}
+): Promise<{ results: FeedSearchResult[]; nextCursor: number | null }> => {
+  const params: Record<string, string> = { q };
+  if (opts.scope) params.scope = opts.scope;
+  if (opts.scopeId != null) params.scopeId = String(opts.scopeId);
+  if (opts.limit != null) params.limit = String(opts.limit);
+  if (opts.before != null) params.before = String(opts.before);
+  return apiClient.get('/feeds/search', { params }).then((r) => ({
+    results: r.data as FeedSearchResult[],
+    nextCursor: r.headers['x-next-cursor'] ? Number(r.headers['x-next-cursor']) : null,
+  }));
+};
+
+// ─── Moderation (Phase D) ─────────────────────────────────────────────────────
+
+const pinnedPath = (scope: FeedScope, scopeId?: number | null): string =>
+  scope === 'ORG' ? '/feeds/pinned/ORG' : `/feeds/pinned/${scope}/${scopeId}`;
+
+// Pinned comments for a WP / Division / Org feed (TASK / FINDING → always empty).
+export const getPinnedFeed = (scope: FeedScope, scopeId?: number | null): Promise<FeedPostEnriched[]> =>
+  apiClient.get(pinnedPath(scope, scopeId)).then((r) => r.data);
+
+// Director/Admin only. reason is optional.
+export const hidePost = (postId: number, reason?: string): Promise<void> =>
+  apiClient.post(`/feeds/posts/${postId}/hide`, reason ? { reason } : {}).then(() => undefined);
+
+export const unhidePost = (postId: number): Promise<void> =>
+  apiClient.post(`/feeds/posts/${postId}/unhide`, {}).then(() => undefined);
+
+// Scope-gated (mirrors posting rights); WP / Division / Org comments only.
+export const pinPost = (postId: number): Promise<void> =>
+  apiClient.post(`/feeds/posts/${postId}/pin`, {}).then(() => undefined);
+
+export const unpinPost = (postId: number): Promise<void> =>
+  apiClient.post(`/feeds/posts/${postId}/unpin`, {}).then(() => undefined);
+
+// Acknowledge ("I have read this") a comment — idempotent (Phase G).
+export const ackPost = (postId: number): Promise<{ id: number; acknowledged: boolean; ackCount: number }> =>
+  apiClient.post(`/feeds/posts/${postId}/ack`, {}).then((r) => r.data);
 
 export const postFeedComment = (
   scope: FeedScope,
   scopeId: number | null | undefined,
-  content: string
+  content: string,
+  mentionUserIds?: number[]
 ): Promise<FeedPostEnriched> =>
-  apiClient.post(`${feedPath(scope, scopeId)}/posts`, { content }).then((r) => r.data);
+  apiClient
+    .post(`${feedPath(scope, scopeId)}/posts`, { content, ...(mentionUserIds?.length ? { mentionUserIds } : {}) })
+    .then((r) => r.data);
 
 /**
  * Client-side mirror of the backend feed posting RBAC (feedService.canPostToFeed)
