@@ -13,6 +13,43 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-28 — Work Assignment Workflow Review (Tasks & WPs)
+
+**Branch:** `claude/review-work-assignment-workflow-jrw9md`
+**Scope:** Manual security/workflow review of the Task + Work Package assignment workflow — `task.controller.ts`, `wp.controller.ts`, `autoGenService.ts`, the task/WP routes, and the privilege model. Root pattern of the findings: a role-level privilege check passes but the **division-scope** or **segregation-of-duties** check that should accompany it is missing. Pure hardening — **no schema migration, no new privilege keys** (division-scope checks stay hardcoded per the Phase 7 design).
+**Tests after fixes:** Backend **635/635** (was 621; +14: 11 task + 3 WP hardening tests; 1 existing WP test re-worded for the new message). Full suite green (29 suites). Includes the follow-up `/code-review` round below.
+
+| # | Severity | File / Endpoint | Finding | Status |
+|---|----------|-----------------|---------|--------|
+| WAW-1 | **High (SoD)** | `task.controller.ts` `reviewTask` | The self-approval guard only fired when the actor was **both** issuer and assignee. A Manager who *performed* a task (assignee) but was not the issuer could approve their own work via `task:review_div`. Violates the aviation-QA "perform ≠ approve" rule. | ✅ Fixed — block any review action when `assignedToUserId === userId`. |
+| WAW-2 | **High (division escalation)** | `wp.controller.ts` `createWorkPackage` | No division-scope check; a Manager with `wp:create` could create a WP (and, via auto-gen, inject tasks) into **any** division. | ✅ Fixed — non-Director/Admin restricted to own division. |
+| WAW-3 | **High (division escalation)** | `task.controller.ts` `createTaskService` | No `targetDivisionId` scope; a Manager could create an Unassigned task aimed at another division (then claimable by that division's Staff). Create-side analogue of DEF-4. | ✅ Fixed — gate cross-division target behind `task:assign_any`. Safe for auto-gen/escalation/WP-bypass callers. |
+| WAW-4 | Medium | `wp.controller.ts` `assignUserToWp` | Division check keyed on the `'Manager'` role string, so any other non-global role granted `wp:assign` skipped it. | ✅ Fixed — generic non-Director/Admin own-division check. |
+| WAW-5 | Low-med (SoD) | `task.controller.ts` `rateTask` | A user could rate their own performed task (skews efficiency analytics). | ✅ Fixed — block when `assignedToUserId === userId`. |
+| WAW-6 | Medium (defense-in-depth) | `wp.controller.ts` `updateWorkPackageStatus` | The non-creator `wp:manage_status` path had no division scope. Not reachable by default roles (only Director/Admin hold the key), but unsafe if granted to a scoped role. | ✅ Fixed — own-division check on the privilege path. |
+| WAW-7 | Medium | `task.controller.ts` `updateTaskWp` | A task could be linked to a WP in another division. | ✅ Fixed — WP division must match the task's target division unless `task:assign_any`. |
+| WAW-8 | Low-med (SoD) | `task.controller.ts` `decideDeadlineExtension` | The requester of an extension (e.g. the issuer, who is also a reviewer) could approve their own request. | ✅ Fixed — block when `extension.requestedBy === userId`. |
+| WAW-9 | Low (gap) | `assignTask`/`selfAssignTask`/`reassignTask` | Tasks carry a required `skillLevel` (0–4) that is never enforced against the assignee. | ⏭ Deferred (new **DEF-7**) — `User` has no competency field; needs a migration + seed + UI. |
+| WAW-10 | Low | `task.controller.ts` `setDeadline` / `createTask` / `createQuickTask` | No "deadline in the future" validation — a past deadline could be set, instantly marking the task Overdue. | ✅ Fixed — reject deadlines before start-of-today on the human-facing paths (service/auto-gen stay permissive). |
+| WAW-11 | Low (abuse) | `task.routes.ts` / `wp.routes.ts` | Only the comment route was rate-limited; create/assign/save-data/etc. were unthrottled (e.g. 512 KB `saveTaskData` payloads). | ✅ Fixed — shared per-user `createMutationRateLimiter` on all mutating task/WP routes (auto-disabled under test). |
+| WAW-12 | Low (correctness) | `task.controller.ts` `createTask` handler | The handler silently dropped `title` (the service supports it; only Quick Task could set one). | ✅ Fixed — destructure + length-guard + pass through. |
+| WAW-13 | Info | `getTaskById` / `getTaskActivity` / `getWorkPackages` | Full transparency: any authenticated user reads all task data / WP detail cross-division. | ✔ Accepted-as-is — intentional transparency model (see DEF-6); flagged as a conscious risk acceptance. |
+
+**Related deferrals unchanged:** DEF-3 (`transferIssuerRights` target division scope) and DEF-4 (`assignTask` on a task targeted at another division) were **not** touched by this pass — WAW-3 closes only the *create* side; the *assign-existing* side of DEF-4 remains open pending product confirmation.
+
+### Follow-up `/code-review` (high effort, recall-biased) — on the WAW diff
+
+Reviewed the hardening diff itself; 4 findings, all actioned.
+
+| # | Severity | File / Endpoint | Finding | Status |
+|---|----------|-----------------|---------|--------|
+| WAW-R1 | Medium (functional/UX) | `task.routes.ts` | One shared 30/min limiter covered all 18 task-mutation routes as a single combined bucket — a Director/Manager doing a batch of reviews/assignments, or frequent `saveTaskData` autosaves, could hit 429. | ✅ Fixed — `saveTaskData` gets its own generous bucket (240/min); the shared action limiter ceiling raised to 90/min. |
+| WAW-R2 | Low-med (regression) | `task.controller.ts` `updateTaskWp` | `targetDivisionId` is nullable (`Int?`); the new check `wp.divisionId !== task.targetDivisionId` made `!== null` always true, so a null-target task could no longer be linked by a non-`assign_any` actor. | ✅ Fixed — `task.targetDivisionId != null` guard; null-target tasks stay freely linkable. Test SR-11. |
+| WAW-R3 | Low (TZ edge) | `task.controller.ts` `pastDeadlineError` | Compared a UTC-midnight date-only deadline against local `startOfToday()`, wrongly rejecting a same-day deadline on a negative-UTC-offset server. | ✅ Fixed — compare UTC epoch-days (TZ-independent); `setDeadline` reuses the helper. Test SR-10. |
+| WAW-R4 | Medium (altitude/maintainability) | `wp.controller.ts` + `task.controller.ts` | The division-scope idiom was copy-pasted at 5 sites with two divergent signals (task `assign_any` vs WP role-string), risking inconsistent cross-division reach for custom roles and drift. | ✅ Fixed — extracted `hasCrossDivisionReach` (`utils/privilegeAccess.ts`); all 5 sites call it. Director/Admin or any role with `task:assign_any` now have consistent reach across tasks and WPs. |
+
+---
+
 ## Session: 2026-06-23 — Database Architecture Review + Remediation (Phases 1–5) + Post-Phase-5 Code Review
 
 **Branch:** `claude/relaxed-lamport-sst3dn` (commits for Phases 1–5 + the review-fix commit).
@@ -216,6 +253,7 @@ User triaged: fix #1, #4, #5, #6; accept #3; #2 is a deploy-pipeline question (f
 |----|----------|------|---------------------|
 | DEF-5 | Low | No `PUT` endpoint for `FILE_UPLOAD_CONFIG`; "Admin-configurable" (Rule 10) currently means a manual DB upsert. | Settings-panel endpoint is a follow-up feature, not a review bug. Default policy + clamp behave correctly meanwhile. |
 | DEF-6 | Low | `download`/`list` are auth-only (no per-entity scope), consistent with the app's transparency model. If finding/task/WP visibility is ever tightened, attachments won't follow until a scope check is added at `assertEntityExists`. | Matches current product design (`buildFindingScope → {}`); revisit only if visibility is locked down. |
+| DEF-7 | Low (feature) | Skill gating not enforced: tasks carry a required `skillLevel` (0–4) but `assignTask`/`selfAssignTask`/`reassignTask` never compare it to the assignee — `User` has no competency field. (WAW-9, 2026-06-28.) | Needs a schema migration (`User.skillLevel` or a competency model) + seed + UI; out of scope for a hardening pass. |
 
 ---
 

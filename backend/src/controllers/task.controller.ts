@@ -5,7 +5,7 @@ import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes, resolv
 import { createNotifications, notifyFeedWatchers, notifyMentions } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS, TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
-import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
+import { hasPrivilege, hasCrossDivisionReach, PrivilegeActor } from '../utils/privilegeAccess';
 
 import { prisma } from '../lib/prisma';
 
@@ -353,6 +353,28 @@ function startOfToday(): Date {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
+}
+
+/**
+ * Validates a user-supplied deadline for the manual create / set-deadline paths:
+ * rejects an unparseable date or one whose calendar day is before today. Same-day
+ * is allowed. The comparison is on UTC epoch-days, NOT local time: a date-only
+ * deadline ("YYYY-MM-DD") parses to UTC midnight and is stored that way, so
+ * comparing UTC-day-to-UTC-day keeps the check correct regardless of the server's
+ * local timezone (a local-midnight comparison wrongly rejects a same-day date-only
+ * deadline on a negative-UTC-offset server). Returns an error string or null.
+ * NOTE: only the human-facing handlers use this — the shared createTaskService and
+ * auto-gen/escalation flows derive deadlines from a WP timeframe and stay permissive.
+ */
+function pastDeadlineError(deadline: unknown): string | null {
+  if (deadline == null) return null; // optional — absence is fine
+  const d = new Date(deadline as string | number | Date);
+  if (isNaN(d.getTime())) return 'Invalid deadline date';
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const deadlineDay = Math.floor(d.getTime() / DAY_MS);
+  const todayDay = Math.floor(Date.now() / DAY_MS);
+  if (deadlineDay < todayDay) return 'Deadline cannot be in the past';
+  return null;
 }
 
 /** RBAC visibility scope for the "All Tasks" tab (role-dependent). Async for the
@@ -748,6 +770,17 @@ export async function createTaskService(
   if (!templateId || !targetDivisionId) {
     throw new HttpError(400, 'templateId and targetDivisionId are required');
   }
+
+  // Division lock on the TARGET division. Only an actor with cross-division reach
+  // (task:assign_any) may create a task aimed at another division. Mirrors the
+  // assignee division lock below and assignTask. Safe for every caller: the WP-
+  // assignment bypass above already requires targetDivisionId === divisionId, the
+  // auto-gen system actor resolves task:assign_any via Director defaults, and
+  // escalation Managers become correctly restricted to their own division.
+  if (!hasCrossDivisionReach(actor) && targetDivisionId !== divisionId) {
+    throw new HttpError(403, 'You can only create tasks for your own division');
+  }
+
   if (issuanceNote != null && (typeof issuanceNote !== 'string' || issuanceNote.length > 2000)) {
     throw new HttpError(400, 'issuanceNote must be a string of at most 2000 characters');
   }
@@ -871,10 +904,22 @@ export async function createTaskService(
 export const createTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId, role, divisionId } = req.user!;
-    const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote } = req.body;
+    const { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote, title } = req.body;
+
+    const titleLenErr = lengthError(title, MAX_TITLE_LEN, 'title');
+    if (titleLenErr) {
+      res.status(400).json({ message: titleLenErr });
+      return;
+    }
+
+    const deadlineErr = pastDeadlineError(deadline);
+    if (deadlineErr) {
+      res.status(400).json({ message: deadlineErr });
+      return;
+    }
 
     const task = await prisma.$transaction((tx) =>
-      createTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote })
+      createTaskService(tx, { userId, role, divisionId, permissions: req.user!.permissions }, { templateId, targetDivisionId, wpId, assignedToUserId, deadline, estimatedHours, skillLevel, requiresApproval, issuanceNote, title })
     );
 
     // Notify the initial assignee if one was provided at creation time (best-effort,
@@ -935,7 +980,7 @@ export const updateTaskWp = async (req: Request, res: Response): Promise<void> =
     if (wpId !== null && wpId !== undefined) {
       const wp = await prisma.workPackage.findUnique({
         where: { id: wpId, deletedAt: null },
-        select: { id: true, status: true }
+        select: { id: true, status: true, divisionId: true }
       });
       if (!wp) {
         res.status(404).json({ message: 'Work Package not found' });
@@ -943,6 +988,15 @@ export const updateTaskWp = async (req: Request, res: Response): Promise<void> =
       }
       if (wp.status === 'Closed') {
         res.status(400).json({ message: 'Cannot link a task to a Closed Work Package' });
+        return;
+      }
+      // Division lock: a task may only be linked to a WP in its own target
+      // division, unless the actor has cross-division reach. Prevents a task being
+      // filed under a foreign-division work package. The `targetDivisionId != null`
+      // guard preserves the prior behaviour for the (schema-nullable) case of a
+      // task with no target division — those stay freely linkable.
+      if (!hasCrossDivisionReach(req.user!) && task.targetDivisionId != null && wp.divisionId !== task.targetDivisionId) {
+        res.status(403).json({ message: 'A task can only be linked to a Work Package in its own division' });
         return;
       }
       newWpId = wp.id;
@@ -987,6 +1041,12 @@ export const createQuickTask = async (req: Request, res: Response): Promise<void
     }
     if (String(title).length > MAX_TITLE_LEN) {
       res.status(400).json({ message: `Task title must be at most ${MAX_TITLE_LEN} characters` });
+      return;
+    }
+
+    const quickDeadlineErr = pastDeadlineError(deadline);
+    if (quickDeadlineErr) {
+      res.status(400).json({ message: quickDeadlineErr });
       return;
     }
 
@@ -1485,9 +1545,12 @@ export const reviewTask = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // Amendment 3 (T74): Issuer who is also Assignee cannot self-approve
-    if (task.issuerId === userId && task.assignedToUserId === userId) {
-      res.status(403).json({ message: 'The same person cannot perform a task and approve it. Aviation QA integrity requirement.' });
+    // Segregation of duties (Amendment 3 / T74, hardened): the person who
+    // performed the task (the assignee) can NEVER review its outcome, regardless
+    // of who issued it. A Manager assignee holding task:review_div would otherwise
+    // approve their own work via isReviewer(). Aviation QA integrity requirement.
+    if (task.assignedToUserId === userId) {
+      res.status(403).json({ message: 'The same person cannot perform a task and review it. Aviation QA integrity requirement.' });
       return;
     }
 
@@ -2070,11 +2133,14 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const newDeadline = new Date(deadline);
-    if (isNaN(newDeadline.getTime())) {
-      res.status(400).json({ message: 'Invalid deadline date' });
+    // Validate format + reject a past deadline via the shared helper (same UTC-day
+    // rule the create paths use), then construct the Date for the update.
+    const setDeadlineErr = pastDeadlineError(deadline);
+    if (setDeadlineErr) {
+      res.status(400).json({ message: setDeadlineErr });
       return;
     }
+    const newDeadline = new Date(deadline);
 
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.task.update({
@@ -2245,6 +2311,11 @@ export const decideDeadlineExtension = async (req: Request, res: Response): Prom
       if (extension.decision !== null) {
         throw new HttpError(400, 'This extension request has already been decided');
       }
+      // Segregation of duties: the requester cannot decide their own extension
+      // request (an issuer is both an eligible requester and a reviewer here).
+      if (extension.requestedBy === userId) {
+        throw new HttpError(403, 'You cannot decide your own deadline extension request');
+      }
 
       // Resolve deadline when approving (proposedDeadline from the request is the fallback).
       if (decision === 'approve' && !deadlineUpdate) {
@@ -2337,6 +2408,12 @@ export const rateTask = async (req: Request, res: Response): Promise<void> => {
 
     if (!task.assignedToUserId) {
       res.status(400).json({ message: 'Cannot rate an unassigned task' });
+      return;
+    }
+
+    // Segregation of duties: a user cannot rate their own performed task.
+    if (task.assignedToUserId === userId) {
+      res.status(403).json({ message: 'You cannot rate your own task' });
       return;
     }
 

@@ -10,28 +10,33 @@ import {
 } from '../controllers/wp.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { requirePrivilege } from '../middleware/rbac.middleware';
+import { createMutationRateLimiter } from '../middleware/rateLimit.middleware';
 
 const router = Router();
 
 // All WP routes require authentication
 router.use(authenticateJWT);
 
+// Per-user write limiter shared across the state-changing WP endpoints. Keyed on
+// userId; auto-disabled under test / DISABLE_RATE_LIMIT. Reads stay unthrottled.
+const wpMutationLimiter = createMutationRateLimiter();
+
 // WP listing and detail
 router.get('/', getWorkPackages);
 router.get('/:id', getWorkPackageById);
 
 // WP creation — Manager, Director, Admin
-router.post('/', requirePrivilege('wp:create'), createWorkPackage);
+router.post('/', wpMutationLimiter, requirePrivilege('wp:create'), createWorkPackage);
 
 // WP update — authorization handled in controller (managers/creator/global edit all
 // fields; assigned users may edit only the timeframe).
-router.put('/:id', updateWorkPackage);
+router.put('/:id', wpMutationLimiter, updateWorkPackage);
 
 // WP status changes — checked in controller (creator, Admin, Director)
-router.put('/:id/status', updateWorkPackageStatus);
+router.put('/:id/status', wpMutationLimiter, updateWorkPackageStatus);
 
 // WP assignment — Manager, Director, Admin (further checks in controller)
-router.post('/:id/assign', requirePrivilege('wp:assign'), assignUserToWp);
-router.delete('/:id/assign/:userId', requirePrivilege('wp:assign'), removeUserFromWp);
+router.post('/:id/assign', wpMutationLimiter, requirePrivilege('wp:assign'), assignUserToWp);
+router.delete('/:id/assign/:userId', wpMutationLimiter, requirePrivilege('wp:assign'), removeUserFromWp);
 
 export default router;
