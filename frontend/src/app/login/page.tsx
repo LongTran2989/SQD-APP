@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
+import PasswordInput from '../../components/auth/PasswordInput';
 import { ShieldAlert } from 'lucide-react';
 
 export default function LoginPage() {
@@ -39,6 +40,10 @@ export default function LoginPage() {
     } catch (err: any) {
       if (err.response?.status === 401) {
         setError('Invalid Staff ID or password.');
+      } else if (err.response?.status === 429) {
+        // Surface the rate-limit response rather than disguising it as a
+        // connection problem (audit U5).
+        setError(err.response?.data?.message || 'Too many attempts. Please try again in a few minutes.');
       } else {
         setError('An error occurred connecting to the server.');
       }
@@ -112,15 +117,12 @@ export default function LoginPage() {
                   Forgot password?
                 </Link>
               </div>
-              <input
+              <PasswordInput
                 id="password"
-                type="password"
                 required
                 autoComplete="current-password"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow duration-150"
-                placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={setPassword}
               />
             </div>
 

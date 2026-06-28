@@ -4,6 +4,8 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '../../api/client';
+import PasswordInput from '../../components/auth/PasswordInput';
+import PasswordStrength, { isPasswordValid } from '../../components/auth/PasswordStrength';
 import { KeyRound, ShieldAlert, CheckCircle2 } from 'lucide-react';
 
 function ResetPasswordForm() {
@@ -36,9 +38,10 @@ function ResetPasswordForm() {
       return;
     }
 
-    if (newPassword.length < 8) {
+    // Mirror the server policy so we fail fast instead of round-tripping a 400.
+    if (!isPasswordValid(newPassword)) {
       setStatus('error');
-      setMessage('Password must be at least 8 characters long.');
+      setMessage('Password must be at least 8 characters and include both letters and numbers.');
       return;
     }
 
@@ -84,27 +87,27 @@ function ResetPasswordForm() {
 
       <form onSubmit={handleReset} className="space-y-5">
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1">New Password</label>
-          <input
-            type="password"
+          <PasswordInput
+            label="New Password"
             required
-            className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-            placeholder="••••••••"
+            autoComplete="new-password"
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
+            onChange={setNewPassword}
           />
+          <PasswordStrength password={newPassword} />
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1">Confirm Password</label>
-          <input
-            type="password"
+          <PasswordInput
+            label="Confirm Password"
             required
-            className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-            placeholder="••••••••"
+            autoComplete="new-password"
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
+            onChange={setConfirmPassword}
           />
+          {confirmPassword.length > 0 && confirmPassword !== newPassword && (
+            <p className="mt-1.5 text-xs text-red-600">Passwords do not match.</p>
+          )}
         </div>
 
         <button
