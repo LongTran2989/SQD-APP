@@ -4,8 +4,46 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { JWT_SECRET } from '../config/env';
+import { validatePassword } from '../utils/passwordPolicy';
 
 import { prisma } from '../lib/prisma';
+
+// JWT is HMAC-SHA256 signed. Pinning the algorithm on BOTH sign and verify (see
+// auth.middleware) prevents algorithm-confusion attacks. See auth audit M1.
+const JWT_ALGORITHM = 'HS256' as const;
+
+// Roles only a Director may mint via register — blocks a non-Director (e.g. an
+// Admin holding `user:create`) from escalating by creating a Director. Admin and
+// below remain creatable by any `user:create` holder. See audit H3.
+const DIRECTOR_ONLY_ROLE_NAMES = new Set(['Director']);
+
+// Basic shape check for the optional email field. Format only — deliverability
+// is never assumed. See audit L1.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Best-effort compliance audit write for an authentication event. Mirrors the
+// logout precedent: AuthN events have no Task context, so AuditLog alone is the
+// system-of-record (Rule 3's TaskActivity half does not apply off-task). Never
+// allowed to break the request it records. See audit H2.
+const writeAuthAudit = async (
+  actionType: string,
+  userId: number,
+  details?: Record<string, unknown>
+): Promise<void> => {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        actionType,
+        entityType: 'User',
+        entityId: String(userId),
+        performedByUserId: userId,
+        details: details ?? undefined
+      }
+    });
+  } catch (err) {
+    console.error(`Failed to write ${actionType} audit log:`, err);
+  }
+};
 
 // A constant, valid bcrypt hash used to perform a "dummy" comparison when a
 // login is attempted for an unknown user. This keeps the found / not-found code
@@ -68,6 +106,9 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
 
     if (!isValidPassword) {
+      // Audit failed attempts against KNOWN accounts only. The unknown-user path
+      // is intentionally not logged so this write adds no enumeration signal.
+      await writeAuthAudit('LOGIN_FAILED', user.id, { reason: 'invalid_password', ip: req.ip });
       res.status(401).json({ message: 'Invalid credentials' });
       return;
     }
@@ -88,7 +129,13 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     };
 
     const token = jwt.sign(payload, JWT_SECRET, {
-      expiresIn: '1d'
+      expiresIn: '1d',
+      algorithm: JWT_ALGORITHM
+    });
+
+    await writeAuthAudit('LOGIN_SUCCESS', user.id, {
+      ip: req.ip,
+      forcePasswordChange: user.forcePasswordChange
     });
 
     // Set the httpOnly cookie in both flows: the forced-change session is gated
@@ -169,6 +216,17 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      res.status(400).json({ message: passwordError });
+      return;
+    }
+
+    if (email && !EMAIL_REGEX.test(email)) {
+      res.status(400).json({ message: 'A valid email address is required' });
+      return;
+    }
+
     const existingById = await prisma.user.findUnique({ where: { employeeId, deletedAt: null } });
     if (existingById) {
       res.status(400).json({ message: 'User already exists' });
@@ -189,6 +247,31 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Scope guards (audit H3). The route already requires `user:create`; these
+    // bound WHAT the holder may create so a non-Director cannot escalate.
+    const creator = (req as any).user as { userId: number; role: string; divisionId: number } | undefined;
+
+    // 1. Only a Director may mint a Director account.
+    if (DIRECTOR_ONLY_ROLE_NAMES.has(roleName) && creator?.role !== 'Director') {
+      res.status(403).json({ message: 'Only a Director may create Director accounts' });
+      return;
+    }
+
+    // 2. Non-Director/Admin creators may only create users inside their own
+    //    division — they cannot seed accounts into other divisions.
+    const creatorIsGlobal = creator?.role === 'Director' || creator?.role === 'Admin';
+    if (!creatorIsGlobal && creator?.divisionId !== divisionId) {
+      res.status(403).json({ message: 'You may only create users within your own division' });
+      return;
+    }
+
+    // 3. Validate the target division exists (avoids a raw Prisma FK 500).
+    const division = await prisma.division.findUnique({ where: { id: divisionId } });
+    if (!division) {
+      res.status(400).json({ message: 'Invalid division' });
+      return;
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
 
     // forcePasswordChange defaults to true in the schema, so a newly registered
@@ -202,6 +285,13 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         divisionId,
         roleId: role.id
       }
+    });
+
+    // Record who created which account, with what role, for compliance (H2).
+    await writeAuthAudit('USER_REGISTERED', newUser.id, {
+      createdByUserId: creator?.userId,
+      roleName,
+      divisionId
     });
 
     res.status(201).json({ message: 'User registered successfully', userId: newUser.id });
@@ -245,6 +335,19 @@ export const updatePassword = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      res.status(400).json({ message: passwordError });
+      return;
+    }
+
+    // The new password must actually differ from the current one — a forced
+    // change that re-sets the same value defeats the purpose.
+    if (newPassword === oldPassword) {
+      res.status(400).json({ message: 'New password must be different from the current password' });
+      return;
+    }
+
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
     const sessionId = crypto.randomUUID();
@@ -268,8 +371,11 @@ export const updatePassword = async (req: Request, res: Response): Promise<void>
     };
 
     const token = jwt.sign(payload, JWT_SECRET, {
-      expiresIn: '1d'
+      expiresIn: '1d',
+      algorithm: JWT_ALGORITHM
     });
+
+    await writeAuthAudit('PASSWORD_CHANGED', updatedUser.id, { ip: req.ip });
 
     // Refresh the cookie with the new session (forcePasswordChange now false).
     setAuthCookie(res, token);
@@ -317,6 +423,8 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
         }
       });
 
+      await writeAuthAudit('PASSWORD_RESET_REQUESTED', user.id, { ip: req.ip });
+
       // Simulated email sending by printing to console
       console.log(`\n========================================`);
       console.log(`[EMAIL MOCK] Password Reset Requested`);
@@ -339,6 +447,12 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
 
     if (!token || !newPassword) {
       res.status(400).json({ message: 'Token and new password are required' });
+      return;
+    }
+
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      res.status(400).json({ message: passwordError });
       return;
     }
 
@@ -369,6 +483,8 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
         activeSessionId: null
       }
     });
+
+    await writeAuthAudit('PASSWORD_RESET', user.id, { ip: req.ip });
 
     res.status(200).json({ message: 'Password reset successfully. You can now log in.' });
   } catch (error) {
