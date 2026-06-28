@@ -477,9 +477,10 @@ export const ackPost = async (req: Request, res: Response): Promise<void> => {
     const postId = parsePostId(req.params.id);
     if (postId === null) { res.status(400).json({ message: 'A numeric post id is required.' }); return; }
 
-    const post = await prisma.feedPost.findUnique({ where: { id: postId }, select: { id: true, type: true, scope: true, scopeId: true } });
+    const post = await prisma.feedPost.findUnique({ where: { id: postId }, select: { id: true, type: true, scope: true, scopeId: true, hiddenAt: true } });
     if (!post) { res.status(404).json({ message: 'Comment not found.' }); return; }
     if (post.type !== 'COMMENT') { res.status(400).json({ message: 'Only comments can be acknowledged.' }); return; }
+    if (post.hiddenAt) { res.status(400).json({ message: 'A hidden comment cannot be acknowledged.' }); return; }
 
     // Attempt the first-ack write atomically; a concurrent duplicate aborts on the
     // unique constraint (P2002) and is treated as an already-acknowledged no-op.
@@ -523,7 +524,14 @@ export const getPinnedFeed = async (req: Request, res: Response): Promise<void> 
       orderBy: { pinnedAt: 'desc' },
     });
 
-    const authorIds = [...new Set(pinned.map((p) => p.authorId).filter((id): id is number => typeof id === 'number'))];
+    // Resolve author + mention names together (mirrors getFeed) so a pinned
+    // comment renders its @mention line in the pinned strip.
+    const mentionIdsByPost = new Map(pinned.map((p) => [p.id, mentionIdsFromMetadata(p.metadata)]));
+    const allMentionIds = [...new Set([...mentionIdsByPost.values()].flat())];
+    const authorIds = [...new Set([
+      ...pinned.map((p) => p.authorId).filter((id): id is number => typeof id === 'number'),
+      ...allMentionIds,
+    ])];
     const authors = authorIds.length
       ? await prisma.user.findMany({ where: { id: { in: authorIds }, deletedAt: null }, select: { id: true, name: true } })
       : [];
@@ -544,6 +552,9 @@ export const getPinnedFeed = async (req: Request, res: Response): Promise<void> 
       attachments: attachmentsByPost.get(p.id) ?? [],
       ackCount: acksByPost.get(p.id)?.ackCount ?? 0,
       acknowledged: acksByPost.get(p.id)?.acknowledged ?? false,
+      mentions: (mentionIdsByPost.get(p.id) ?? [])
+        .filter((id) => authorMap.has(id))
+        .map((id) => ({ id, name: authorMap.get(id) ?? null })),
     })));
   } catch (error) {
     console.error('Error fetching pinned feed:', error);

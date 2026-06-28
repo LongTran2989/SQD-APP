@@ -121,7 +121,10 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
       return next;
     });
 
-  const visiblePosts = posts.filter((p) => !hidden.has(p.type));
+  // A pinned comment already shows in the pinned strip above — exclude it from the
+  // inline list so it isn't rendered twice (with two moderation menus).
+  const pinnedIds = new Set(pinned.map((p) => p.id));
+  const visiblePosts = posts.filter((p) => !hidden.has(p.type) && !pinnedIds.has(p.id));
 
   // Auto-scroll to newest only when the BOTTOM entry changes (initial load or an
   // appended post) — never when older posts are prepended via "Load earlier".

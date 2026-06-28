@@ -440,7 +440,7 @@ export const actionEscalation = async (req: Request, res: Response): Promise<voi
           // do not scope visibility — but we still validate them: coerce to numbers, dedupe,
           // and drop any id that isn't a real Division. Empty → null (no tags).
           const requestedDivisionIds = Array.isArray(payload.taggedDivisionIds)
-            ? [...new Set((payload.taggedDivisionIds as unknown[]).filter((n): n is number => typeof n === 'number'))]
+            ? [...new Set((payload.taggedDivisionIds as unknown[]).filter((n): n is number => typeof n === 'number' && Number.isInteger(n)))]
             : [];
           let taggedDivisionIds: number[] | null = null;
           if (requestedDivisionIds.length > 0) {

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { checkAndTriggerPendingVerification } from '../services/findingService';
-import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes, resolveMentions, mentionIdsFromMetadata, resolveEntityLinksForPosts, resolveAttachmentsForPosts } from '../services/feedService';
+import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes, resolveMentions, mentionIdsFromMetadata, resolveEntityLinksForPosts, resolveAttachmentsForPosts, MAX_COMMENT_LEN as FEED_MAX_COMMENT_LEN } from '../services/feedService';
 import { createNotifications, notifyFeedWatchers, notifyMentions } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS, TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
@@ -26,7 +26,9 @@ function parseTaskId(raw: string | string[] | undefined): number | null {
 // detail) while still blocking unbounded-storage / DoS via giant payloads.
 const MAX_TITLE_LEN = 300;       // task titles are short labels
 const MAX_REASON_LEN = 2000;     // reassign / inactivate / reopen / extension reasons
-const MAX_COMMENT_LEN = 5000;    // review comments + activity-feed comments
+// Single source of truth for the comment cap lives in feedService (shared by every
+// feed comment path); re-exported alias keeps the local lengthError call sites tidy.
+const MAX_COMMENT_LEN = FEED_MAX_COMMENT_LEN; // review comments + activity-feed comments
 
 // Dynamic task data (saveTaskData). `data` is arbitrary JSON shaped by the
 // template's schemaSnapshot, so we cap generically rather than per declared type:

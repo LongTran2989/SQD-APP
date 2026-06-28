@@ -95,13 +95,19 @@ export const FEED_POST_TYPES: FeedPostType[] = ['COMMENT', 'SYSTEM_EVENT', 'ESCA
 // on reads as { id, name }. Validation drops ids that aren't real, non-deleted
 // users, so the stored set is always trustworthy.
 
+// Upper bound on mentions per comment — guards against a malicious oversized
+// mentionUserIds array amplifying into a large query + notification fan-out.
+export const MAX_MENTIONS_PER_COMMENT = 50;
+
 /** Validates raw mention ids → ordered, de-duped [{id,name}] of real users. */
 export async function resolveMentions(
   client: PrismaLike,
   raw: unknown
 ): Promise<{ id: number; name: string | null }[]> {
   if (!Array.isArray(raw)) return [];
-  const ids = [...new Set(raw.filter((n): n is number => typeof n === 'number' && Number.isInteger(n)))];
+  // Cap the input so a single request can't amplify into a huge IN-query + mass
+  // notification fan-out (no realistic comment mentions more than a handful).
+  const ids = [...new Set(raw.filter((n): n is number => typeof n === 'number' && Number.isInteger(n)))].slice(0, MAX_MENTIONS_PER_COMMENT);
   if (ids.length === 0) return [];
   const users = await client.user.findMany({
     where: { id: { in: ids }, deletedAt: null },

@@ -342,13 +342,15 @@ export async function buildFeedDigests(client: PrismaLike, since: Date): Promise
     });
     if (optedIn.length === 0) return;
 
+    // Count human COMMENTs only — not the pin/ack/hide/escalation SYSTEM_EVENT
+    // noise that also lands on these feeds (the digest summarises real discussion).
     const orgCount = await client.feedPost.count({
-      where: { scope: 'ORG', hiddenAt: null, createdAt: { gt: since } },
+      where: { scope: 'ORG', type: 'COMMENT', hiddenAt: null, createdAt: { gt: since } },
     });
     const divisionIds = [...new Set(optedIn.map((u) => u.divisionId))];
     const divGroups = await client.feedPost.groupBy({
       by: ['scopeId'],
-      where: { scope: 'DIVISION', scopeId: { in: divisionIds }, hiddenAt: null, createdAt: { gt: since } },
+      where: { scope: 'DIVISION', type: 'COMMENT', scopeId: { in: divisionIds }, hiddenAt: null, createdAt: { gt: since } },
       _count: { _all: true },
     });
     const divCount = new Map(divGroups.map((g) => [g.scopeId, g._count._all]));

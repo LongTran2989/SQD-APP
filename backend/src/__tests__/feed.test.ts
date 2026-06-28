@@ -393,6 +393,14 @@ describe('Feed API (Phase 2)', () => {
       const taskPin = await request(app).post(`/api/feeds/posts/${taskComment.id}/pin`).set('Authorization', `Bearer ${directorToken}`).send({});
       expect(taskPin.status).toBe(400);
     });
+
+    it('the pinned-feed read resolves @mentions (parity with getFeed)', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'pinned directive', authorId: directorUserId, metadata: { mentions: [managerUserId] } } });
+      await request(app).post(`/api/feeds/posts/${c.id}/pin`).set('Authorization', `Bearer ${directorToken}`).send({});
+      const res = await request(app).get(`/api/feeds/pinned/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      const posted = res.body.find((p: { id: number }) => p.id === c.id);
+      expect(posted.mentions.map((m: { id: number }) => m.id)).toContain(managerUserId);
+    });
   });
 
   // ─── @mentions (Phase E) ─────────────────────────────────────────────────────
@@ -490,6 +498,12 @@ describe('Feed API (Phase 2)', () => {
       const res = await request(app).post(`/api/feeds/posts/${sys.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
       expect(res.status).toBe(400);
     });
+
+    it('rejects acknowledging a hidden comment (400)', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'hidden directive', authorId: directorUserId, hiddenAt: new Date(), hiddenByUserId: directorUserId } });
+      const res = await request(app).post(`/api/feeds/posts/${c.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
+      expect(res.status).toBe(400);
+    });
   });
 
   // ─── Search (Phase H) ────────────────────────────────────────────────────────
@@ -524,11 +538,14 @@ describe('Feed API (Phase 2)', () => {
       await prisma.notification.deleteMany({ where: { type: 'FEED_DIGEST' } });
       await prisma.user.update({ where: { id: staffUserId }, data: { preferences: { feedDigest: true } } });
       await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'ORG', scopeId: null, content: 'fresh org news', authorId: directorUserId } });
+      // A SYSTEM_EVENT must NOT inflate the digest count (comments only).
+      await prisma.feedPost.create({ data: { type: 'SYSTEM_EVENT', scope: 'ORG', scopeId: null, content: 'someone pinned a comment' } });
 
       await buildFeedDigests(prisma, new Date(Date.now() - 60 * 60 * 1000)); // since 1h ago
 
       const optedIn = await prisma.notification.findFirst({ where: { userId: staffUserId, type: 'FEED_DIGEST' } });
       expect(optedIn).not.toBeNull();
+      expect(optedIn?.title).toContain('1 new'); // the SYSTEM_EVENT was excluded
       const notOpted = await prisma.notification.findFirst({ where: { userId: managerUserId, type: 'FEED_DIGEST' } });
       expect(notOpted).toBeNull();
 

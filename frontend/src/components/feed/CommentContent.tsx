@@ -30,7 +30,10 @@ export default function CommentContent({
   // shared lastIndex state). Mirrors the backend ENTITY_REF_REGEX.
   for (const m of content.matchAll(/#([A-Za-z0-9][A-Za-z0-9_-]*)/g)) {
     const code = m[1];
-    const link = code ? entityLinks[code] : undefined;
+    // hasOwnProperty guard: entityLinks is a plain object, so a token like
+    // "#toString"/"#__proto__" would otherwise resolve to an inherited prototype
+    // member and render a broken link. Only own keys are real entity links.
+    const link = code && Object.prototype.hasOwnProperty.call(entityLinks, code) ? entityLinks[code] : undefined;
     if (!link) continue; // unknown code → leave as plain text (handled by the tail slice)
     const idx = m.index ?? 0;
     if (idx > last) parts.push(<Fragment key={`t${i}`}>{content.slice(last, idx)}</Fragment>);
