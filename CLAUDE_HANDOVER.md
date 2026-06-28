@@ -1,6 +1,8 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-24 (rev 18). Supersedes all previous versions.*
+*Last updated: 2026-06-28 (rev 19). Supersedes all previous versions.*
 
+> **rev 19 (2026-06-28):** **Feed Features workstream (Phases A–H)** on branch `claude/feed-features-audit-iac2uw` — a hardening + capability expansion of the unified `FeedPost` feed, built from `FEED_FEATURES_AUDIT.md` against `FEED_IMPROVEMENT_PLAN.md`. Shipped: comment length cap + per-user write rate-limit + disseminate validation (A); **keyset pagination + type filters** with the cursor on an `X-Next-Cursor` header (B); **scoped SSE feed signals** to watchers instead of broadcast (C); **soft-hide + pinning** (D); **@mentions** with notifications (E); inline **`#CODE` entity hyperlinks** (E.2); **attachments in comments** via a new `FEED_POST` attachment entity type (F); **acknowledgement / read-receipts** (G); **feed search + opt-in daily digest** (H). Then an accepted high-effort `/code-review` (8 fixes, 1 accepted-as-is, 1 deferred — see `CODE_REVIEW_AUDIT_LOG.md` 2026-06-28). **Backend 621/621**, frontend `tsc --noEmit` + lint clean — verified end-to-end against a live Postgres + backend + Next.js stack (login, pagination header, mentions, #links, attachments upload/download, pinning, hide, ack, search). Schema: `FeedPost` gains moderation columns + a new `FeedPostAcknowledgement` model (additive). See OBJECT H, §6, and `FEED_IMPROVEMENT_PLAN.md` for the per-phase detail.
+>
 > **rev 18 (2026-06-24):** Task-list server-side pagination + new `/tasks/stats|assignees|options` endpoints; `Finding.findingId` business code (`FND-000001`); DB integrity hardening (CHECK constraints, Finding indexes); post-review picker/UX fixes; **migration history squashed to a clean replayable baseline** (was unshippable). Backend **595/595**, frontend build clean — verified locally on a real DB (incl. the DB-level CHECK constraint rejection). **⚠️ Read §12.8 "Pre-deploy items to MONITOR & RECTIFY" before going to prod** — most importantly the test-DB/prod schema-application parity gap. Also folds in the Quick-View Enrichment + Back-to-Finding feature (582/582) and its clean `/security-review` from `claude/nice-darwin-nwyj81`.
 
 ---
@@ -19,6 +21,18 @@ SQD-APP is an aviation maintenance Quality Assurance (QA) and Quality Control (Q
 ## 2. CURRENT IMPLEMENTATION STATUS
 
 ### Completed
+- **Feed Features workstream — Phases A–H** (2026-06-28 — branch `claude/feed-features-audit-iac2uw`)
+  > Audit-driven hardening + capability expansion of the unified `FeedPost` feed. Started from `FEED_FEATURES_AUDIT.md` (full feed file-map + weakness/vuln list), executed via `FEED_IMPROVEMENT_PLAN.md`. **Backend 621/621; frontend `tsc`+lint clean; verified live end-to-end.** Then an accepted high-effort `/code-review` (`CODE_REVIEW_AUDIT_LOG.md`, 2026-06-28 session — F1–F9 fixed, F7 accepted-as-is, F10 deferred).
+  >
+  > - **A — Hardening:** shared `commentLengthError` (`MAX_COMMENT_LEN=5000`) now enforced on **every** comment path (the generic `postFeedComment` was previously uncapped); new per-user `createMutationRateLimiter` (30/min, keyed on `userId`) on feed comment/flag + task-activity writes; `DISSEMINATE` `taggedDivisionIds` validated against real Divisions (`Number.isInteger` + existence).
+  > - **B — Pagination + filters:** `getFeed`/`getTaskActivity` are **keyset-paginated** (`?limit` default 30/max 100, `?before` cursor, `?types` filter). **Response body stays an array; the next-page cursor rides the `X-Next-Cursor` response header** (CORS-exposed) — backward-compatible with array-consuming callers. Client filters are client-side (`FeedFilterBar`).
+  > - **C — Scoped realtime (M1):** `createFeedPost` resolves TASK/WP/FINDING watchers at emit time and the realtime `feed` signal fans out only to them (`publishToUser`); DIVISION/ORG stay broadcasts. New `resolveFindingWatchers`. Overflow → broadcast fallback.
+  > - **D — Soft-hide + pinning:** `FeedPost` gains `hiddenAt/hiddenByUserId/hiddenReason` + `pinnedAt/pinnedByUserId`. Director/Admin hide/unhide (excluded from **every** feed read; `?includeHidden=true` for Director/Admin review); pin/unpin on WP/DIV/ORG comments only (RBAC = `canPostToFeed`); `GET /feeds/pinned/:scope/:scopeId?`. COMMENT-only, dual-write AuditLog + SYSTEM_EVENT.
+  > - **E — @mentions:** chip-based picker (`GET /users/mention-search`); ids stored in `metadata.mentions`, resolved to names on read; new `FEED_MENTION` notification (author never self-notified).
+  > - **E.2 — `#CODE` entity links:** read-time resolution of `#<Task.taskId | WorkPackage.wpId | Finding.findingId>` → `{type,id}`; client linkifies to the detail route (XSS-safe React elements; `hasOwnProperty` guard so `#toString`/`#__proto__` can't hit the prototype chain).
+  > - **F — Comment attachments:** new `FEED_POST` attachment entity type (bucket `sqd-feed`) reusing the existing `StorageAdapter`/`Attachment` model (no migration); reads surface `attachments[]`; composer post-then-upload.
+  > - **G — Acknowledgement:** new `FeedPostAcknowledgement` model (unique per user+post, idempotent); `POST /feeds/posts/:id/ack`; dual-write AuditLog + SYSTEM_EVENT on first ack only; reads return `ackCount`+`acknowledged`. Hidden comments cannot be acked.
+  > - **H — Search + digest:** `GET /feeds/search?q=&scope=&scopeId=` (COMMENT bodies, hidden excluded, keyset); opt-in daily `FEED_DIGEST` (preferences `feedDigest`, cron 07:00, COMMENT-only counts).
 - **DB Architecture Hardening (Phases 1–5) + Task-List Pagination + Migration Squash** (2026-06-23/24 — branch `claude/relaxed-lamport-sst3dn`)
   > A senior-architect review of `schema.prisma` + data-access, a phased remediation, a post-review `/code-review`, and a migration-history rebuild. **Verified locally against a real DB: backend 595/595, frontend `next build` clean (24 routes), and the new DB-level CHECK constraint confirmed rejecting a bad status (Postgres `23514`).** Full finding-by-finding log in `CODE_REVIEW_AUDIT_LOG.md` (2026-06-23 session).
   >
@@ -1179,7 +1193,7 @@ Dedicated analytics view with charts and filters across severity, eventType, err
 
 ### OBJECT H: UNIFIED FEED & ESCALATION (`FeedPost`, `EscalationFlag`)
 
-**Added by the Feed & Escalation feature (Phases 1–5 — complete).** Replaces the former `TaskActivity` (OBJECT D). `FeedPost.scopeId` is **polymorphic — no foreign key**; a feed is located by `(scope, scopeId)`.
+**Added by the Feed & Escalation feature (Phases 1–5 — complete); expanded by the Feed Features workstream (Phases A–H, 2026-06-28 — see §2 and `FEED_IMPROVEMENT_PLAN.md`).** Replaces the former `TaskActivity` (OBJECT D). `FeedPost.scopeId` is **polymorphic — no foreign key**; a feed is located by `(scope, scopeId)`. A 5th scope, `FINDING` (`scopeId = finding.id`), backs the Finding activity feed.
 
 **`FeedPost`**
 
@@ -1187,17 +1201,29 @@ Dedicated analytics view with charts and filters across severity, eventType, err
 |---|---|---|
 | `id` | Int | |
 | `type` | String | `COMMENT` \| `SYSTEM_EVENT` \| `ESCALATION_CARD` \| `INFO_CARD` |
-| `scope` | String | `TASK` \| `WP` \| `DIVISION` \| `ORG` |
-| `scopeId` | Int? | taskId / wpId / divisionId; **NULL for the singleton ORG feed** |
+| `scope` | String | `TASK` \| `WP` \| `DIVISION` \| `ORG` \| `FINDING` |
+| `scopeId` | Int? | taskId / wpId / divisionId / findingId; **NULL for the singleton ORG feed** |
 | `authorId` | Int? | NULL for SYSTEM_EVENT / auto-generated cards |
 | `content` | String | Comment body, system text, or generated card headline |
-| `metadata` | Json? | |
+| `metadata` | Json? | Phase E: `{ mentions: int[] }` for @mention ids on a COMMENT |
 | `sourcePostId` | Int? | The flagged COMMENT a card references (self-relation) |
 | `sourceExcerpt` | String? | Truncated snippet (≤160 + `…`) — **never the full source text** |
 | `sourceTaskId` / `sourceWpId` | Int? | Denormalised deep-link (no FK — polymorphic origin) |
 | `flagId` | Int? | FK to `EscalationFlag` |
 | `taggedDivisionIds` | Json? | Org Feed only (int array) — used by Disseminate (Phase 4) |
+| `hiddenAt`/`hiddenByUserId`/`hiddenReason` | DateTime?/Int?/String? | **Phase D** soft-hide (Director/Admin); excluded from every read unless `?includeHidden=true` |
+| `pinnedAt`/`pinnedByUserId` | DateTime?/Int? | **Phase D** pin (WP/DIV/ORG COMMENT) |
 | `createdAt` | DateTime | Immutable |
+
+**`FeedPostAcknowledgement`** (Phase G) — a user's "I have read this" on a COMMENT. Immutable; idempotent.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | Int | |
+| `feedPostId` | Int | FK → FeedPost (cascade) |
+| `userId` | Int | |
+| `acknowledgedAt` | DateTime | |
+| | | `@@unique([feedPostId, userId])` — one per user per post |
 
 **`EscalationFlag`** — one flag tracks an escalation through its whole lifecycle (no flag chains). Immutable; never soft-deleted.
 
@@ -1219,6 +1245,18 @@ Dedicated analytics view with charts and filters across severity, eventType, err
 **Escalation RBAC (`canActionFlag` in `services/escalationService.ts` — single authority for both the action endpoint and the `getFeed` `canAction` flag):** Director/Admin → any flag; Manager → all ORG flags + own-division WP/DIVISION flags; Group Leader/Staff → none (they still SEE cards via feed transparency). Reading any feed is open to all; posting follows `canPostToFeed` (Task/WP all; Division own-div + Director/Admin any; Org Director/Admin/Manager).
 
 **Dedup guard (#21):** at most ONE PENDING flag per `(sourcePostId, targetScope)`. Enforced by an in-transaction `findFirst` at `isolationLevel: Serializable` → `HttpError(409)`; the concurrent loser aborts with Prisma `P2034`, mapped to the same 409. A full `@@unique` would be wrong (re-flagging is allowed once the prior flag is DISMISSED/ACTIONED), and a *partial* unique index isn't expressible under `prisma db push` — hence the transactional guard.
+
+**Feed capabilities (Phases A–H, 2026-06-28).** All endpoints under `/api/feeds` (+ `/api/tasks/:id/activity` for the Task feed). Per-phase detail in `FEED_IMPROVEMENT_PLAN.md`; the controller/service map is in `FEED_FEATURES_AUDIT.md`.
+
+- **Reads are keyset-paginated (B).** `getFeed` (`GET /feeds/:scope/:scopeId?`) and `getTaskActivity` accept `?limit` (default 30, max 100), `?before=<id>` cursor, `?types=COMMENT,…` filter. **The response body is still a flat array; the next cursor is returned on the `X-Next-Cursor` response header** (exposed via CORS in `index.ts`) — old array-consumers keep working but now see only the newest page. Frontend pages "load earlier" upward; `getFeed`/`getTaskActivity` API helpers return the array, `getFeedPage`/`getTaskActivityPage` return `{posts/activities, nextCursor}`.
+- **Moderation (D).** `POST /feeds/posts/:id/hide|unhide` (Director/Admin) — hidden COMMENTs are excluded from **every** read path (`getFeed`, `getTaskActivity`, dashboard feed + ongoing-works, task-list last/recent-activity); Director/Admin pass `?includeHidden=true` to review. `POST /feeds/posts/:id/pin|unpin` (WP/DIV/ORG COMMENT, RBAC = `canPostToFeed`); `GET /feeds/pinned/:scope/:scopeId?` returns the pinned strip. All dual-write AuditLog + SYSTEM_EVENT.
+- **@mentions (E).** Picker via `GET /users/mention-search?q=` (auth-only). `postFeedComment`/`postTaskComment` accept `mentionUserIds` (capped at 50), store ids in `metadata.mentions`, and notify via `FEED_MENTION`. Reads resolve `mentions: [{id,name}]`.
+- **`#CODE` entity links (E.2).** Reads extract `#<code>` tokens and resolve any matching `Task.taskId`/`WorkPackage.wpId`/`Finding.findingId` into `entityLinks: { code: {type,id} }`. Client `CommentContent` linkifies to the detail route (React elements only — XSS-safe; **`hasOwnProperty` guard** so `#toString`/`#__proto__` don't hit the prototype chain).
+- **Attachments (F).** Files attach to a COMMENT via the existing attachment API with `entityType='FEED_POST'`, `entityId=<post.id>` (bucket `sqd-feed`); `assertEntityExists` accepts only COMMENTs. Reads surface `attachments[]`; downloads still stream through `/api/attachments/:id/download`.
+- **Acknowledgement (G).** `POST /feeds/posts/:id/ack` — any authenticated user, COMMENT-only, **rejects hidden comments**, idempotent (unique constraint; P2002 → no-op). Dual-write AuditLog + SYSTEM_EVENT on the **first** ack per user only. Reads return `ackCount` + viewer `acknowledged`.
+- **Search + digest (H).** `GET /feeds/search?q=&scope=&scopeId=&limit=&before=` — case-insensitive substring over COMMENT bodies, newest-first, keyset, hidden excluded. Opt-in daily digest: preference `feedDigest`, `FEED_DIGEST` notification, `buildFeedDigests` (counts **COMMENT-only** new ORG + own-Division activity), cron 07:00 `APP_TIMEZONE`.
+- **Realtime scoping (C).** `createFeedPost` resolves TASK/WP/FINDING watchers at emit time so the `feed` SSE signal targets only them; DIVISION/ORG broadcast.
+- **Write guards (A).** Shared `commentLengthError` (`MAX_COMMENT_LEN=5000` in `feedService`) on every comment path; per-user `createMutationRateLimiter` (30/min) on comment/flag/activity writes.
 
 ---
 
@@ -1564,6 +1602,16 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 60. **The 5 DB CHECK constraints live ONLY in raw SQL and are NOT in the test DB:** `Task_status_check`, `Finding_status_check`, `Finding_severity_check`, `WorkPackage_status_check`, `FindingLink_no_self_reference_check` are in migration `20260623000100` (Prisma can't express CHECK in `schema.prisma`). `test:setup` uses `db push`, which skips raw-SQL migrations, so **the constraints do not exist in `sqd_qa_test_db` and the suite never exercises them**. A change that writes an off-list status can pass all tests yet 500 in prod with Postgres `23514`. When you add/rename a status or severity, update **both** the constant in `constants/*` **and** the CHECK list in the migration. See §12.8 item 1 for the parity-fix options.
 
 61. **`Finding.findingId` (`FND-000001`) is allocated in app code, not by a DB sequence:** `generateFindingId` (`finding.controller.ts`) takes a transaction-scoped `pg_advisory_xact_lock(8123401)`, reads the current max `findingId`, and increments — so allocation is serialised without a dedicated DB sequence object (none exists; do not add one expecting the app to use it). The column is `String? @unique` (nullable for the historical two-step backfill; always set at creation going forward). It is org-wide (no division prefix). Verified contiguous across server restarts.
+
+62. **Feed reads are paginated and the cursor is on a HEADER, not in the body (Phase B):** `getFeed`/`getTaskActivity` return only the newest `?limit` (default 30, max 100) posts as a **flat array**, with the next-page cursor on the **`X-Next-Cursor` response header** (CORS-exposed in `index.ts` via `exposedHeaders`). A caller that doesn't read the header silently sees a truncated feed — this was a deliberate backward-compat choice (body shape unchanged) so existing array consumers don't break. Frontend: `getFeed`/`getTaskActivity` return the array; `getFeedPage`/`getTaskActivityPage` return `{…, nextCursor}`. If you add a new feed read, keep this contract.
+
+63. **Hidden COMMENTs must be filtered from EVERY feed read (Phase D, Rule-2-style obligation):** `hiddenAt != null` is excluded in `getFeed`, `getTaskActivity`, `getPinnedFeed`, `dashboard.controller` (`getFeed` + `getOngoingWorks`), and `task.controller`'s `getLastActivityMap`/`getRecentActivitiesMap`. Only Director/Admin may pass `?includeHidden=true` (on `getFeed`/`getTaskActivity`) to review them. If you add a new path that reads `FeedPost`, add the `hiddenAt: null` filter or you'll resurface moderated content. `hiddenReason` is internal — it only ever reaches Director/Admin because hidden posts are gated.
+
+64. **Comment attachments use a `FEED_POST` attachment entity type (Phase F), not a FeedPost column:** files attach via the normal attachment API with `entityType='FEED_POST'`, `entityId='<post.id>'` (bucket `sqd-feed`). `attachmentService.assertEntityExists` accepts only COMMENT posts; `feedScopeFor` returns null for `FEED_POST` so no per-file SYSTEM_EVENT is written (files render inline on the comment). The upload is post-then-upload (the comment must exist first to own the entityId).
+
+65. **`#CODE` entity links resolve at READ time and the client lookup needs a `hasOwnProperty` guard (Phase E.2):** the backend (`feedService.resolveEntityLinksForPosts`) scans COMMENT content for `#<code>` and resolves real `Task.taskId`/`WorkPackage.wpId`/`Finding.findingId` into `entityLinks`. The frontend `CommentContent` MUST use `Object.prototype.hasOwnProperty.call(entityLinks, code)` before indexing — `entityLinks` is a plain object, so a token like `#toString`/`#constructor`/`#__proto__` would otherwise resolve to an inherited prototype member and render a broken `<Link href="undefined/undefined">` (code-review F1).
+
+66. **`prisma generate` after pulling the feed schema (and the schema-engine download can fail offline):** Phase D added `FeedPost.hiddenAt/hiddenByUserId/hiddenReason/pinnedAt/pinnedByUserId`; Phase G added the `FeedPostAcknowledgement` model. A stale client makes `prisma.feedPostAcknowledgement` undefined and the new columns missing — run `npx prisma generate` (and `npm run test:setup` which `db push`es + regenerates). Note: in an air-gapped/egress-limited environment, `prisma generate`/`db push` may fail fetching the **schema-engine** binary from `binaries.prisma.sh`; the query-engine `.so.node` ships in `@prisma/engines`, but the schema-engine is downloaded — fetch it once with `curl --retry --continue` to `node_modules/@prisma/engines/schema-engine-<platform>` if the auto-download resets.
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 
