@@ -325,6 +325,15 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    // Division lock: a division-scoped actor may only create a Work Package in
+    // their own division. Only Director / Admin (global reach) may target another
+    // division. Without this, a Manager holding wp:create could create a WP — and
+    // its auto-generated tasks (which inherit wp.divisionId) — in any division.
+    if (req.user!.role !== 'Director' && req.user!.role !== 'Admin' && Number(divisionId) !== req.user!.divisionId) {
+      res.status(403).json({ message: 'You can only create Work Packages for your own division' });
+      return;
+    }
+
     // Validate type exists
     const wpType = await prisma.wpType.findUnique({ where: { code: type } });
     if (!wpType) {
@@ -523,9 +532,18 @@ export const updateWorkPackageStatus = async (req: Request, res: Response): Prom
       return;
     }
 
-    // Only the creator (relationship) or a privileged role can change status
+    // Only the creator (relationship) or a privileged role can change status.
     if (wp.creatorId !== userId && !hasPrivilege(req.user!, 'wp:manage_status')) {
       res.status(403).json({ message: 'Insufficient permissions to change Work Package status' });
+      return;
+    }
+    // Division lock on the privilege path: a non-creator acting via wp:manage_status
+    // must be in the WP's division unless they have global reach (Director/Admin).
+    // Mirrors the isManager clause in updateWorkPackage.
+    if (wp.creatorId !== userId &&
+        req.user!.role !== 'Director' && req.user!.role !== 'Admin' &&
+        req.user!.divisionId !== wp.divisionId) {
+      res.status(403).json({ message: 'You can only change the status of Work Packages in your own division' });
       return;
     }
 
@@ -657,8 +675,11 @@ export const assignUserToWp = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (userRole === 'Manager' && targetUser.divisionId !== userDivisionId) {
-      res.status(403).json({ message: 'Managers can only assign users from the same division' });
+    // Division lock: any non-global actor (not Director/Admin) holding wp:assign
+    // may only assign users from their own division. Previously keyed on the
+    // 'Manager' role string, which let any other scoped role with wp:assign bypass it.
+    if (userRole !== 'Director' && userRole !== 'Admin' && targetUser.divisionId !== userDivisionId) {
+      res.status(403).json({ message: 'You can only assign users from your own division' });
       return;
     }
 
