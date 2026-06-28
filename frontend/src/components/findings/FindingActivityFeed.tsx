@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FeedPostEnriched, FeedPostType, User, MentionUser } from '../../types';
 import { getFeedPage, postFeedComment } from '../../api/feedApi';
+import { uploadCommentAttachments } from '../../api/attachmentApi';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
@@ -11,6 +12,8 @@ import CommentModerationMenu from '../feed/CommentModerationMenu';
 import MentionField from '../feed/MentionField';
 import MentionsLine from '../feed/MentionsLine';
 import CommentContent from '../feed/CommentContent';
+import CommentAttachments from '../feed/CommentAttachments';
+import AttachmentPicker from '../feed/AttachmentPicker';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
@@ -35,6 +38,7 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
   const [mentionSel, setMentionSel] = useState<MentionUser[]>([]);
+  const [attachFiles, setAttachFiles] = useState<File[]>([]);
 
   const canModerate = currentUser.role === 'Director' || currentUser.role === 'Admin';
 
@@ -104,9 +108,21 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
     setPosting(true);
     try {
       const newPost = await postFeedComment('FINDING', findingId, comment.trim(), mentionSel.map((m) => m.id));
-      setPosts((prev) => [...prev, newPost]);
       setComment('');
       setMentionSel([]);
+      if (attachFiles.length) {
+        const files = attachFiles;
+        setAttachFiles([]);
+        try {
+          await uploadCommentAttachments(newPost.id, files);
+        } catch (uErr: unknown) {
+          const m = (uErr as { response?: { data?: { message?: string } } })?.response?.data?.message;
+          toast.error(m || 'Some attachments failed to upload');
+        }
+        reloadFeed();
+      } else {
+        setPosts((prev) => [...prev, newPost]);
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg || 'Failed to post comment');
@@ -217,6 +233,7 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
                   }`}>
                     <CommentContent content={entry.content} entityLinks={entry.entityLinks} />
                   </div>
+                  <CommentAttachments attachments={entry.attachments} />
                   <MentionsLine mentions={entry.mentions} />
                 </div>
               </div>
@@ -254,8 +271,9 @@ export default function FindingActivityFeed({ findingId, currentUser, onRefresh 
             </button>
           </div>
         </div>
-        <div className="mt-2 pl-10">
+        <div className="mt-2 pl-10 flex flex-wrap items-center gap-2">
           <MentionField selected={mentionSel} onChange={setMentionSel} />
+          <AttachmentPicker files={attachFiles} onChange={setAttachFiles} disabled={posting} />
         </div>
       </div>
     </div>

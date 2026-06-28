@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { TaskEnriched, TaskActivityEnriched, FeedPostType, EscalationTargetScope, User, MentionUser } from '../../types';
 import { postTaskComment, getTaskActivityPage } from '../../api/taskApi';
+import { uploadCommentAttachments } from '../../api/attachmentApi';
 import toast from 'react-hot-toast';
 import { Settings, MessageCircle, Send } from 'lucide-react';
 import FlagButton from '../feed/FlagButton';
@@ -11,6 +12,8 @@ import CommentModerationMenu from '../feed/CommentModerationMenu';
 import MentionField from '../feed/MentionField';
 import MentionsLine from '../feed/MentionsLine';
 import CommentContent from '../feed/CommentContent';
+import CommentAttachments from '../feed/CommentAttachments';
+import AttachmentPicker from '../feed/AttachmentPicker';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
@@ -49,6 +52,7 @@ export default function TaskActivityFeed({
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
   const [mentionSel, setMentionSel] = useState<MentionUser[]>([]);
+  const [attachFiles, setAttachFiles] = useState<File[]>([]);
   // Older entries loaded via "Load earlier" — kept separate from the parent-owned
   // `activities` (the newest page) so the parent's refresh logic stays untouched.
   // cursor: undefined = unknown (button shown optimistically), number = more
@@ -167,6 +171,17 @@ export default function TaskActivityFeed({
       onNewActivity(newActivity);
       setComment('');
       setMentionSel([]);
+      if (attachFiles.length) {
+        const files = attachFiles;
+        setAttachFiles([]);
+        try {
+          await uploadCommentAttachments(newActivity.id, files);
+        } catch (uErr: unknown) {
+          const m = (uErr as { response?: { data?: { message?: string } } })?.response?.data?.message;
+          toast.error(m || 'Some attachments failed to upload');
+        }
+        onRefresh?.(); // re-fetch so the comment renders with its files
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg || 'Failed to post comment');
@@ -282,6 +297,7 @@ export default function TaskActivityFeed({
                   }`}>
                     <CommentContent content={entry.content} entityLinks={entry.entityLinks} />
                   </div>
+                  <CommentAttachments attachments={entry.attachments} />
                   <MentionsLine mentions={entry.mentions} />
                 </div>
               </div>
@@ -322,8 +338,9 @@ export default function TaskActivityFeed({
               </button>
             </div>
           </div>
-          <div className="mt-2 pl-10">
+          <div className="mt-2 pl-10 flex flex-wrap items-center gap-2">
             <MentionField selected={mentionSel} onChange={setMentionSel} />
+            <AttachmentPicker files={attachFiles} onChange={setAttachFiles} disabled={posting} />
           </div>
         </div>
       )}

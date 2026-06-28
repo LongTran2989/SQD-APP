@@ -8,6 +8,7 @@ import FlagButton from './FlagButton';
 import CommentModerationMenu from './CommentModerationMenu';
 import MentionsLine from './MentionsLine';
 import CommentContent from './CommentContent';
+import CommentAttachments from './CommentAttachments';
 import { formatTimestamp, getInitials } from '../../utils/feedHelpers';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -102,6 +103,7 @@ export default function FeedPostItem({ post, currentUserId, flagTargets, onFlagg
         >
           <CommentContent content={post.content} entityLinks={post.entityLinks} />
         </div>
+        <CommentAttachments attachments={post.attachments} />
         <MentionsLine mentions={post.mentions} />
       </div>
     </div>

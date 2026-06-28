@@ -75,7 +75,7 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
 
     const { entityType, entityId, fieldId } = req.body as Record<string, string>;
     if (!isAttachmentEntityType(entityType)) {
-      res.status(400).json({ message: 'entityType must be one of TASK, FINDING, TEMPLATE, WP' });
+      res.status(400).json({ message: 'entityType must be one of TASK, FINDING, TEMPLATE, WP, FEED_POST' });
       return;
     }
     if (!entityId || typeof entityId !== 'string') {
@@ -111,7 +111,7 @@ export const listAttachments = async (req: Request, res: Response): Promise<void
   try {
     const { entityType, entityId, fieldId } = req.query;
     if (!isAttachmentEntityType(entityType)) {
-      res.status(400).json({ message: 'entityType must be one of TASK, FINDING, TEMPLATE, WP' });
+      res.status(400).json({ message: 'entityType must be one of TASK, FINDING, TEMPLATE, WP, FEED_POST' });
       return;
     }
     if (typeof entityId !== 'string' || !entityId.length) {

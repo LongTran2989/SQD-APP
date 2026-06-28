@@ -185,8 +185,31 @@ resolution map) that emits links to `/dashboard/...`. Not blocking @mentions.
 
 ---
 
-## Phase F — Attachments in comments
+## Phase F — Attachments in comments  ✅ IMPLEMENTED
 Reuse the existing local-disk `StorageAdapter` + soft-deleted `Attachment` model (FILE_UPLOAD_DEV_GUIDE.md).
+
+**As built.** Added a `FEED_POST` attachment entity type (bucket `sqd-feed`) so files
+attach to a specific COMMENT — no schema migration (the polymorphic `Attachment`
+model already supports it). All existing policy/quota/soft-delete/streamed-download
+rules apply unchanged (Rule 10).
+- Backend: `ATTACHMENT_ENTITY_TYPES` + `ENTITY_BUCKET` gain `FEED_POST`;
+  `attachmentService.assertEntityExists` resolves a FEED_POST to its COMMENT (rejects
+  non-comment posts → 404); `feedScopeFor` returns null for FEED_POST (no per-file
+  SYSTEM_EVENT — files render inline on the comment). Reads (`getFeed`/
+  `getTaskActivity`/`getPinnedFeed`) batch-resolve `resolveAttachmentsForPosts` and
+  attach `attachments[]` per comment.
+- Frontend: shared `AttachmentPicker` (stages File[] in the composer) + post-then-
+  upload flow (the comment is created first, then files upload to FEED_POST/its id,
+  then the feed reloads); shared `CommentAttachments` renders download chips
+  (streamed via `/api/attachments/:id/download`, never a public URL);
+  `attachmentApi.uploadCommentAttachments` helper. Wired into all three composers +
+  renderers.
+- Tests: attachment.test.ts A23 (attach to comment → surfaces on activity read) +
+  A24 (non-COMMENT post → 404). Full suite 614/614; frontend tsc + lint clean.
+- Verified live: comment → upload note.pdf → feed shows attachment metadata →
+  download streams the bytes (HTTP 200, 31 bytes).
+
+### Original plan notes
 
 - Confirm `Attachment` polymorphic linkage supports `entityType='FeedPost'` (or add it). Migration only if a new entity type/column is needed.
 - `feed.controller.postFeedComment` / `postTaskComment`: accept attachment IDs (uploaded via existing attachment upload endpoint), associate to the created `FeedPost`. Enforce `FILE_UPLOAD_CONFIG` limits (never hardcode — Rule 10). Soft-delete only.

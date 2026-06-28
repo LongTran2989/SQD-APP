@@ -165,6 +165,40 @@ export async function resolveEntityLinks(
   return map;
 }
 
+// ─── Comment attachments (Phase F) ────────────────────────────────────────────
+// Files attached to a feed COMMENT are stored as Attachment rows with
+// entityType='FEED_POST', entityId=post.id. Reads surface their metadata so the
+// comment can render download chips. Bytes always stream via /api/attachments.
+
+export interface FeedAttachment {
+  id: number;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  caption: string | null;
+}
+
+/** Batched: the non-deleted attachments for a page of posts, keyed by post id. */
+export async function resolveAttachmentsForPosts(
+  client: PrismaLike,
+  postIds: number[]
+): Promise<Map<number, FeedAttachment[]>> {
+  const out = new Map<number, FeedAttachment[]>();
+  if (postIds.length === 0) return out;
+  const rows = await client.attachment.findMany({
+    where: { entityType: 'FEED_POST', entityId: { in: postIds.map(String) }, deletedAt: null },
+    select: { id: true, fileName: true, fileType: true, fileSize: true, caption: true, entityId: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  for (const r of rows) {
+    const pid = Number(r.entityId);
+    const list = out.get(pid) ?? [];
+    list.push({ id: r.id, fileName: r.fileName, fileType: r.fileType, fileSize: r.fileSize, caption: r.caption });
+    out.set(pid, list);
+  }
+  return out;
+}
+
 /**
  * Convenience for a read path: resolve the entity links for a page of posts and
  * return a per-post map (only the codes found in that post that actually resolve).

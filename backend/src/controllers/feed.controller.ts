@@ -12,6 +12,7 @@ import {
   resolveMentions,
   mentionIdsFromMetadata,
   resolveEntityLinksForPosts,
+  resolveAttachmentsForPosts,
   FeedScope,
 } from '../services/feedService';
 import { canActionFlag } from '../services/escalationService';
@@ -145,8 +146,11 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
     const authorMap = new Map(authors.map((a) => [a.id, a.name]));
     const statusMap = new Map(flags.map((f) => [f.id, f.status]));
 
-    // Inline #CODE entity links (Phase E.2) — resolve across the page once.
-    const entityLinksByPost = await resolveEntityLinksForPosts(prisma, posts);
+    // Inline #CODE entity links (Phase E.2) + comment attachments (Phase F).
+    const [entityLinksByPost, attachmentsByPost] = await Promise.all([
+      resolveEntityLinksForPosts(prisma, posts),
+      resolveAttachmentsForPosts(prisma, posts.map((p) => p.id)),
+    ]);
 
     let viewerCanAction = false;
     if (req.user && hasEscalationCard) {
@@ -171,6 +175,7 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
         .filter((id) => authorMap.has(id))
         .map((id) => ({ id, name: authorMap.get(id) ?? null })),
       entityLinks: entityLinksByPost.get(p.id) ?? {},
+      attachments: attachmentsByPost.get(p.id) ?? [],
     })));
   } catch (error) {
     console.error('Error fetching feed:', error);
@@ -426,7 +431,10 @@ export const getPinnedFeed = async (req: Request, res: Response): Promise<void> 
       ? await prisma.user.findMany({ where: { id: { in: authorIds }, deletedAt: null }, select: { id: true, name: true } })
       : [];
     const authorMap = new Map(authors.map((a) => [a.id, a.name]));
-    const entityLinksByPost = await resolveEntityLinksForPosts(prisma, pinned);
+    const [entityLinksByPost, attachmentsByPost] = await Promise.all([
+      resolveEntityLinksForPosts(prisma, pinned),
+      resolveAttachmentsForPosts(prisma, pinned.map((p) => p.id)),
+    ]);
 
     res.json(pinned.map((p) => ({
       ...p,
@@ -434,6 +442,7 @@ export const getPinnedFeed = async (req: Request, res: Response): Promise<void> 
       hidden: false,
       pinned: true,
       entityLinks: entityLinksByPost.get(p.id) ?? {},
+      attachments: attachmentsByPost.get(p.id) ?? [],
     })));
   } catch (error) {
     console.error('Error fetching pinned feed:', error);

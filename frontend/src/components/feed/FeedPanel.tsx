@@ -6,9 +6,11 @@ import { MessageCircle, Send, Pin } from 'lucide-react';
 import { FeedPostEnriched, FeedScope, FeedPostType, EscalationTargetScope, User, MentionUser } from '../../types';
 import { getFeedPage, getPinnedFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
 import { getApiErrorMessage } from '../../utils/apiError';
+import { uploadCommentAttachments } from '../../api/attachmentApi';
 import FeedPostItem from './FeedPostItem';
 import FeedFilterBar from './FeedFilterBar';
 import MentionField from './MentionField';
+import AttachmentPicker from './AttachmentPicker';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
@@ -39,6 +41,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
   const [mentionSel, setMentionSel] = useState<MentionUser[]>([]);
+  const [attachFiles, setAttachFiles] = useState<File[]>([]);
 
   // Moderation rights (Phase D). Hide/unhide is Director/Admin; pin/unpin mirrors
   // posting rights and is only offered on the pinnable (WP/Division/Org) scopes.
@@ -143,9 +146,22 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
     setPosting(true);
     try {
       const created = await postFeedComment(scope, scopeId, comment.trim(), mentionSel.map((m) => m.id));
-      setPosts((prev) => [...prev, created]);
       setComment('');
       setMentionSel([]);
+      // Attachments upload AFTER the comment exists (they need its id), then we
+      // reload so the comment renders with its files. Without files we just append.
+      if (attachFiles.length) {
+        const files = attachFiles;
+        setAttachFiles([]);
+        try {
+          await uploadCommentAttachments(created.id, files);
+        } catch (err) {
+          toast.error(getApiErrorMessage(err, 'Some attachments failed to upload'));
+        }
+        reloadFeed();
+      } else {
+        setPosts((prev) => [...prev, created]);
+      }
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Failed to post comment'));
     } finally {
@@ -266,8 +282,9 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
               </button>
             </div>
           </div>
-          <div className="mt-2 pl-10">
+          <div className="mt-2 pl-10 flex flex-wrap items-center gap-2">
             <MentionField selected={mentionSel} onChange={setMentionSel} />
+            <AttachmentPicker files={attachFiles} onChange={setAttachFiles} disabled={posting} />
           </div>
         </div>
       )}

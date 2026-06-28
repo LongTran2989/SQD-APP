@@ -351,6 +351,16 @@ export interface EntityLink {
 // Map of #CODE (without the '#') → link target, attached to enriched comments.
 export type EntityLinkMap = Record<string, EntityLink>;
 
+// Attachment metadata surfaced on a feed comment (Phase F). Bytes stream via
+// /api/attachments/:id/download — never a public URL.
+export interface FeedAttachment {
+  id: number;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  caption: string | null;
+}
+
 // Enriched — server-side joined author name
 export interface TaskActivityEnriched extends TaskActivity {
   author: { id: number; name: string | null } | null;
@@ -358,6 +368,7 @@ export interface TaskActivityEnriched extends TaskActivity {
   pinned?: boolean; // always false for TASK feeds (not pinnable); kept for shape parity
   mentions?: MentionUser[]; // @mentioned users resolved to names (Phase E)
   entityLinks?: EntityLinkMap; // resolved #CODE references (Phase E.2)
+  attachments?: FeedAttachment[]; // files attached to this comment (Phase F)
 }
 
 // ── Unified feed (Phase 2) — generic across all four scopes ──────────────────
@@ -399,6 +410,8 @@ export interface FeedPostEnriched extends FeedPost {
   mentions?: MentionUser[];
   // Resolved #CODE references (Phase E.2).
   entityLinks?: EntityLinkMap;
+  // Files attached to this comment (Phase F).
+  attachments?: FeedAttachment[];
 }
 
 // ── Escalation (Phase 3) ─────────────────────────────────────────────────────
@@ -488,7 +501,7 @@ export interface TimeBooking {
   updatedAt: string;
 }
 
-export type AttachmentEntityType = 'TASK' | 'FINDING' | 'TEMPLATE' | 'WP';
+export type AttachmentEntityType = 'TASK' | 'FINDING' | 'TEMPLATE' | 'WP' | 'FEED_POST';
 
 // Public attachment metadata as returned by the API. The internal storageKey /
 // bucket are never exposed — downloads go through the backend stream endpoint.
