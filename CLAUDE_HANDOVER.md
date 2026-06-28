@@ -1,11 +1,17 @@
 # SQD-APP: Claude Code Project Handover
-*Last updated: 2026-06-28 (rev 20). Supersedes all previous versions.*
+*Last updated: 2026-06-28 (rev 21). Supersedes all previous versions.*
 
-> **rev 20 (2026-06-28):** **Work Assignment Workflow security/hardening pass** on branch `claude/review-work-assignment-workflow-jrw9md` — a manual review of the Task + Work Package assignment workflow (`task.controller.ts`, `wp.controller.ts`, `autoGenService.ts`, task/WP routes, privilege model) and remediation of the accepted findings. Closes two **segregation-of-duties** holes (a task performer could review — WAW-1 — or rate — WAW-5 — their own work; an extension requester could decide their own request — WAW-8) and three **division-scope escalations** (Manager could create a WP — WAW-2 — or a task — WAW-3 — or link a task to a WP — WAW-7 — across divisions; the WP-assign div check was role-string-gated — WAW-4). Plus past-deadline validation (WAW-10), per-user rate limits on all mutating task/WP routes (WAW-11), `createTask` now honours `title` (WAW-12), and `updateWorkPackageStatus` div scope (WAW-6). **No schema migration, no new privilege keys** (division checks stay hardcoded per Phase 7 design). Skill-gating (WAW-9) deferred as **DEF-7** (needs a `User` competency field). Transparency reads (WAW-13) accepted-as-is. A follow-up `/code-review` of the diff fixed 4 more items (WAW-R1..R4): a shared rate-limit bucket split (autosave gets its own), a null-`targetDivisionId` link regression, a timezone-safe deadline check (UTC epoch-days), and extraction of a shared `hasCrossDivisionReach` helper used by all 5 division-scope sites. **Backend 635/635** (was 621; +14). See `CODE_REVIEW_AUDIT_LOG.md` 2026-06-28 (Work Assignment Workflow Review + follow-up) and §8 gotcha #59.
-
-> **rev 19 (2026-06-28):** **Feed Features workstream (Phases A–H)** on branch `claude/feed-features-audit-iac2uw` — a hardening + capability expansion of the unified `FeedPost` feed, built from `FEED_FEATURES_AUDIT.md` against `FEED_IMPROVEMENT_PLAN.md`. Shipped: comment length cap + per-user write rate-limit + disseminate validation (A); **keyset pagination + type filters** with the cursor on an `X-Next-Cursor` header (B); **scoped SSE feed signals** to watchers instead of broadcast (C); **soft-hide + pinning** (D); **@mentions** with notifications (E); inline **`#CODE` entity hyperlinks** (E.2); **attachments in comments** via a new `FEED_POST` attachment entity type (F); **acknowledgement / read-receipts** (G); **feed search + opt-in daily digest** (H). Then an accepted high-effort `/code-review` (8 fixes, 1 accepted-as-is, 1 deferred — see `CODE_REVIEW_AUDIT_LOG.md` 2026-06-28). **Backend 621/621**, frontend `tsc --noEmit` + lint clean — verified end-to-end against a live Postgres + backend + Next.js stack (login, pagination header, mentions, #links, attachments upload/download, pinning, hide, ack, search). Schema: `FeedPost` gains moderation columns + a new `FeedPostAcknowledgement` model (additive). See OBJECT H, §6, and `FEED_IMPROVEMENT_PLAN.md` for the per-phase detail.
+> **The dated, rev-by-rev history now lives in [`CHANGELOG.md`](./CHANGELOG.md)** (rev 21,
+> 20, 19, 18, …). This file is the **stable reference** — architecture, schema, object
+> reference, RBAC, gotchas, pre-deploy items. When you ship a workstream, add a `## rev NN`
+> block to `CHANGELOG.md` and update §2 status here; don't grow a changelog at the top of
+> this file (Rule 12).
 >
-> **rev 18 (2026-06-24):** Task-list server-side pagination + new `/tasks/stats|assignees|options` endpoints; `Finding.findingId` business code (`FND-000001`); DB integrity hardening (CHECK constraints, Finding indexes); post-review picker/UX fixes; **migration history squashed to a clean replayable baseline** (was unshippable). Backend **595/595**, frontend build clean — verified locally on a real DB (incl. the DB-level CHECK constraint rejection). **⚠️ Read §12.8 "Pre-deploy items to MONITOR & RECTIFY" before going to prod** — most importantly the test-DB/prod schema-application parity gap. Also folds in the Quick-View Enrichment + Back-to-Finding feature (582/582) and its clean `/security-review` from `claude/nice-darwin-nwyj81`.
+> **Current rev (21, 2026-06-28):** Doc/code consistency audit + single-source-of-truth
+> restructure — no app/runtime code changed. Highlights: **MIG-1** (Feed Phases A–H schema
+> never captured in a migration — see §12.8 item 0), Finding `Dismissed` status documented,
+> `ENFORCE_SINGLE_SESSION` corrected (DB `SystemSetting`, not env var), enumerable facts now
+> point to code constants. Latest backend test figure: **635/635** (rev 20).
 
 ---
 
@@ -1616,7 +1622,7 @@ Branch `claude/vigilant-mendel-3sajt0` (PR #15). No new tests — changes are pu
 
 67. **Segregation of duties is enforced on the ASSIGNEE, not the issuer (2026-06-28 hardening):** the task performer (`assignedToUserId`) can never `review` (`reviewTask`) or `rate` (`rateTask`) their own task, and an extension requester can't `decide` their own request (`decideDeadlineExtension`). The old `reviewTask` guard only blocked the issuer-who-is-also-assignee case — a Manager assignee who was NOT the issuer could approve their own work via `task:review_div`. If you add any new sign-off/scoring path, gate it on `assignedToUserId === userId`, not on the issuer. **Division scope on the CREATE/LINK path** is also now enforced via the single shared helper **`hasCrossDivisionReach(actor)`** (`utils/privilegeAccess.ts`): `createTaskService` (targetDivisionId), `createWorkPackage` (divisionId), `updateTaskWp` (WP must match task division — guarded by `targetDivisionId != null` so null-target tasks stay linkable), `assignUserToWp`, and `updateWorkPackageStatus` all call it. Reach = Director/Admin by role OR any role granted `task:assign_any` — so a custom role's cross-division reach is consistent across tasks AND WPs (don't re-hand-roll the `role !== 'Director' && …` triple). These are hardcoded checks by design (Phase 7 keeps division-scope out of the privilege matrix). Note WAW-9/**DEF-7**: task `skillLevel` is still NOT enforced against the assignee (no `User` competency field yet). Rate limiting: mutating task/WP routes carry a per-user limiter (disabled under test); `saveTaskData` (autosave) has its own generous bucket so it never starves the review/assign action budget.
 
-66. **`prisma generate` after pulling the feed schema (and the schema-engine download can fail offline):** Phase D added `FeedPost.hiddenAt/hiddenByUserId/hiddenReason/pinnedAt/pinnedByUserId`; Phase G added the `FeedPostAcknowledgement` model. A stale client makes `prisma.feedPostAcknowledgement` undefined and the new columns missing — run `npx prisma generate` (and `npm run test:setup` which `db push`es + regenerates). Note: in an air-gapped/egress-limited environment, `prisma generate`/`db push` may fail fetching the **schema-engine** binary from `binaries.prisma.sh`; the query-engine `.so.node` ships in `@prisma/engines`, but the schema-engine is downloaded — fetch it once with `curl --retry --continue` to `node_modules/@prisma/engines/schema-engine-<platform>` if the auto-download resets.
+66. **`prisma generate` after pulling the feed schema (and the schema-engine download can fail offline):** Phase D added `FeedPost.hiddenAt/hiddenByUserId/hiddenReason/pinnedAt/pinnedByUserId`; Phase G added the `FeedPostAcknowledgement` model. A stale client makes `prisma.feedPostAcknowledgement` undefined and the new columns missing — run `npx prisma generate` (and `npm run test:setup` which `db push`es + regenerates). **⚠️ These exact additions are the unmigrated drift in §12.8 item 0 / audit-log MIG-1 — they exist only via `db push`, not in any migration. A fresh `migrate deploy` will be missing them until the remediation migration is added.** Note: in an air-gapped/egress-limited environment, `prisma generate`/`db push` may fail fetching the **schema-engine** binary from `binaries.prisma.sh`; the query-engine `.so.node` ships in `@prisma/engines`, but the schema-engine is downloaded — fetch it once with `curl --retry --continue` to `node_modules/@prisma/engines/schema-engine-<platform>` if the auto-download resets.
 
 ### Feed & Escalation pending issues (#20–23 — all RESOLVED in Phases 4–5)
 
@@ -1822,6 +1828,19 @@ npm run start               # serves the optimized production build
 
 Open standing items that are **not blockers for the current pre-prod branch** but must be
 watched/closed as the app approaches and enters production. Ordered by importance.
+
+0. **[BLOCKER before prod — added rev 21, 2026-06-28, audit-log MIG-1] Migration baseline is missing the entire Feed Phases A–H schema.**
+   `schema.prisma` has **46 models** but the migrations create only **45 tables**. The feed-hardening
+   workstream (rev 19) was applied with `db push` and never captured via `migrate:dev` (violating item 2
+   / gotcha #59). Missing from migrations: the **`FeedPostAcknowledgement`** table and the `FeedPost`
+   columns `hiddenAt / hiddenByUserId / hiddenReason / pinnedAt / pinnedByUserId`. A `migrate deploy`
+   onto a fresh DB therefore builds an **incomplete** schema and the app 500s on every feed hide/pin/
+   acknowledge path. The README's "migrate diff → no drift (2026-06-23)" is stale.
+   - **Rectify (owner sign-off required):** add one additive, non-destructive migration capturing the
+     post-squash delta — `cd backend && npm run migrate:dev -- --name feed_phases_a_h` (or
+     `npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --script`
+     reviewed into a new timestamped folder), then `npx prisma generate`. Commit it with no schema edit.
+   - The new `docs-consistency.test.ts` guard (model-count == table-count) fails until this is done.
 
 1. **[MONITOR — highest] Test-DB ≠ prod schema-application path → CHECK constraints are NOT exercised by the suite.**
    `npm run test:setup` builds `sqd_qa_test_db` with `prisma db push`, which applies only what

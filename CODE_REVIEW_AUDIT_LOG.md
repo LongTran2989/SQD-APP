@@ -13,6 +13,27 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-28 — Doc/Code Consistency Audit + Migration-Drift Investigation
+
+**Branch:** `claude/codebase-docs-architecture-jev3tw`
+**Scope:** Full audit of the four reference docs (`CLAUDE.md`, `CLAUDE_HANDOVER.md`, `BUSINESS_WORKFLOW.md`, `CODE_REVIEW_AUDIT_LOG.md`) against the actual code, plus a single-source-of-truth restructure so the docs stop drifting. Root pattern of the doc findings: **enumerable facts (statuses, env vars, counts, model lists) were re-stated in prose and the code moved underneath them.** One finding is a real schema/deploy issue, not a doc typo.
+
+| # | Severity | Location | Finding | Status |
+|---|----------|----------|---------|--------|
+| **MIG-1** | **High (deploy-blocker)** | `prisma/migrations` vs `schema.prisma` | The entire **Feed Phases A–H** schema reached dev/test via `prisma db push` and was **never captured in a migration**, despite gotcha #59 mandating `migrate:dev` after the 2026-06-23 squash. Missing from the migration baseline: the **`FeedPostAcknowledgement`** table and the Phase-D `FeedPost` columns `hiddenAt / hiddenByUserId / hiddenReason / pinnedAt / pinnedByUserId`. A fresh `migrate deploy` builds a DB without them → the app 500s on all feed hide/pin/acknowledge paths. Schema has **46 models**; `0_init` creates **45 tables**. The README's "`migrate diff` → no drift (2026-06-23)" is now stale. | ⏭ **Documented; remediation sign-off-gated.** Fix = one additive migration capturing the post-squash delta: `npx prisma migrate dev --name feed_phases_a_h` (or `migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --script` reviewed into a new folder). Additive/nullable + new table — non-destructive. **Not generated here** (no PG/shadow DB in this env, and migration history changes need owner sign-off). |
+| DOC-1 | Low | `CLAUDE.md` line 9 | "Core platform live through Phase 7" — frozen; Feed A–H, Time Booking, DB Hardening shipped after. | ✅ Fixed — reworded to defer to `CLAUDE_HANDOVER.md` §2 / `CHANGELOG.md`; instruct not to restate the phase. |
+| DOC-2 | Low (correctness) | `CLAUDE.md` Status Machines + `BUSINESS_WORKFLOW.md` §4 | Finding lifecycle omitted the `Dismissed` terminal status (`PUT /:id/dismiss`, exists in code). | ✅ Fixed — added `Dismissed` + pointer to `constants/findingTaxonomy.ts` `FINDING_STATUSES`. |
+| DOC-3 | Medium (misleading) | `CLAUDE.md` Auth + Env sections | `ENFORCE_SINGLE_SESSION` documented as a `.env` / `.env.test` variable. It is a **DB `SystemSetting`** (`auth.middleware.ts:78`, seeded in `__tests__/setup.ts`), never an env var. | ✅ Fixed — corrected both sections; removed from env list. |
+| DOC-4 | Low | `CLAUDE.md` Env section | Env list named only 3 vars; code reads 9 (`STORAGE_DRIVER`, `STORAGE_LOCAL_ROOT`, `FRONTEND_ORIGIN`, `APP_TIMEZONE`, `DISABLE_RATE_LIMIT`, `PORT`, `NODE_ENV` also). | ✅ Fixed — added canonical **`backend/.env.example`**; docs point to it instead of re-listing. |
+| DOC-5 | Low | `CLAUDE.md` test baseline | Baked-in "≈499" baseline was 7 revs stale (live ~635). | ✅ Fixed — docs now say run `npm test`; latest figure lives in handover §2 / `CHANGELOG.md`. The handover's 635 is consistent (633 static `it/test` blocks + `.each` expansion). |
+| DOC-6 | Low | `CLAUDE_HANDOVER.md`, `ARCHITECTURE_AUDIT.md`, `migrations/README.md` | "45 models / 45 tables" — schema now has 46 models / 1,035 lines. | ✅ Fixed — counts corrected; tied to MIG-1. |
+
+**Verified accurate (no change):** versions (Next 16 / React 19 / Prisma 6 / Express 5), the 7 soft-delete models in Rule 2 (`FindingResponseAction`'s `deletedAt` is only a code comment, not a field), the 6 `ROLE_NAMES`, the 9 `TASK_STATUSES`, and the file-upload `StorageAdapter` design.
+
+**Structural changes (single source of truth):** code is now the authority for enumerable facts and docs *link* to the constant rather than restate it; the append-only rev log was split out of `CLAUDE_HANDOVER.md` into **`CHANGELOG.md`**; added **`docs/README.md`** index and **`backend/.env.example`**; added a drift-guard test (`backend/src/__tests__/docs-consistency.test.ts`) asserting schema-model count == migration-table count, which would have caught MIG-1.
+
+---
+
 ## Session: 2026-06-28 — Work Assignment Workflow Review (Tasks & WPs)
 
 **Branch:** `claude/review-work-assignment-workflow-jrw9md`

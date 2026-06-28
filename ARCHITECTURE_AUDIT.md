@@ -121,7 +121,7 @@ Docs are a maintainability asset only while they're findable and current. 19 roo
 
 - **Don't do a big-bang refactor.** With ~540 tests as a safety net, the right move is to refactor in the margins of feature work, one controller at a time, keeping tests green at each step.
 - **Don't add new architectural layers** (e.g. repositories, CQRS, microservices). The codebase is a well-organized modular monolith — that's the correct shape for this app. The fix is *consistency within the existing layers*, not new ones.
-- **Don't split the Prisma schema yet.** 45 models / ~1,003 lines in one `schema.prisma` is still navigable; revisit only past ~1,500 lines.
+- **Don't split the Prisma schema yet.** 46 models / ~1,035 lines in one `schema.prisma` is still navigable; revisit only past ~1,500 lines. (Note: of those 46 models, the Feed Phases A–H additions are not yet in any migration — see `CODE_REVIEW_AUDIT_LOG.md` MIG-1.)
 
 ---
 

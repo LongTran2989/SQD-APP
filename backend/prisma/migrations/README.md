@@ -10,11 +10,21 @@ written on top of a `db push`'d dev DB and never replayed in sequence (e.g. an
 
 | Migration | Contents |
 |-----------|----------|
-| `0_init` | Full schema generated from `schema.prisma` (`migrate diff --from-empty`): all 45 tables, indexes, FKs, and the `Finding.findingId` column + unique index. Proven to apply cleanly from empty. |
+| `0_init` | Full schema generated from `schema.prisma` (`migrate diff --from-empty`): 45 tables, indexes, FKs, and the `Finding.findingId` column + unique index. Proven to apply cleanly from empty *as of the 2026-06-23 squash.* |
 | `20260623000100_add_status_check_constraints` | The 5 DB-level CHECK constraints (Task/Finding/WorkPackage status, Finding severity, FindingLink self-reference). Prisma cannot express CHECK constraints in `schema.prisma`, so they live here in raw SQL — this is the **only** thing the baseline cannot regenerate, so it must never be deleted. |
 
-Validation (2026-06-23): `migrate deploy` against an empty DB applies both cleanly;
-`migrate diff --from-migrations … --to-schema-datamodel` reports **no drift**.
+Validation (2026-06-23): `migrate deploy` against an empty DB applied both cleanly;
+`migrate diff … --to-schema-datamodel` reported **no drift** *at that time*.
+
+> ⚠️ **KNOWN DRIFT (2026-06-28, audit-log MIG-1):** `schema.prisma` now has **46
+> models** but the migrations above still create only **45 tables**. The entire
+> **Feed Phases A–H** workstream was applied via `db push` and never captured here:
+> the `FeedPostAcknowledgement` table and the `FeedPost` columns
+> `hiddenAt / hiddenByUserId / hiddenReason / pinnedAt / pinnedByUserId` are missing
+> from the migration baseline. A fresh `migrate deploy` builds a DB without them.
+> **Remediation (owner sign-off required):** one additive migration —
+> `npm run migrate:dev --name feed_phases_a_h` (or `migrate diff --from-migrations . --to-schema-datamodel ../schema.prisma --script` reviewed into a new folder).
+> Until then, the "no drift" line above does not hold.
 
 ## Workflow — do NOT hand-author migration folders again
 

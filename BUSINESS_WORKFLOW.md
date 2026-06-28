@@ -28,6 +28,7 @@ This document outlines the high-level business logic and application workflow fo
 - **Pending Verification Hook:** When every follow-up Task linked to a finding reaches a final state (Closed, Rejected, or Terminated), the finding automatically transitions to `Pending Verification`. This is a best-effort background operation wired into the task review/submission actions.
 - **Stage 2 Analysis:** The reporter (or a Manager/Director) fills in analytical fields on the finding: Root Cause, Corrective Action taken, Error Code, Category, and Recurrence flag.
 - **Closure:** A Manager/Director signs off and closes the finding from `Pending Verification` → `Closed`.
+- **Dismissal:** A Manager/Director can dismiss a finding raised in error (`PUT /:id/dismiss`, reason mandatory). `Dismissed` is a terminal off-ramp available from any non-closed status — distinct from `Closed`. (Status authority: `constants/findingTaxonomy.ts` `FINDING_STATUSES`.)
 - **RBAC Visibility:** Director/Admin see all findings system-wide. Managers see findings in their division. Group Leaders and Staff see only findings they raised or are assigned a follow-up task on.
 - **Sidebar Badge:** The Findings nav item shows an amber badge with the count of Open + In Progress findings within the viewer's RBAC scope.
 
