@@ -38,7 +38,9 @@ export default function CommentContent({
       <Link
         key={`l${i}`}
         href={`${ROUTE[link.type]}/${link.id}`}
-        className="text-blue-600 hover:underline font-medium"
+        // Inherit the bubble's text colour (white on the self/blue bubble, dark on
+        // others) so the link is always legible; the underline marks it as a link.
+        className="underline underline-offset-2 font-medium hover:opacity-80"
       >
         #{code}
       </Link>
