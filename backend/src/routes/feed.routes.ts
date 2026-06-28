@@ -10,6 +10,7 @@ import {
   unpinPost,
   ackPost,
   getPinnedFeed,
+  searchFeed,
 } from '../controllers/feed.controller';
 import { flagPost } from '../controllers/escalation.controller';
 
@@ -33,6 +34,10 @@ router.post('/posts/:id/unhide', feedWriteLimiter, unhidePost);
 router.post('/posts/:id/pin', feedWriteLimiter, pinPost);
 router.post('/posts/:id/unpin', feedWriteLimiter, unpinPost);
 router.post('/posts/:id/ack', feedWriteLimiter, ackPost);
+
+// Search across COMMENT bodies. Literal "search" prefix before the generic
+// /:scope routes so it is never captured as a :scope param.
+router.get('/search', searchFeed);
 
 // Pinned-posts read. The literal "pinned" prefix is registered BEFORE the generic
 // /:scope routes so it is never captured as a :scope param.

@@ -35,6 +35,7 @@ export type NotificationType =
   | 'FINDING_OVERDUE'
   | 'FEED_ACTIVITY'
   | 'FEED_MENTION'
+  | 'FEED_DIGEST'
   | 'BLUEPRINT_LAUNCHED'
   | 'TASKS_GENERATED';
 
@@ -125,6 +126,7 @@ function eventKeyOf(input: NotificationInput): NotificationEventKey | null {
     return null;
   }
   if (input.type === 'FEED_MENTION') return 'FEED_MENTION';
+  if (input.type === 'FEED_DIGEST') return 'FEED_DIGEST';
   return isNotificationEventKey(input.type) ? input.type : null;
 }
 
@@ -318,6 +320,55 @@ export async function notifyMentions(
     await createNotifications(client, inputs, [authorId]);
   } catch (err) {
     console.error('[notifications] notifyMentions failed (non-fatal):', err);
+  }
+}
+
+/**
+ * Daily feed digest (Phase H). For every user who opted in (preferences.feedDigest
+ * === true), counts new non-hidden ORG posts + new posts on their own Division
+ * Board since `since`, and — when there's anything new — sends one FEED_DIGEST
+ * notification. Best-effort; pure counting (no per-user post scan) so it stays
+ * cheap. Run on a 24h interval with since = now − 24h (see index.ts).
+ */
+export async function buildFeedDigests(client: PrismaLike, since: Date): Promise<void> {
+  try {
+    const users = await client.user.findMany({
+      where: { deletedAt: null },
+      select: { id: true, divisionId: true, preferences: true },
+    });
+    const optedIn = users.filter((u) => {
+      const p = u.preferences as { feedDigest?: unknown } | null;
+      return !!p && typeof p === 'object' && (p as { feedDigest?: unknown }).feedDigest === true;
+    });
+    if (optedIn.length === 0) return;
+
+    const orgCount = await client.feedPost.count({
+      where: { scope: 'ORG', hiddenAt: null, createdAt: { gt: since } },
+    });
+    const divisionIds = [...new Set(optedIn.map((u) => u.divisionId))];
+    const divGroups = await client.feedPost.groupBy({
+      by: ['scopeId'],
+      where: { scope: 'DIVISION', scopeId: { in: divisionIds }, hiddenAt: null, createdAt: { gt: since } },
+      _count: { _all: true },
+    });
+    const divCount = new Map(divGroups.map((g) => [g.scopeId, g._count._all]));
+
+    const inputs: NotificationInput[] = [];
+    for (const u of optedIn) {
+      const total = orgCount + (divCount.get(u.divisionId) ?? 0);
+      if (total <= 0) continue;
+      inputs.push({
+        userId: u.id,
+        type: 'FEED_DIGEST',
+        title: `${total} new feed update${total === 1 ? '' : 's'}`,
+        body: 'New activity on the Org Feed and your Division Board in the last 24 hours.',
+        linkScope: null,
+        linkId: null,
+      });
+    }
+    await createNotifications(client, inputs);
+  } catch (err) {
+    console.error('[notifications] buildFeedDigests failed (non-fatal):', err);
   }
 }
 

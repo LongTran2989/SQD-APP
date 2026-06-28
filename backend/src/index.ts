@@ -30,7 +30,7 @@ import dashboardRoutes from './routes/dashboard.routes';
 import workloadRoutes from './routes/workload.routes';
 import cron from 'node-cron';
 import { startRealtimeListener } from './realtime/pgEvents';
-import { purgeOldNotifications } from './services/notificationService';
+import { purgeOldNotifications, buildFeedDigests } from './services/notificationService';
 import { initStorage } from './services/storage';
 import { runAutoGenCron, APP_TIMEZONE } from './services/autoGenService';
 import { runRecurrenceCron } from './services/recurrenceService';
@@ -136,6 +136,10 @@ if (process.env.NODE_ENV !== 'test') {
   // job. Each blueprint's FOR UPDATE lock + nextRunAt anchor make every auto-launch
   // idempotent, so a missed/duplicate run is safe.
   cron.schedule('15 0 * * *', () => { void runRecurrenceCron(prisma); }, { timezone: APP_TIMEZONE });
+  // Daily feed digest (07:00 in APP_TIMEZONE) — one summary notification of the
+  // last 24 h of Org Feed + Division Board activity, only for users who opted in
+  // (preferences.feedDigest). Best-effort; a missed run just skips that day.
+  cron.schedule('0 7 * * *', () => { void buildFeedDigests(prisma, new Date(Date.now() - 24 * 60 * 60 * 1000)); }, { timezone: APP_TIMEZONE });
 }
 
 export default app;

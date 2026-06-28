@@ -446,7 +446,7 @@ export const updateMyProfile = async (req: Request, res: Response): Promise<void
 };
 
 // Top-level keys the client is allowed to persist in User.preferences.
-const ALLOWED_PREFERENCE_KEYS = ['taskColumns', 'taskFilters'] as const;
+const ALLOWED_PREFERENCE_KEYS = ['taskColumns', 'taskFilters', 'feedDigest'] as const;
 // Hard cap on the serialized preferences blob (defensive — it is user-controlled).
 const MAX_PREFERENCES_BYTES = 16 * 1024;
 

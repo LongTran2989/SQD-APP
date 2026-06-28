@@ -45,6 +45,34 @@ export const getFeedPage = (
     nextCursor: r.headers['x-next-cursor'] ? Number(r.headers['x-next-cursor']) : null,
   }));
 
+// ─── Search (Phase H) ─────────────────────────────────────────────────────────
+
+export interface FeedSearchResult {
+  id: number;
+  scope: FeedScope;
+  scopeId: number | null;
+  content: string;
+  createdAt: string;
+  author: { id: number; name: string | null } | null;
+}
+
+// Searches COMMENT bodies (newest first). Omit scope for a global search; pass
+// scope[/scopeId] to search within one feed. Cursor rides the X-Next-Cursor header.
+export const searchFeed = (
+  q: string,
+  opts: { scope?: FeedScope; scopeId?: number | null; limit?: number; before?: number | null } = {}
+): Promise<{ results: FeedSearchResult[]; nextCursor: number | null }> => {
+  const params: Record<string, string> = { q };
+  if (opts.scope) params.scope = opts.scope;
+  if (opts.scopeId != null) params.scopeId = String(opts.scopeId);
+  if (opts.limit != null) params.limit = String(opts.limit);
+  if (opts.before != null) params.before = String(opts.before);
+  return apiClient.get('/feeds/search', { params }).then((r) => ({
+    results: r.data as FeedSearchResult[],
+    nextCursor: r.headers['x-next-cursor'] ? Number(r.headers['x-next-cursor']) : null,
+  }));
+};
+
 // ─── Moderation (Phase D) ─────────────────────────────────────────────────────
 
 const pinnedPath = (scope: FeedScope, scopeId?: number | null): string =>

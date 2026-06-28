@@ -188,6 +188,56 @@ export const getFeed = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+// ─── GET /api/feeds/search?q=&scope=&scopeId=&limit=&before= ───────────────────
+// Full-text-ish search over COMMENT bodies (case-insensitive substring), newest
+// first, keyset-paginated. Hidden comments are excluded for everyone. Optional
+// scope[/scopeId] narrows to one feed (per-feed search); omit for a global search.
+// Transparency model: any authenticated user may search all feeds.
+export const searchFeed = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = (Array.isArray(req.query.q) ? req.query.q[0] ?? '' : req.query.q ?? '').toString().trim();
+    if (q.length < 2) { res.setHeader('X-Next-Cursor', ''); res.json([]); return; }
+
+    const limit = parseFeedLimit(req.query.limit);
+    const before = parseFeedBefore(req.query.before);
+    const scopeRaw = (Array.isArray(req.query.scope) ? req.query.scope[0] ?? '' : req.query.scope ?? '').toString().toUpperCase();
+    const scope = isFeedScope(scopeRaw) ? scopeRaw : null;
+    const scopeId = parseFeedBefore(req.query.scopeId); // reuse the positive-int parser
+
+    const where: Prisma.FeedPostWhereInput = {
+      type: 'COMMENT',
+      hiddenAt: null,
+      content: { contains: q, mode: 'insensitive' },
+    };
+    if (scope) where.scope = scope;
+    if (scope && scope !== 'ORG' && scopeId != null) where.scopeId = scopeId;
+    if (before != null) where.id = { lt: before };
+
+    const rows = await prisma.feedPost.findMany({ where, orderBy: { id: 'desc' }, take: limit });
+    const nextCursor = rows.length === limit ? (rows[rows.length - 1]?.id ?? null) : null;
+    res.setHeader('X-Next-Cursor', nextCursor != null ? String(nextCursor) : '');
+
+    const authorIds = [...new Set(rows.map((r) => r.authorId).filter((id): id is number => typeof id === 'number'))];
+    const authors = authorIds.length
+      ? await prisma.user.findMany({ where: { id: { in: authorIds }, deletedAt: null }, select: { id: true, name: true } })
+      : [];
+    const authorMap = new Map(authors.map((a) => [a.id, a.name]));
+
+    // Newest-first flat result list (not reversed — search isn't a chat transcript).
+    res.json(rows.map((r) => ({
+      id: r.id,
+      scope: r.scope,
+      scopeId: r.scopeId,
+      content: r.content,
+      createdAt: r.createdAt,
+      author: r.authorId ? { id: r.authorId, name: authorMap.get(r.authorId) ?? null } : null,
+    })));
+  } catch (error) {
+    console.error('Error searching feed:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // ─── POST /api/feeds/:scope/:scopeId?/posts ───────────────────────────────────
 // Creates a COMMENT on a feed. Plain comments are NOT written to AuditLog (this
 // matches the existing task-comment behavior); only system events dual-write.

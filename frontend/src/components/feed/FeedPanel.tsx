@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { MessageCircle, Send, Pin } from 'lucide-react';
+import { MessageCircle, Send, Pin, Search, X } from 'lucide-react';
 import { FeedPostEnriched, FeedScope, FeedPostType, EscalationTargetScope, User, MentionUser } from '../../types';
-import { getFeedPage, getPinnedFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
+import { getFeedPage, getPinnedFeed, postFeedComment, canPostToFeed, searchFeed, FeedSearchResult } from '../../api/feedApi';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { uploadCommentAttachments } from '../../api/attachmentApi';
 import FeedPostItem from './FeedPostItem';
@@ -14,7 +14,7 @@ import AttachmentPicker from './AttachmentPicker';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
-import { getInitials } from '../../utils/feedHelpers';
+import { getInitials, formatTimestamp } from '../../utils/feedHelpers';
 
 interface FeedPanelProps {
   scope: FeedScope;
@@ -42,6 +42,8 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
   const [posting, setPosting] = useState(false);
   const [mentionSel, setMentionSel] = useState<MentionUser[]>([]);
   const [attachFiles, setAttachFiles] = useState<File[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<FeedSearchResult[] | null>(null);
 
   // Moderation rights (Phase D). Hide/unhide is Director/Admin; pin/unpin mirrors
   // posting rights and is only offered on the pinnable (WP/Division/Org) scopes.
@@ -75,6 +77,20 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
     }
     return () => { cancelled = true; };
   }, [scope, scopeId, isPinnableScope]);
+
+  // Per-feed search (Phase H), debounced. A query < 2 chars exits search mode (the
+  // normal feed shows). All setState lives in the timer/promise callbacks.
+  useEffect(() => {
+    let cancelled = false;
+    const term = searchQuery.trim();
+    const t = setTimeout(() => {
+      if (term.length < 2) { setSearchResults(null); return; }
+      searchFeed(term, { scope, scopeId: scopeId ?? undefined, limit: 50 })
+        .then((r) => { if (!cancelled) setSearchResults(r.results); })
+        .catch(() => { if (!cancelled) setSearchResults([]); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [searchQuery, scope, scopeId]);
 
   // Older posts are prepended above the current page; the scroll container keeps
   // its position (we only grow the top), so the reader isn't yanked.
@@ -192,6 +208,20 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
             </label>
           )}
         </div>
+        <div className="w-full relative">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search comments in this feed…"
+            className="w-full pl-8 pr-8 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {searchQuery && (
+            <button type="button" onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" aria-label="Clear search">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Pinned strip */}
@@ -213,7 +243,28 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
         </div>
       )}
 
-      {/* Feed list */}
+      {/* Search results — replace the feed list while a search is active */}
+      {searchResults !== null ? (
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2 min-h-0">
+          <p className="text-[11px] text-slate-400">
+            {searchResults.length} result{searchResults.length === 1 ? '' : 's'} for “{searchQuery.trim()}”
+          </p>
+          {searchResults.length === 0 ? (
+            <div className="text-center text-slate-400 text-sm py-8">No matching comments.</div>
+          ) : (
+            searchResults.map((r) => (
+              <div key={r.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-xs font-semibold text-slate-700">{r.author?.name ?? 'Unknown'}</span>
+                  <span className="text-[10px] text-slate-400">{formatTimestamp(r.createdAt)}</span>
+                </div>
+                <p className="text-sm text-slate-700 break-words">{r.content}</p>
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+      /* Feed list */
       <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
         <NewUpdatesPill show={hasNew} onClick={refresh} />
         {!loading && cursor != null && (
@@ -251,6 +302,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
           ))
         )}
       </div>
+      )}
 
       {/* Composer */}
       {canPost && (

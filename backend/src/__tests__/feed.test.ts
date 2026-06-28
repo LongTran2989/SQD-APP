@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { buildFeedDigests } from '../services/notificationService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -488,6 +489,51 @@ describe('Feed API (Phase 2)', () => {
       const sys = await prisma.feedPost.create({ data: { type: 'SYSTEM_EVENT', scope: 'DIVISION', scopeId: divisionId, content: 'sys' } });
       const res = await request(app).post(`/api/feeds/posts/${sys.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
       expect(res.status).toBe(400);
+    });
+  });
+
+  // ─── Search (Phase H) ────────────────────────────────────────────────────────
+
+  describe('Search', () => {
+    it('finds comments by content, excludes hidden, honours the scope filter', async () => {
+      await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'ORG', scopeId: null, content: 'uniqueneedle alpha', authorId: directorUserId } });
+      await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'uniqueneedle beta', authorId: staffUserId } });
+      const hidden = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'ORG', scopeId: null, content: 'uniqueneedle hidden', authorId: directorUserId, hiddenAt: new Date(), hiddenByUserId: directorUserId } });
+
+      const g = await request(app).get('/api/feeds/search?q=uniqueneedle').set('Authorization', `Bearer ${staffToken}`);
+      expect(g.status).toBe(200);
+      const ids = g.body.map((r: { id: number }) => r.id);
+      expect(ids).not.toContain(hidden.id);
+      expect(g.body).toHaveLength(2);
+
+      const o = await request(app).get('/api/feeds/search?q=uniqueneedle&scope=ORG').set('Authorization', `Bearer ${staffToken}`);
+      expect(o.body.every((r: { scope: string }) => r.scope === 'ORG')).toBe(true);
+      expect(o.body).toHaveLength(1);
+    });
+
+    it('returns empty for queries shorter than 2 chars', async () => {
+      const r = await request(app).get('/api/feeds/search?q=a').set('Authorization', `Bearer ${staffToken}`);
+      expect(r.body).toEqual([]);
+    });
+  });
+
+  // ─── Daily feed digest (Phase H) ─────────────────────────────────────────────
+
+  describe('Daily feed digest', () => {
+    it('notifies opted-in users about new Org/Division activity; skips others', async () => {
+      await prisma.notification.deleteMany({ where: { type: 'FEED_DIGEST' } });
+      await prisma.user.update({ where: { id: staffUserId }, data: { preferences: { feedDigest: true } } });
+      await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'ORG', scopeId: null, content: 'fresh org news', authorId: directorUserId } });
+
+      await buildFeedDigests(prisma, new Date(Date.now() - 60 * 60 * 1000)); // since 1h ago
+
+      const optedIn = await prisma.notification.findFirst({ where: { userId: staffUserId, type: 'FEED_DIGEST' } });
+      expect(optedIn).not.toBeNull();
+      const notOpted = await prisma.notification.findFirst({ where: { userId: managerUserId, type: 'FEED_DIGEST' } });
+      expect(notOpted).toBeNull();
+
+      // reset so the opt-in doesn't leak into other tests
+      await prisma.user.update({ where: { id: staffUserId }, data: { preferences: {} } });
     });
   });
 });

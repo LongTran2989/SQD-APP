@@ -246,7 +246,27 @@ that, so a re-ack adds no noise). Reads (`getFeed`/`getPinnedFeed`) batch-resolv
 
 ---
 
-## Phase H — Feed search + digests  *(needs Phase B)*
+## Phase H — Feed search + digests  ✅ IMPLEMENTED  *(needed Phase B)*
+
+**Search (as built).** `GET /feeds/search?q=&scope=&scopeId=&limit=&before=` — case-
+insensitive substring over COMMENT bodies, newest-first, keyset-paginated (cursor
+via `X-Next-Cursor`), hidden comments excluded for everyone. Optional `scope`
+[`/scopeId`] narrows to one feed (per-feed search); omit for global. `q` < 2 chars →
+empty. Frontend: a debounced search box in the `FeedPanel` header that swaps the
+feed list for a results list (author + timestamp + content) while a query is active.
+
+**Digests (as built).** Opt-in daily summary for offline catch-up. New `FEED_DIGEST`
+notification type + config-catalog key; `feedDigest` added to the preferences
+allowlist (set via `PATCH /users/me/preferences`). `notificationService.
+buildFeedDigests(client, since)` counts new non-hidden ORG posts + the user's own
+Division Board posts since `since` and sends one FEED_DIGEST notification when
+there's anything new (pure counting, no per-user scan). Scheduled daily at 07:00
+APP_TIMEZONE in `index.ts` with `since = now − 24h`.
+- Tests: feed.test.ts — search (content match, hidden excluded, scope filter, short
+  query) + digest (opted-in notified, others skipped). Full suite 619/619; frontend
+  tsc + lint clean. Search verified live + screenshot.
+
+### Original plan notes
 **Search**
 - `GET /api/feeds/search?q=...&scope=...` over `FeedPost.content` (Postgres `ILIKE`/trigram or `to_tsvector` — decide during build; trigram index on `content` for scale). Excludes hidden posts (Phase D). Respects transparency (all readable).
 - Frontend: a feed search surface (global + per-feed).
