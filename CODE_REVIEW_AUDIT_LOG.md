@@ -17,7 +17,7 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 **Branch:** `claude/review-work-assignment-workflow-jrw9md`
 **Scope:** Manual security/workflow review of the Task + Work Package assignment workflow — `task.controller.ts`, `wp.controller.ts`, `autoGenService.ts`, the task/WP routes, and the privilege model. Root pattern of the findings: a role-level privilege check passes but the **division-scope** or **segregation-of-duties** check that should accompany it is missing. Pure hardening — **no schema migration, no new privilege keys** (division-scope checks stay hardcoded per the Phase 7 design).
-**Tests after fixes:** Backend **633/633** (was 621; +12: 9 task + 3 WP hardening tests; 1 existing WP test re-worded for the new message). Full suite green (29 suites).
+**Tests after fixes:** Backend **635/635** (was 621; +14: 11 task + 3 WP hardening tests; 1 existing WP test re-worded for the new message). Full suite green (29 suites). Includes the follow-up `/code-review` round below.
 
 | # | Severity | File / Endpoint | Finding | Status |
 |---|----------|-----------------|---------|--------|
@@ -36,6 +36,17 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 | WAW-13 | Info | `getTaskById` / `getTaskActivity` / `getWorkPackages` | Full transparency: any authenticated user reads all task data / WP detail cross-division. | ✔ Accepted-as-is — intentional transparency model (see DEF-6); flagged as a conscious risk acceptance. |
 
 **Related deferrals unchanged:** DEF-3 (`transferIssuerRights` target division scope) and DEF-4 (`assignTask` on a task targeted at another division) were **not** touched by this pass — WAW-3 closes only the *create* side; the *assign-existing* side of DEF-4 remains open pending product confirmation.
+
+### Follow-up `/code-review` (high effort, recall-biased) — on the WAW diff
+
+Reviewed the hardening diff itself; 4 findings, all actioned.
+
+| # | Severity | File / Endpoint | Finding | Status |
+|---|----------|-----------------|---------|--------|
+| WAW-R1 | Medium (functional/UX) | `task.routes.ts` | One shared 30/min limiter covered all 18 task-mutation routes as a single combined bucket — a Director/Manager doing a batch of reviews/assignments, or frequent `saveTaskData` autosaves, could hit 429. | ✅ Fixed — `saveTaskData` gets its own generous bucket (240/min); the shared action limiter ceiling raised to 90/min. |
+| WAW-R2 | Low-med (regression) | `task.controller.ts` `updateTaskWp` | `targetDivisionId` is nullable (`Int?`); the new check `wp.divisionId !== task.targetDivisionId` made `!== null` always true, so a null-target task could no longer be linked by a non-`assign_any` actor. | ✅ Fixed — `task.targetDivisionId != null` guard; null-target tasks stay freely linkable. Test SR-11. |
+| WAW-R3 | Low (TZ edge) | `task.controller.ts` `pastDeadlineError` | Compared a UTC-midnight date-only deadline against local `startOfToday()`, wrongly rejecting a same-day deadline on a negative-UTC-offset server. | ✅ Fixed — compare UTC epoch-days (TZ-independent); `setDeadline` reuses the helper. Test SR-10. |
+| WAW-R4 | Medium (altitude/maintainability) | `wp.controller.ts` + `task.controller.ts` | The division-scope idiom was copy-pasted at 5 sites with two divergent signals (task `assign_any` vs WP role-string), risking inconsistent cross-division reach for custom roles and drift. | ✅ Fixed — extracted `hasCrossDivisionReach` (`utils/privilegeAccess.ts`); all 5 sites call it. Director/Admin or any role with `task:assign_any` now have consistent reach across tasks and WPs. |
 
 ---
 

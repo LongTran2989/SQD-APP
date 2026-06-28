@@ -2671,5 +2671,41 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.status).toBe(201);
       expect(res.body.title).toBe('Custom task title');
     });
+
+    it('SR-10: a same-day (today) deadline is accepted on create → 201', async () => {
+      // Guards the timezone fix — same-day must be allowed regardless of server TZ.
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC date)
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId, deadline: today });
+      expect(res.status).toBe(201);
+    });
+
+    it('SR-11: a task with no target division can still be linked to a WP → 200', async () => {
+      // Regression guard: the division lock must not block a (schema-nullable)
+      // null-targetDivision task from being linked.
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: `TSK-WP-SR11${String(Date.now()).slice(-5)}`, name: 'Null-target link WP', type: 'AUDIT',
+          divisionId, timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: managerId, status: 'Open',
+        },
+      });
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${String(Date.now()).slice(-6)}`, templateId: publishedTemplateId,
+          issuerId: managerId, targetDivisionId: null, status: 'Unassigned',
+          schemaSnapshot: [], assignmentType: 'INDIVIDUAL',
+        },
+      });
+      const res = await request(app)
+        .patch(`/api/tasks/${task.id}/wp`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ wpId: wp.id });
+      expect(res.status).toBe(200);
+      expect(res.body.wpId).toBe(wp.id);
+      await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
   });
 });

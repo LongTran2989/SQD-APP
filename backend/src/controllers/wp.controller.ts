@@ -5,7 +5,7 @@ import { rearmLastDoneRecurrence } from '../services/recurrenceService';
 import { createFeedPost } from '../services/feedService';
 import { createNotifications } from '../services/notificationService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
-import { hasPrivilege } from '../utils/privilegeAccess';
+import { hasPrivilege, hasCrossDivisionReach } from '../utils/privilegeAccess';
 
 // Emits a WP-scope SYSTEM_EVENT alongside the existing AuditLog write. Mirrors
 // the task feed's logTaskActivity: best-effort, never throws, authorId stays
@@ -326,10 +326,10 @@ export const createWorkPackage = async (req: Request, res: Response): Promise<vo
     }
 
     // Division lock: a division-scoped actor may only create a Work Package in
-    // their own division. Only Director / Admin (global reach) may target another
+    // their own division. Only actors with cross-division reach may target another
     // division. Without this, a Manager holding wp:create could create a WP — and
     // its auto-generated tasks (which inherit wp.divisionId) — in any division.
-    if (req.user!.role !== 'Director' && req.user!.role !== 'Admin' && Number(divisionId) !== req.user!.divisionId) {
+    if (!hasCrossDivisionReach(req.user!) && Number(divisionId) !== req.user!.divisionId) {
       res.status(403).json({ message: 'You can only create Work Packages for your own division' });
       return;
     }
@@ -538,10 +538,9 @@ export const updateWorkPackageStatus = async (req: Request, res: Response): Prom
       return;
     }
     // Division lock on the privilege path: a non-creator acting via wp:manage_status
-    // must be in the WP's division unless they have global reach (Director/Admin).
-    // Mirrors the isManager clause in updateWorkPackage.
+    // must be in the WP's division unless they have cross-division reach.
     if (wp.creatorId !== userId &&
-        req.user!.role !== 'Director' && req.user!.role !== 'Admin' &&
+        !hasCrossDivisionReach(req.user!) &&
         req.user!.divisionId !== wp.divisionId) {
       res.status(403).json({ message: 'You can only change the status of Work Packages in your own division' });
       return;
@@ -633,7 +632,6 @@ export const updateWorkPackageStatus = async (req: Request, res: Response): Prom
 export const assignUserToWp = async (req: Request, res: Response): Promise<void> => {
   try {
     const wpId = parseInt(req.params.id as string);
-    const userRole = req.user!.role;
     const userDivisionId = req.user!.divisionId;
     const { userId } = req.body;
 
@@ -675,10 +673,10 @@ export const assignUserToWp = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Division lock: any non-global actor (not Director/Admin) holding wp:assign
-    // may only assign users from their own division. Previously keyed on the
-    // 'Manager' role string, which let any other scoped role with wp:assign bypass it.
-    if (userRole !== 'Director' && userRole !== 'Admin' && targetUser.divisionId !== userDivisionId) {
+    // Division lock: any actor without cross-division reach holding wp:assign may
+    // only assign users from their own division. Previously keyed on the 'Manager'
+    // role string, which let any other scoped role with wp:assign bypass it.
+    if (!hasCrossDivisionReach(req.user!) && targetUser.divisionId !== userDivisionId) {
       res.status(403).json({ message: 'You can only assign users from your own division' });
       return;
     }

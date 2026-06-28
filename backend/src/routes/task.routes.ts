@@ -40,10 +40,16 @@ const router = Router();
 router.use(authenticateJWT);
 
 // Per-user write limiter shared across the state-changing task endpoints (create,
-// assign, save-data, submit, review, lifecycle, deadline, rate). Keyed on userId;
-// auto-disabled under test / DISABLE_RATE_LIMIT. Reads stay unthrottled. The
-// activity-comment route keeps its own bucket so commenting never starves actions.
-const taskMutationLimiter = createMutationRateLimiter();
+// assign, submit, review, lifecycle, deadline, rate). Keyed on userId; auto-disabled
+// under test / DISABLE_RATE_LIMIT. Reads stay unthrottled. The ceiling is lifted
+// above the default so a Director/Manager processing a batch of reviews/assignments
+// in one minute isn't throttled, while a runaway script still is.
+const taskMutationLimiter = createMutationRateLimiter({ limit: 90 });
+
+// `saveTaskData` is the autosave path — a single user editing one long form fires
+// it far more often than any review/assign action, so it gets its own generous
+// bucket instead of sharing (and starving) the action budget above.
+const taskDataLimiter = createMutationRateLimiter({ limit: 240 });
 
 // ─── List endpoints ─────────────────────────────────────────────────
 router.get('/', getTasks);
@@ -69,7 +75,7 @@ router.put('/:id/reassign', taskMutationLimiter, reassignTask);
 router.put('/:id/transfer-issuer', taskMutationLimiter, transferIssuerRights);
 
 // ─── Task execution ─────────────────────────────────────────────────
-router.put('/:id/data', taskMutationLimiter, saveTaskData);
+router.put('/:id/data', taskDataLimiter, saveTaskData);
 router.put('/:id/submit', taskMutationLimiter, submitTask);
 
 // ─── Review workflow ─────────────────────────────────────────────────

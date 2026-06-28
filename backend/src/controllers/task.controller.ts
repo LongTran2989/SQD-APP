@@ -5,7 +5,7 @@ import { createFeedPost, parseFeedLimit, parseFeedBefore, parseFeedTypes, resolv
 import { createNotifications, notifyFeedWatchers, notifyMentions } from '../services/notificationService';
 import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES, REVIEW_ACTIONS, DEADLINE_DECISIONS, TASK_DATA_EDITABLE_STATUSES } from '../constants/taskStatus';
-import { hasPrivilege, PrivilegeActor } from '../utils/privilegeAccess';
+import { hasPrivilege, hasCrossDivisionReach, PrivilegeActor } from '../utils/privilegeAccess';
 
 import { prisma } from '../lib/prisma';
 
@@ -357,9 +357,12 @@ function startOfToday(): Date {
 
 /**
  * Validates a user-supplied deadline for the manual create / set-deadline paths:
- * rejects an unparseable date or one that falls before the start of today. A
- * date-only deadline is stored at local midnight, so same-day is allowed (the
- * comparison is against startOfToday, not "now"). Returns an error string or null.
+ * rejects an unparseable date or one whose calendar day is before today. Same-day
+ * is allowed. The comparison is on UTC epoch-days, NOT local time: a date-only
+ * deadline ("YYYY-MM-DD") parses to UTC midnight and is stored that way, so
+ * comparing UTC-day-to-UTC-day keeps the check correct regardless of the server's
+ * local timezone (a local-midnight comparison wrongly rejects a same-day date-only
+ * deadline on a negative-UTC-offset server). Returns an error string or null.
  * NOTE: only the human-facing handlers use this — the shared createTaskService and
  * auto-gen/escalation flows derive deadlines from a WP timeframe and stay permissive.
  */
@@ -367,7 +370,10 @@ function pastDeadlineError(deadline: unknown): string | null {
   if (deadline == null) return null; // optional — absence is fine
   const d = new Date(deadline as string | number | Date);
   if (isNaN(d.getTime())) return 'Invalid deadline date';
-  if (d.getTime() < startOfToday().getTime()) return 'Deadline cannot be in the past';
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const deadlineDay = Math.floor(d.getTime() / DAY_MS);
+  const todayDay = Math.floor(Date.now() / DAY_MS);
+  if (deadlineDay < todayDay) return 'Deadline cannot be in the past';
   return null;
 }
 
@@ -771,7 +777,7 @@ export async function createTaskService(
   // assignment bypass above already requires targetDivisionId === divisionId, the
   // auto-gen system actor resolves task:assign_any via Director defaults, and
   // escalation Managers become correctly restricted to their own division.
-  if (!hasPrivilege(actor, 'task:assign_any') && targetDivisionId !== divisionId) {
+  if (!hasCrossDivisionReach(actor) && targetDivisionId !== divisionId) {
     throw new HttpError(403, 'You can only create tasks for your own division');
   }
 
@@ -985,9 +991,11 @@ export const updateTaskWp = async (req: Request, res: Response): Promise<void> =
         return;
       }
       // Division lock: a task may only be linked to a WP in its own target
-      // division, unless the actor has cross-division reach (task:assign_any).
-      // Prevents a task being filed under a foreign-division work package.
-      if (!hasPrivilege(req.user!, 'task:assign_any') && wp.divisionId !== task.targetDivisionId) {
+      // division, unless the actor has cross-division reach. Prevents a task being
+      // filed under a foreign-division work package. The `targetDivisionId != null`
+      // guard preserves the prior behaviour for the (schema-nullable) case of a
+      // task with no target division — those stay freely linkable.
+      if (!hasCrossDivisionReach(req.user!) && task.targetDivisionId != null && wp.divisionId !== task.targetDivisionId) {
         res.status(403).json({ message: 'A task can only be linked to a Work Package in its own division' });
         return;
       }
@@ -2125,15 +2133,14 @@ export const setDeadline = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    // Validate format + reject a past deadline via the shared helper (same UTC-day
+    // rule the create paths use), then construct the Date for the update.
+    const setDeadlineErr = pastDeadlineError(deadline);
+    if (setDeadlineErr) {
+      res.status(400).json({ message: setDeadlineErr });
+      return;
+    }
     const newDeadline = new Date(deadline);
-    if (isNaN(newDeadline.getTime())) {
-      res.status(400).json({ message: 'Invalid deadline date' });
-      return;
-    }
-    if (newDeadline.getTime() < startOfToday().getTime()) {
-      res.status(400).json({ message: 'Deadline cannot be in the past' });
-      return;
-    }
 
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.task.update({
