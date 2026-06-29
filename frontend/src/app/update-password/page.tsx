@@ -3,7 +3,10 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '../../api/client';
+import { apiErrorMessage } from '../../api/errorMessage';
 import { useAuthStore } from '../../store/authStore';
+import PasswordInput from '../../components/auth/PasswordInput';
+import PasswordStrength, { isPasswordValid } from '../../components/auth/PasswordStrength';
 import { ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export default function UpdatePasswordPage() {
@@ -33,8 +36,14 @@ export default function UpdatePasswordPage() {
       return;
     }
 
-    if (newPassword.length < 8) {
-      setError('Password must be at least 8 characters long.');
+    // Mirror the server policy so we fail fast instead of round-tripping a 400.
+    if (!isPasswordValid(newPassword)) {
+      setError('Password must be at least 8 characters and include both letters and numbers.');
+      return;
+    }
+
+    if (newPassword === oldPassword) {
+      setError('New password must be different from your current password.');
       return;
     }
 
@@ -49,8 +58,8 @@ export default function UpdatePasswordPage() {
       // Log the user in officially.
       login(user);
       router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'An error occurred updating your password.');
+    } catch (err: unknown) {
+      setError(apiErrorMessage(err, 'An error occurred updating your password.'));
     } finally {
       setLoading(false);
     }
@@ -75,40 +84,36 @@ export default function UpdatePasswordPage() {
         )}
 
         <form onSubmit={handleUpdate} className="space-y-5">
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1">Current Password</label>
-            <input
-              type="password"
-              required
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-              placeholder="••••••••"
-              value={oldPassword}
-              onChange={(e) => setOldPassword(e.target.value)}
-            />
-          </div>
+          <PasswordInput
+            label="Current Password"
+            required
+            autoComplete="current-password"
+            value={oldPassword}
+            onChange={setOldPassword}
+          />
 
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1">New Password</label>
-            <input
-              type="password"
+            <PasswordInput
+              label="New Password"
               required
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-              placeholder="••••••••"
+              autoComplete="new-password"
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={setNewPassword}
             />
+            <PasswordStrength password={newPassword} />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1">Confirm New Password</label>
-            <input
-              type="password"
+            <PasswordInput
+              label="Confirm New Password"
               required
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-              placeholder="••••••••"
+              autoComplete="new-password"
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={setConfirmPassword}
             />
+            {confirmPassword.length > 0 && confirmPassword !== newPassword && (
+              <p className="mt-1.5 text-xs text-red-600">Passwords do not match.</p>
+            )}
           </div>
 
           <button

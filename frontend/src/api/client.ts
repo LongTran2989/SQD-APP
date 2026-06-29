@@ -29,16 +29,39 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Key under which a human-readable "why you were signed out" notice is stashed
+// for the login page to render after the full-page redirect below (audit U8).
+export const AUTH_NOTICE_KEY = 'auth_notice';
+
+// Map the backend's session-invalidation 401 messages to a friendly explanation.
+// Only the cases where an ACTIVE session was revoked produce a notice — a plain
+// "no token" 401 (e.g. landing on a protected page while logged out) does not.
+const signOutNotice = (serverMessage: string): string | null => {
+  const m = serverMessage.toLowerCase();
+  if (m.includes('another tab')) {
+    return 'You were signed out because a different user signed in to this browser. Please log in again.';
+  }
+  if (m.includes('another location') || m.includes('session expired')) {
+    return 'You were signed out because your account signed in on another device. Please log in again.';
+  }
+  if (m.includes('no longer active')) {
+    return 'Your session has ended because the account is no longer active.';
+  }
+  return null;
+};
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Optionally handle 401s globally (e.g. redirect to login)
-    if (error.response?.status === 401) {
-      if (typeof window !== 'undefined') {
-        useAuthStore.getState().logout();
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
-        }
+    // Handle 401s globally: explain the sign-out (audit U8) then redirect to login.
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      const notice = signOutNotice(error.response?.data?.message || '');
+      if (notice) {
+        sessionStorage.setItem(AUTH_NOTICE_KEY, notice);
+      }
+      useAuthStore.getState().logout();
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
       }
     }
     return Promise.reject(error);
