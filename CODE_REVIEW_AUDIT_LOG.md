@@ -13,6 +13,50 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-29 — Authentication Audit + Remediation + `/code-review`
+
+**Branch:** `claude/auth-audit-5dm9ju`
+**Scope:** Manual audit of the authentication surface (`auth.controller.ts`, `auth.middleware.ts`, `auth.routes.ts`, `rateLimit.middleware.ts`, `config/env.ts`, CORS/cookies in `index.ts`, plus the frontend auth flow: `authStore`, `client.ts`, login/update-password/forgot-password/reset-password pages, `useRequireAuth`). Then remediation of an accepted subset, then a high-effort recall-biased `/code-review` of the resulting diff. Pure hardening — **no schema migration, no new privilege keys** (role-elevation / division-scope stay hardcoded per the Phase 7 design).
+**Tests after fixes:** Backend **653/653** (was 649; +4 register-scope tests, on top of the new auth tests added during remediation). Frontend `tsc --noEmit` clean; ESLint clean on all touched auth files. Verified live against a Postgres + backend + Next.js (headless-Chromium) sandbox stack.
+
+### Part A — Manual audit findings (remediated this session)
+
+| # | Severity | File / Area | Finding | Status |
+|---|----------|-------------|---------|--------|
+| AU-H1 | **High** | `auth.controller.ts` register/update/reset | No server-side password policy — frontend-only length check, bypassable by any API client. | ✅ Fixed — shared `utils/passwordPolicy.ts` (min 8, ≤72 bytes, letters+numbers) enforced on all three paths; reject `newPassword === oldPassword`. |
+| AU-H2 | **High** | `auth.controller.ts` | No authentication audit trail — only logout wrote `AuditLog`. | ✅ Fixed — `LOGIN_SUCCESS` / `LOGIN_FAILED` (known accounts only) / `USER_REGISTERED` / `PASSWORD_CHANGED` / `PASSWORD_RESET_REQUESTED` / `PASSWORD_RESET` via best-effort `writeAuthAudit`. AuditLog-only (auth events have no Task context — documented Rule-3 exception). |
+| AU-H3 | **High** | `auth.controller.ts` register | No role-elevation / division scope on register — a `user:create` holder could mint any role in any division. | ✅ Fixed — see Part B (AR-1–AR-4) for the hardened final form. |
+| AU-M1 | Medium | `auth.middleware.ts` / `auth.controller.ts` | JWT algorithm not pinned. | ✅ Fixed — `HS256` pinned on sign and verify. |
+| AU-M4 | Medium | `auth.middleware.ts` | Forced-password-change users were 403'd out of `/logout`. | ✅ Fixed — `/logout` added to the forced-change allowlist. |
+| AU-L1 | Low | `auth.controller.ts` register | Optional email never format-validated. | ✅ Fixed — `EMAIL_REGEX` check. |
+| AU-U1 | Low (UX) | `update-password` / `reset-password` | No strength meter / upfront requirements; frontend rule drifted from server. | ✅ Fixed — `PasswordStrength` mirrors the server policy; shared `isPasswordValid()` so client gating matches the server. |
+| AU-U2 | Low (UX/a11y) | login / update / reset | No show/hide password toggle. | ✅ Fixed — reusable `PasswordInput`. |
+| AU-U4 | Low | `forgot-password` | Stale `director@sqd.com` placeholder (a deprecated credential). | ✅ Fixed — `you@example.com`. |
+| AU-U5 | Low (UX) | login | 429 rate-limit collapsed into a generic "connection error". | ✅ Fixed — surfaces the rate-limit message. |
+| AU-M2 | Medium | `rateLimit.middleware.ts` | Auth limiter is in-memory + IP-keyed only; no per-account lockout; multiplies across instances. | ⏭ Deferred (**DEF-8**) — needs Redis-backed store + per-`employeeId` lockout. |
+| AU-M3 | Medium | `auth.controller.ts` forgotPassword | Timing side-channel (DB+hash work only on the existent-email path) enables email enumeration. | ⏭ Deferred (**DEF-9**). |
+| AU-L2 | Low | `auth.controller.ts` cookie opts | `secure`/`sameSite` keyed on `NODE_ENV` alone. | ⏭ Deferred — tie to an explicit deploy flag. |
+| AU-U6/7/8/9 | Low (UX/a11y) | forced-change logout path, client-only route gate, multi-tab toast, dead-end success pages | Various smaller UX gaps. | ⏭ Deferred — not in the accepted remediation scope. |
+
+### Part B — `/code-review` (high effort, recall-biased) on the auth diff
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| AR-1 | **High (effectiveness)** | `auth.controller.ts` register + `auth.test.ts` | The division-scope guard was effectively **dead code** (only Director/Admin hold `user:create` by default, both bypass it as global) and its test passed for the wrong reason (403 came from `requirePrivilege`, not the guard). | ✅ Fixed — test grants Manager `user:create` via `PrivilegeConfig` so the guard is actually reached; asserts the guard's message; adds same-division allow + string-coercion cases. |
+| AR-2 | Medium (escalation) | `auth.controller.ts` register | H3 blocked only `Director` creation, not `Admin` (also globally-privileged). | ✅ Fixed — **user-confirmed decision:** only a Director may mint a Director **or** an Admin (`ELEVATED_ROLE_NAMES`). |
+| AR-3 | Medium (robustness) | `auth.controller.ts` register | `divisionId` from the body never coerced — a string spuriously 403'd same-division creators and 500'd the Prisma Int lookup. | ✅ Fixed — `Number()` + positive-integer validation → clean 400. |
+| AR-4 | Medium (altitude) | `auth.controller.ts` register | Inline `role==='Director'||'Admin'` diverged from the shared `hasCrossDivisionReach()` (which also honours `task:assign_any`). | ✅ Fixed — calls `hasCrossDivisionReach(req.user)`. |
+| AR-5 | Low-med (a11y) | `PasswordInput.tsx` | `label htmlFor`/`id` undefined when `label` passed without `id` (every update/reset field) — label not associated. | ✅ Fixed — `useId()` fallback id. |
+| AR-6 | Low-med (a11y) | `PasswordInput.tsx` | Show/hide toggle `tabIndex={-1}` → keyboard-unreachable. | ✅ Fixed — removed. |
+| AR-7 | Low (UX) | `PasswordStrength.tsx` | A >72-byte password showed an all-green checklist + "Strong" but submit was blocked (contradiction). | ✅ Fixed — 72-byte cap is now a visible rule; `isPasswordValid` derives from the rule set; meter never exceeds "Weak" until all rules pass. |
+| AR-8 | Low (robustness) | `auth.controller.ts` logout | The untouched inline `LOGOUT` audit write lacks `writeAuthAudit`'s best-effort try/catch, so an audit failure 500s logout after the session is revoked. | ⏭ Deferred — refactor `LOGOUT` to `writeAuthAudit`. |
+| AR-9 | Low (type-safety) | `auth.controller.ts` register | Read actor via `(req as any).user`. | ✅ Fixed — typed `req.user`. |
+| AR-10 | Low | `auth.controller.ts` resetPassword | Policy validated before the token lookup, so a bad token + weak password returns the policy error. | ✔ Accepted-as-is — policy is public; minor, keeps validation ordering uniform with register/update. |
+
+**Cut at the review cap (verified, not actioned):** two equivalent error-message helpers coexist (`apiErrorMessage` / `getApiErrorMessage`); the frontend `PasswordStrength` policy is a deliberate hand-kept mirror of the backend (drift risk); `LOGIN_FAILED` records the victim's `performedByUserId` (plausibly by-design — confirm forensic intent).
+
+---
+
 ## Session: 2026-06-28 — Work Assignment Workflow Review (Tasks & WPs)
 
 **Branch:** `claude/review-work-assignment-workflow-jrw9md`
