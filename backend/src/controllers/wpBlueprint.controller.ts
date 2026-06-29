@@ -45,13 +45,13 @@ function toDefaultAutoGenColumns(c: AutoGenColumns) {
 // absent/null clears the whole block (manual-launch-only). When set, all three of
 // recurrenceType/recurrenceInterval/recurrenceStartDate are required together, and
 // nextRunAt is seeded to the (UTC-normalized) start date so the cron picks it up.
-interface RecurrenceColumns {
+export interface RecurrenceColumns {
   recurrenceType: string | null;
   recurrenceInterval: number | null;
   recurrenceStartDate: Date | null;
   nextRunAt: Date | null;
 }
-function resolveRecurrence(input: {
+export function resolveRecurrence(input: {
   recurrenceType?: unknown; recurrenceInterval?: unknown; recurrenceStartDate?: unknown;
 }): { error: string } | { data: RecurrenceColumns } {
   const rt = input.recurrenceType;

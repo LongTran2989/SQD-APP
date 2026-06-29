@@ -36,7 +36,7 @@ const prisma = new PrismaClient({ adapter });
 // ──────────────────────────────────────────────────────────────────────────────
 // Config
 // ──────────────────────────────────────────────────────────────────────────────
-const EXCEL_PATH = path.join(__dirname, '..', 'sample_templates.xlsx');
+const EXCEL_PATH = path.join(__dirname, '..', 'seed_data.xlsx');
 const DEFAULT_OWNER_EMPLOYEE_ID = 'VAE00071'; // Director Lê Viết Thành
 const DEFAULT_DIVISION_CODE = 'QA'; // Fallback if Division column is empty
 
@@ -200,7 +200,7 @@ async function main() {
     wb = XLSX.readFile(EXCEL_PATH);
   } catch {
     console.error(`❌ Cannot open Excel file at:\n   ${EXCEL_PATH}`);
-    console.error('   Place your sample_templates.xlsx there and re-run.');
+    console.error('   Place your seed_data.xlsx there and re-run.');
     process.exit(1);
   }
 
