@@ -17,6 +17,7 @@ export const STANDALONE_TEMPLATE_TYPES: string[] = [
   'DOC',
   'DRR',
   'DT',
+  'Dissemination',
   'INFO',
   'IR',
   'LN1',
@@ -25,6 +26,7 @@ export const STANDALONE_TEMPLATE_TYPES: string[] = [
   'NCR',
   'PSD',
   'QN',
+  'QR',
   'RII',
 ];
 

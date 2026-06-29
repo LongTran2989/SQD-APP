@@ -98,6 +98,12 @@ async function assertEntityExists(
     case 'TEMPLATE':
       found = await client.template.findUnique({ where: { id: numericId }, select: { id: true } });
       break;
+    case 'FEED_POST':
+      // A feed COMMENT the file is attached to. FeedPost is immutable (no
+      // deletedAt); only COMMENTs accept attachments.
+      found = await client.feedPost.findUnique({ where: { id: numericId }, select: { id: true, type: true } })
+        .then((p) => (p && p.type === 'COMMENT' ? { id: p.id } : null));
+      break;
   }
   if (!found) throw new HttpError(404, `${entityType} not found`);
   return numericId;

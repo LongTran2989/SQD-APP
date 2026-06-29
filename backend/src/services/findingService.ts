@@ -1,6 +1,13 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { createFeedPost } from './feedService';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
+import {
+  FINDING_WORKFLOW_CONFIG_KEY,
+  DEFAULT_FINDING_WORKFLOW_CONFIG,
+  parseFindingWorkflowConfig,
+  closureGateForSeverity,
+  type FindingWorkflowConfig,
+} from '../constants/findingWorkflowConfig';
 
 import { prisma } from '../lib/prisma';
 
@@ -11,12 +18,35 @@ export { FINAL_TASK_STATUSES };
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 /**
- * Writes a Finding event to BOTH AuditLog (entityType 'Finding', system-wide
- * compliance) AND the source Task's feed (FeedPost, scope 'TASK', SYSTEM_EVENT).
+ * Reads the Admin-configurable finding-workflow policy from SystemSetting,
+ * falling back to DEFAULT_FINDING_WORKFLOW_CONFIG when the row is absent or
+ * invalid. Mirrors loadFileUploadConfig (attachmentService.ts).
+ */
+export async function getFindingWorkflowConfig(
+  client: PrismaLike = prisma
+): Promise<FindingWorkflowConfig> {
+  const row = await client.systemSetting.findUnique({ where: { key: FINDING_WORKFLOW_CONFIG_KEY } });
+  if (!row) return DEFAULT_FINDING_WORKFLOW_CONFIG;
+  try {
+    return parseFindingWorkflowConfig(JSON.parse(row.value)) ?? DEFAULT_FINDING_WORKFLOW_CONFIG;
+  } catch {
+    return DEFAULT_FINDING_WORKFLOW_CONFIG;
+  }
+}
+
+/**
+ * Writes a Finding event to ALL of its sinks atomically: AuditLog (entityType
+ * 'Finding', system-wide compliance), the Finding's own feed (FeedPost, scope
+ * 'FINDING' — the finding-detail timeline), AND the source Task's feed (scope
+ * 'TASK') when the finding has a source task.
  *
  * Accepts a Prisma client OR a transaction client so callers that mutate the
- * Finding inside a $transaction keep the dual write atomic. When `sourceTaskId`
- * is null (Finding with no linked source Task) the TaskActivity write is skipped.
+ * Finding inside a $transaction keep the writes atomic. The FINDING-scope event
+ * is always written (every audited event appears on the finding timeline); the
+ * TASK-scope event is skipped for standalone findings (no source task).
+ *
+ * This is the single dual-write helper for findings — there is no separate
+ * finding-feed helper, so the timeline can never drift from the audit log.
  */
 export async function logFindingAuditAndActivity(
   client: PrismaLike,
@@ -39,6 +69,17 @@ export async function logFindingAuditAndActivity(
     }
   });
 
+  // The finding's own timeline — written for every audited event, including
+  // standalone findings (no source task) and the RCA/CAPA/Link events.
+  await createFeedPost(client, {
+    type: 'SYSTEM_EVENT',
+    scope: 'FINDING',
+    scopeId: findingId,
+    content: activityContent,
+    metadata: details,
+    authorId: null
+  });
+
   if (sourceTaskId) {
     await createFeedPost(client, {
       type: 'SYSTEM_EVENT',
@@ -57,6 +98,7 @@ export async function evaluateCloseGate(
   const finding = await prisma.finding.findUnique({
     where: { id: findingId, deletedAt: null },
     select: {
+      severity: true,
       rca: { select: { status: true } },
       capaActions: {
         where: { deletedAt: null },
@@ -66,15 +108,28 @@ export async function evaluateCloseGate(
   });
   if (!finding) return { ok: false, reason: 'Finding not found' };
 
-  // Gate 1: RCA must be Complete (if one exists)
+  // Severity-configurable closed-loop policy (Admin-managed; default makes RCA +
+  // a verified corrective CAPA mandatory for Level 1/Level 2, Observations free).
+  const config = await getFindingWorkflowConfig();
+  const gate = closureGateForSeverity(config, finding.severity);
+
+  // Gate 1 (presence): a graded finding must have a Complete RCA recorded.
+  if (gate.requireRca && !finding.rca) {
+    return { ok: false, reason: 'A completed Root Cause Analysis is required before closing this finding' };
+  }
+  // Gate 1 (completeness): an RCA that exists must be Complete — always enforced.
   if (finding.rca && finding.rca.status !== 'Complete') {
     return { ok: false, reason: 'RCA must be marked Complete before closing' };
   }
 
-  // Gate 2: All CORRECTIVE CAPAs must be Verified.
-  // PREVENTIVE CAPAs do NOT block closure — long-term effectiveness
-  // is monitored post-closure.
+  // Gate 2 (presence): a graded finding must have at least one corrective CAPA.
   const corrective = finding.capaActions.filter((c) => c.type === 'CORRECTIVE');
+  if (gate.requireCorrectiveCapa && corrective.length === 0) {
+    return { ok: false, reason: 'At least one verified corrective action is required before closing this finding' };
+  }
+  // Gate 2 (completeness): every CORRECTIVE CAPA must be Verified — always enforced.
+  // PREVENTIVE CAPAs do NOT block closure — long-term effectiveness is monitored
+  // post-closure.
   for (const capa of corrective) {
     if (capa.status !== 'Verified') {
       return {

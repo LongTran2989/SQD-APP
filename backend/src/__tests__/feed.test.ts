@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { buildFeedDigests } from '../services/notificationService';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -182,6 +183,47 @@ describe('Feed API (Phase 2)', () => {
     });
   });
 
+  // ─── Pagination & filters (Phase B / H2) ─────────────────────────────────────
+
+  describe('GET feeds — pagination & filters', () => {
+    it('caps the page size and returns the newest page with an X-Next-Cursor header', async () => {
+      for (let i = 1; i <= 5; i++) {
+        await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: `c${i}`, authorId: staffUserId } });
+      }
+      const res = await request(app).get(`/api/feeds/DIVISION/${divisionId}?limit=2`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.length).toBe(2);
+      // Page is ascending; the newest two posts are c4 then c5.
+      expect(res.body.map((p: { content: string }) => p.content)).toEqual(['c4', 'c5']);
+      expect(res.headers['x-next-cursor']).toBeTruthy();
+    });
+
+    it('pages backward via the before cursor until exhausted', async () => {
+      const ids: number[] = [];
+      for (let i = 1; i <= 3; i++) {
+        const p = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: `p${i}`, authorId: staffUserId } });
+        ids.push(p.id);
+      }
+      const first = await request(app).get(`/api/feeds/DIVISION/${divisionId}?limit=2`).set('Authorization', `Bearer ${staffToken}`);
+      expect(first.body.map((p: { content: string }) => p.content)).toEqual(['p2', 'p3']);
+      const cursor = first.headers['x-next-cursor'];
+      expect(Number(cursor)).toBe(ids[1]); // p2's id = oldest in the first page
+
+      const second = await request(app).get(`/api/feeds/DIVISION/${divisionId}?limit=2&before=${cursor}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(second.body.map((p: { content: string }) => p.content)).toEqual(['p1']);
+      expect(second.headers['x-next-cursor']).toBe(''); // start of feed reached
+    });
+
+    it('filters by type', async () => {
+      await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'a comment', authorId: staffUserId } });
+      await prisma.feedPost.create({ data: { type: 'SYSTEM_EVENT', scope: 'DIVISION', scopeId: divisionId, content: 'an event' } });
+      const res = await request(app).get(`/api/feeds/DIVISION/${divisionId}?types=SYSTEM_EVENT`).set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.length).toBe(1);
+      expect(res.body[0].type).toBe('SYSTEM_EVENT');
+    });
+  });
+
   // ─── Posting RBAC ────────────────────────────────────────────────────────────
 
   describe('POST feeds — comment RBAC', () => {
@@ -198,6 +240,19 @@ describe('Feed API (Phase 2)', () => {
     it('requires non-empty content', async () => {
       const res = await request(app).post(`/api/feeds/WP/${wpId}/posts`).set('Authorization', `Bearer ${staffToken}`).send({ content: '   ' });
       expect(res.status).toBe(400);
+    });
+
+    it('rejects a comment exceeding the max length (H1)', async () => {
+      const tooLong = 'a'.repeat(5001); // MAX_COMMENT_LEN is 5000
+      const res = await request(app).post(`/api/feeds/WP/${wpId}/posts`).set('Authorization', `Bearer ${staffToken}`).send({ content: tooLong });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/too long/i);
+    });
+
+    it('accepts a comment at exactly the max length (H1 boundary)', async () => {
+      const atLimit = 'a'.repeat(5000);
+      const res = await request(app).post(`/api/feeds/WP/${wpId}/posts`).set('Authorization', `Bearer ${staffToken}`).send({ content: atLimit });
+      expect(res.status).toBe(201);
     });
 
     it('lets a Staff post to their OWN division board', async () => {
@@ -274,6 +329,228 @@ describe('Feed API (Phase 2)', () => {
 
       // Cleanup the assignment so re-runs stay idempotent.
       await prisma.workPackageAssignment.deleteMany({ where: { wpId, userId: staffUserId } });
+    });
+  });
+
+  // ─── Moderation: hide & pin (Phase D) ────────────────────────────────────────
+
+  describe('Moderation — hide & pin', () => {
+    it('hides a comment from reads; Director sees it only with includeHidden; unhide restores', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'to hide', authorId: staffUserId } });
+
+      // Non-Director/Admin cannot hide.
+      const forbidden = await request(app).post(`/api/feeds/posts/${c.id}/hide`).set('Authorization', `Bearer ${staffToken}`).send({ reason: 'x' });
+      expect(forbidden.status).toBe(403);
+
+      // Director hides.
+      const hid = await request(app).post(`/api/feeds/posts/${c.id}/hide`).set('Authorization', `Bearer ${directorToken}`).send({ reason: 'off-topic' });
+      expect(hid.status).toBe(200);
+
+      // Excluded from a normal read.
+      const staffRead = await request(app).get(`/api/feeds/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(staffRead.body.find((p: { id: number }) => p.id === c.id)).toBeUndefined();
+
+      // includeHidden (Director) reveals it, marked hidden.
+      const dirRead = await request(app).get(`/api/feeds/DIVISION/${divisionId}?includeHidden=true`).set('Authorization', `Bearer ${directorToken}`);
+      const found = dirRead.body.find((p: { id: number }) => p.id === c.id);
+      expect(found).toBeTruthy();
+      expect(found.hidden).toBe(true);
+
+      // includeHidden is ignored for non-privileged roles.
+      const staffTry = await request(app).get(`/api/feeds/DIVISION/${divisionId}?includeHidden=true`).set('Authorization', `Bearer ${staffToken}`);
+      expect(staffTry.body.find((p: { id: number }) => p.id === c.id)).toBeUndefined();
+
+      // Unhide restores it for everyone.
+      const un = await request(app).post(`/api/feeds/posts/${c.id}/unhide`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(un.status).toBe(200);
+      const staffRead2 = await request(app).get(`/api/feeds/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(staffRead2.body.find((p: { id: number }) => p.id === c.id)).toBeTruthy();
+    });
+
+    it('pins a Division comment, surfaces it in the pinned feed, unpins; rejects cross-division and TASK', async () => {
+      const divComment = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'pin me', authorId: staffUserId } });
+
+      // A user from another division cannot pin on this division board.
+      const cross = await request(app).post(`/api/feeds/posts/${divComment.id}/pin`).set('Authorization', `Bearer ${staffBToken}`).send({});
+      expect(cross.status).toBe(403);
+
+      // Director pins.
+      const pin = await request(app).post(`/api/feeds/posts/${divComment.id}/pin`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(pin.status).toBe(200);
+
+      // Pinned feed lists it.
+      const pinnedFeed = await request(app).get(`/api/feeds/pinned/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(pinnedFeed.body.map((p: { id: number }) => p.id)).toContain(divComment.id);
+
+      // Unpin removes it from the pinned feed.
+      const unpin = await request(app).post(`/api/feeds/posts/${divComment.id}/unpin`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(unpin.status).toBe(200);
+      const pinnedFeed2 = await request(app).get(`/api/feeds/pinned/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      expect(pinnedFeed2.body.map((p: { id: number }) => p.id)).not.toContain(divComment.id);
+
+      // A TASK comment is not pinnable.
+      const taskComment = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'TASK', scopeId: taskId, content: 'task c', authorId: staffUserId } });
+      const taskPin = await request(app).post(`/api/feeds/posts/${taskComment.id}/pin`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(taskPin.status).toBe(400);
+    });
+
+    it('the pinned-feed read resolves @mentions (parity with getFeed)', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'pinned directive', authorId: directorUserId, metadata: { mentions: [managerUserId] } } });
+      await request(app).post(`/api/feeds/posts/${c.id}/pin`).set('Authorization', `Bearer ${directorToken}`).send({});
+      const res = await request(app).get(`/api/feeds/pinned/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      const posted = res.body.find((p: { id: number }) => p.id === c.id);
+      expect(posted.mentions.map((m: { id: number }) => m.id)).toContain(managerUserId);
+    });
+  });
+
+  // ─── @mentions (Phase E) ─────────────────────────────────────────────────────
+
+  describe('@mentions', () => {
+    beforeEach(async () => {
+      await prisma.notification.deleteMany({ where: { type: 'FEED_MENTION' } });
+    });
+
+    it('stores + returns mentions and notifies the mentioned user (never the author)', async () => {
+      // Staff comments mentioning the Manager AND themselves (self must not notify).
+      const res = await request(app)
+        .post(`/api/feeds/WP/${wpId}/posts`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ content: 'please review', mentionUserIds: [managerUserId, staffUserId] });
+      expect(res.status).toBe(201);
+      expect(res.body.mentions.map((m: { id: number }) => m.id)).toEqual(expect.arrayContaining([managerUserId, staffUserId]));
+
+      // Manager received a FEED_MENTION notification.
+      const mgrNotif = await prisma.notification.findFirst({ where: { userId: managerUserId, type: 'FEED_MENTION' } });
+      expect(mgrNotif).not.toBeNull();
+
+      // The author (self-mentioned) did NOT.
+      const selfNotif = await prisma.notification.findFirst({ where: { userId: staffUserId, type: 'FEED_MENTION' } });
+      expect(selfNotif).toBeNull();
+
+      // The read resolves mention names.
+      const read = await request(app).get(`/api/feeds/WP/${wpId}`).set('Authorization', `Bearer ${staffToken}`);
+      const posted = read.body.find((p: { id: number }) => p.id === res.body.id);
+      expect(posted.mentions.map((m: { id: number }) => m.id)).toEqual(expect.arrayContaining([managerUserId]));
+    });
+
+    it('drops non-existent mention ids', async () => {
+      const res = await request(app)
+        .post(`/api/feeds/WP/${wpId}/posts`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ content: 'x', mentionUserIds: [99999999] });
+      expect(res.status).toBe(201);
+      expect(res.body.mentions).toEqual([]);
+    });
+  });
+
+  // ─── Inline entity links #CODE (Phase E.2) ───────────────────────────────────
+
+  describe('Inline entity links (#CODE)', () => {
+    it('resolves #task / #wp codes in a comment and leaves unknown codes unlinked', async () => {
+      const res = await request(app)
+        .post('/api/feeds/ORG/posts')
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ content: 'see #FED-000001 and #FED-WP-000001 but not #NOPE-999' });
+      expect(res.status).toBe(201);
+
+      const read = await request(app).get('/api/feeds/ORG').set('Authorization', `Bearer ${directorToken}`);
+      const posted = read.body.find((p: { id: number }) => p.id === res.body.id);
+      expect(posted.entityLinks['FED-000001']).toEqual({ type: 'TASK', id: taskId });
+      expect(posted.entityLinks['FED-WP-000001']).toEqual({ type: 'WP', id: wpId });
+      expect(posted.entityLinks['NOPE-999']).toBeUndefined();
+    });
+  });
+
+  // ─── Acknowledgements (Phase G) ──────────────────────────────────────────────
+
+  describe('Acknowledgements', () => {
+    it('acks a comment idempotently; count + viewer flag + one SYSTEM_EVENT per acker', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'directive', authorId: directorUserId } });
+
+      const a1 = await request(app).post(`/api/feeds/posts/${c.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
+      expect(a1.status).toBe(200);
+      expect(a1.body.ackCount).toBe(1);
+      expect(a1.body.acknowledged).toBe(true);
+
+      // Idempotent: the same user acking again does not double-count.
+      const a2 = await request(app).post(`/api/feeds/posts/${c.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
+      expect(a2.body.ackCount).toBe(1);
+
+      // A different user pushes the count to 2.
+      const a3 = await request(app).post(`/api/feeds/posts/${c.id}/ack`).set('Authorization', `Bearer ${managerToken}`).send({});
+      expect(a3.body.ackCount).toBe(2);
+
+      // Exactly one SYSTEM_EVENT per DISTINCT acker (first-ack only).
+      const sysEvents = await prisma.feedPost.findMany({
+        where: { scope: 'DIVISION', scopeId: divisionId, type: 'SYSTEM_EVENT', content: { contains: 'acknowledged' } },
+      });
+      expect(sysEvents).toHaveLength(2);
+
+      // The read reflects the count and the viewer's own flag.
+      const read = await request(app).get(`/api/feeds/DIVISION/${divisionId}`).set('Authorization', `Bearer ${staffToken}`);
+      const posted = read.body.find((p: { id: number }) => p.id === c.id);
+      expect(posted.ackCount).toBe(2);
+      expect(posted.acknowledged).toBe(true);
+    });
+
+    it('rejects acknowledging a non-COMMENT post (400)', async () => {
+      const sys = await prisma.feedPost.create({ data: { type: 'SYSTEM_EVENT', scope: 'DIVISION', scopeId: divisionId, content: 'sys' } });
+      const res = await request(app).post(`/api/feeds/posts/${sys.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects acknowledging a hidden comment (400)', async () => {
+      const c = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'hidden directive', authorId: directorUserId, hiddenAt: new Date(), hiddenByUserId: directorUserId } });
+      const res = await request(app).post(`/api/feeds/posts/${c.id}/ack`).set('Authorization', `Bearer ${staffToken}`).send({});
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // ─── Search (Phase H) ────────────────────────────────────────────────────────
+
+  describe('Search', () => {
+    it('finds comments by content, excludes hidden, honours the scope filter', async () => {
+      await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'ORG', scopeId: null, content: 'uniqueneedle alpha', authorId: directorUserId } });
+      await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'DIVISION', scopeId: divisionId, content: 'uniqueneedle beta', authorId: staffUserId } });
+      const hidden = await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'ORG', scopeId: null, content: 'uniqueneedle hidden', authorId: directorUserId, hiddenAt: new Date(), hiddenByUserId: directorUserId } });
+
+      const g = await request(app).get('/api/feeds/search?q=uniqueneedle').set('Authorization', `Bearer ${staffToken}`);
+      expect(g.status).toBe(200);
+      const ids = g.body.map((r: { id: number }) => r.id);
+      expect(ids).not.toContain(hidden.id);
+      expect(g.body).toHaveLength(2);
+
+      const o = await request(app).get('/api/feeds/search?q=uniqueneedle&scope=ORG').set('Authorization', `Bearer ${staffToken}`);
+      expect(o.body.every((r: { scope: string }) => r.scope === 'ORG')).toBe(true);
+      expect(o.body).toHaveLength(1);
+    });
+
+    it('returns empty for queries shorter than 2 chars', async () => {
+      const r = await request(app).get('/api/feeds/search?q=a').set('Authorization', `Bearer ${staffToken}`);
+      expect(r.body).toEqual([]);
+    });
+  });
+
+  // ─── Daily feed digest (Phase H) ─────────────────────────────────────────────
+
+  describe('Daily feed digest', () => {
+    it('notifies opted-in users about new Org/Division activity; skips others', async () => {
+      await prisma.notification.deleteMany({ where: { type: 'FEED_DIGEST' } });
+      await prisma.user.update({ where: { id: staffUserId }, data: { preferences: { feedDigest: true } } });
+      await prisma.feedPost.create({ data: { type: 'COMMENT', scope: 'ORG', scopeId: null, content: 'fresh org news', authorId: directorUserId } });
+      // A SYSTEM_EVENT must NOT inflate the digest count (comments only).
+      await prisma.feedPost.create({ data: { type: 'SYSTEM_EVENT', scope: 'ORG', scopeId: null, content: 'someone pinned a comment' } });
+
+      await buildFeedDigests(prisma, new Date(Date.now() - 60 * 60 * 1000)); // since 1h ago
+
+      const optedIn = await prisma.notification.findFirst({ where: { userId: staffUserId, type: 'FEED_DIGEST' } });
+      expect(optedIn).not.toBeNull();
+      expect(optedIn?.title).toContain('1 new'); // the SYSTEM_EVENT was excluded
+      const notOpted = await prisma.notification.findFirst({ where: { userId: managerUserId, type: 'FEED_DIGEST' } });
+      expect(notOpted).toBeNull();
+
+      // reset so the opt-in doesn't leak into other tests
+      await prisma.user.update({ where: { id: staffUserId }, data: { preferences: {} } });
     });
   });
 });

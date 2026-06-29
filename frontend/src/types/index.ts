@@ -336,9 +336,41 @@ export interface TaskActivity {
   createdAt: string;
 }
 
+// A user surfaced by the @mention picker / resolved on a comment.
+export interface MentionUser {
+  id: number;
+  name: string | null;
+  employeeId?: string | null;
+}
+
+// A resolved inline #CODE reference in a comment (Phase E.2) → its detail route.
+export interface EntityLink {
+  type: 'TASK' | 'WP' | 'FINDING';
+  id: number;
+}
+// Map of #CODE (without the '#') → link target, attached to enriched comments.
+export type EntityLinkMap = Record<string, EntityLink>;
+
+// Attachment metadata surfaced on a feed comment (Phase F). Bytes stream via
+// /api/attachments/:id/download — never a public URL.
+export interface FeedAttachment {
+  id: number;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  caption: string | null;
+}
+
 // Enriched — server-side joined author name
 export interface TaskActivityEnriched extends TaskActivity {
   author: { id: number; name: string | null } | null;
+  hidden?: boolean; // soft-hidden (M4) — only ever present/true for Director/Admin reads
+  pinned?: boolean; // always false for TASK feeds (not pinnable); kept for shape parity
+  mentions?: MentionUser[]; // @mentioned users resolved to names (Phase E)
+  entityLinks?: EntityLinkMap; // resolved #CODE references (Phase E.2)
+  attachments?: FeedAttachment[]; // files attached to this comment (Phase F)
+  ackCount?: number; // how many users acknowledged this comment (Phase G)
+  acknowledged?: boolean; // whether the viewer has acknowledged it
 }
 
 // ── Unified feed (Phase 2) — generic across all four scopes ──────────────────
@@ -372,6 +404,19 @@ export interface FeedPostEnriched extends FeedPost {
   // server-side (canActionFlag) so the UI gate matches backend RBAC exactly,
   // including the Manager own-division rule the client can't resolve alone.
   canAction?: boolean;
+  // Moderation flags (Phase D). `hidden` is only ever true on Director/Admin reads
+  // (others never receive hidden posts); `pinned` marks a pinned comment.
+  hidden?: boolean;
+  pinned?: boolean;
+  // @mentioned users resolved to names (Phase E).
+  mentions?: MentionUser[];
+  // Resolved #CODE references (Phase E.2).
+  entityLinks?: EntityLinkMap;
+  // Files attached to this comment (Phase F).
+  attachments?: FeedAttachment[];
+  // Acknowledgement receipts (Phase G).
+  ackCount?: number;
+  acknowledged?: boolean;
 }
 
 // ── Escalation (Phase 3) ─────────────────────────────────────────────────────
@@ -461,7 +506,7 @@ export interface TimeBooking {
   updatedAt: string;
 }
 
-export type AttachmentEntityType = 'TASK' | 'FINDING' | 'TEMPLATE' | 'WP';
+export type AttachmentEntityType = 'TASK' | 'FINDING' | 'TEMPLATE' | 'WP' | 'FEED_POST';
 
 // Public attachment metadata as returned by the API. The internal storageKey /
 // bucket are never exposed — downloads go through the backend stream endpoint.
@@ -494,8 +539,8 @@ export type FindingStatus = 'Open' | 'In Progress' | 'Pending Verification' | 'C
 
 export interface Finding {
   id: number;
+  findingId: string | null; // Human-readable business code, e.g. FND-000001 (null for legacy rows not yet backfilled).
   severity: FindingSeverity | null;
-  category: string | null;
   description: string;
   status: FindingStatus;
   fieldId: string | null;
@@ -506,11 +551,6 @@ export interface Finding {
   // Populated relation (present on list/detail reads). Null when no aircraft set.
   aircraftRegistration: { registration: string; description: string | null; operatorCode: string | null } | null;
   regulatoryReference: string | null;
-  errorCode: string | null;
-  rootCause: string | null;
-  correctiveAction: string | null;
-  recurrence: boolean | null;
-  violatorIds: unknown | null;
   sourceTaskId: number | null;
   reportedByUserId: number;
   closedByUserId: number | null;
@@ -527,7 +567,6 @@ export type RcaMethod = 'MEDA' | 'FIVE_WHYS' | 'OTHER';
 export type RcaStatus = 'Draft' | 'Complete';
 export type CapaType = 'CORRECTIVE' | 'PREVENTIVE';
 export type CapaStatus = 'Open' | 'In Progress' | 'Completed' | 'Verified' | 'Waived';
-export type CapaLinkRole = 'EXECUTION' | 'EFFECTIVENESS' | 'SUPPORTING';
 export type FindingLinkType = 'DUPLICATE' | 'RELATED' | 'CAUSED_BY';
 export type ResponseActionType = 'CAR' | 'NCR' | 'QN' | 'QR' | 'IR' | 'Dissemination';
 
@@ -536,7 +575,7 @@ export interface CapaWpRef { id: number; wpId: string; name: string; status: str
 export interface CapaTaskLink {
   id: number;
   capaId: number;
-  role: CapaLinkRole;
+  mandatory: boolean;
   taskId: number | null;
   task?: { id: number; taskId: string; title: string | null; status: TaskStatus; } | null;
   wpId: number | null;
@@ -715,6 +754,7 @@ export type NotificationType =
   | 'TASK_SUBMITTED'
   | 'ESCALATION_QUEUED'
   | 'FINDING_CREATED'
+  | 'FINDING_OVERDUE'
   | 'FEED_ACTIVITY'
   | 'BLUEPRINT_LAUNCHED'
   | 'TASKS_GENERATED';

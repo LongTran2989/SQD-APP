@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { logFindingAuditAndActivity, evaluateCloseGate } from '../services/findingService';
+import { logFindingAuditAndActivity, evaluateCloseGate, getFindingWorkflowConfig } from '../services/findingService';
+import { slaForSeverity } from '../constants/findingWorkflowConfig';
 import { computeTrendForSignature } from '../services/trendService';
 import { buildFindingScope, assertManagerDivisionScope, isFindingReviewer } from '../utils/findingAccess';
 import { hasPrivilege } from '../utils/privilegeAccess';
@@ -12,7 +13,6 @@ import { HttpError, isHttpError } from '../utils/httpError';
 import { FINAL_TASK_STATUSES } from '../constants/taskStatus';
 import { FINDING_SEVERITIES as SEVERITIES, FINDING_STATUSES } from '../constants/findingTaxonomy';
 import { createNotifications, resolvePrivilegedUserIds } from '../services/notificationService';
-import { createFeedPost } from '../services/feedService';
 
 import { prisma } from '../lib/prisma';
 
@@ -56,6 +56,34 @@ async function generateWpId(divisionCode: string, tx: Prisma.TransactionClient):
   return `${divisionCode}-WP-${String(nextSeq).padStart(6, '0')}`;
 }
 
+/**
+ * Generates the next sequential human-readable findingId (e.g. FND-000001).
+ * Findings are organisation-wide (no division prefix, unlike Task/WP), so
+ * allocation is serialised with a transaction-scoped advisory lock rather than a
+ * division row lock. Must run inside a $transaction (all callers do); the lock is
+ * released automatically at commit/rollback.
+ */
+async function generateFindingId(client: PrismaLike): Promise<string> {
+  // Fixed arbitrary key dedicated to the finding-id sequence. $executeRaw (not
+  // $queryRaw) because pg_advisory_xact_lock returns void — nothing to deserialize.
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(8123401)`;
+  const last = await client.finding.findFirst({
+    where: { findingId: { not: null } },
+    orderBy: { id: 'desc' },
+    select: { findingId: true }
+  });
+  let nextSeq = 1;
+  if (last?.findingId) {
+    const seqPart = last.findingId.split('-').pop();
+    if (seqPart) nextSeq = parseInt(seqPart, 10) + 1;
+  }
+  return `FND-${String(nextSeq).padStart(6, '0')}`;
+}
+
+// Findings still in flight — eligible as duplicate-merge canonicals and surfaced
+// as raise-time duplicate candidates (Closed / Dismissed are terminal).
+const FINDING_ACTIVE_STATUSES = ['Open', 'In Progress', 'Pending Verification'];
+
 function computeDueDateBreached(finding: { dueDate: Date | null; status: string }): boolean {
   if (!finding.dueDate) return false;
   if (finding.status === 'Closed') return false;
@@ -67,7 +95,7 @@ function computeDueDateBreached(finding: { dueDate: Date | null; status: string 
  * observed on a read. Returns whether the finding is currently breached.
  */
 async function ensureDueDateBreachLogged(
-  finding: { id: number; dueDate: Date | null; status: string },
+  finding: { id: number; dueDate: Date | null; status: string; targetDivisionId: number | null; description: string },
   performedByUserId: number
 ): Promise<boolean> {
   const breached = computeDueDateBreached(finding);
@@ -86,11 +114,46 @@ async function ensureDueDateBreachLogged(
           details: { dueDate: finding.dueDate } as any
         }
       });
+      // Proactively alert reviewers the first time the breach is observed, so an
+      // overdue finding is not dependent on someone happening to read it again.
+      await notifyFindingOverdue(finding, performedByUserId);
     }
   } catch (err) {
     console.error(`[ensureDueDateBreachLogged] failed for finding=${finding.id}:`, err);
   }
   return true;
+}
+
+/**
+ * Best-effort overdue alert to the finding's reviewers (finding:review holders in
+ * the target division + Director/Admin). Fired once, gated by the same one-time
+ * guard as the DUE_DATE_BREACHED audit row. Never throws.
+ *
+ * Takes the already-loaded finding row (id + targetDivisionId + description) from
+ * the caller's soft-delete-filtered read — it does NOT re-query, so it can never
+ * resurrect a soft-deleted finding and adds no per-finding round-trip.
+ */
+async function notifyFindingOverdue(
+  finding: { id: number; targetDivisionId: number | null; description: string },
+  performedByUserId: number
+): Promise<void> {
+  try {
+    const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', finding.targetDivisionId);
+    await createNotifications(
+      prisma,
+      reviewerIds.map((uid) => ({
+        userId: uid,
+        type: 'FINDING_OVERDUE' as const,
+        title: 'Finding overdue',
+        body: `Finding #${finding.id} has passed its due date: ${finding.description.slice(0, 120)}`,
+        linkScope: 'FINDING' as const,
+        linkId: finding.id,
+      })),
+      [performedByUserId]
+    );
+  } catch (err) {
+    console.error(`[notifyFindingOverdue] failed for finding=${finding.id}:`, err);
+  }
 }
 
 /**
@@ -100,7 +163,7 @@ async function ensureDueDateBreachLogged(
  * up to 2 per finding), and returns the Set of currently-breached finding ids.
  */
 async function ensureDueDateBreachesLogged(
-  findings: { id: number; dueDate: Date | null; status: string }[],
+  findings: { id: number; dueDate: Date | null; status: string; targetDivisionId: number | null; description: string }[],
   performedByUserId: number
 ): Promise<Set<number>> {
   const breached = findings.filter(computeDueDateBreached);
@@ -128,6 +191,10 @@ async function ensureDueDateBreachesLogged(
           details: { dueDate: f.dueDate } as any
         }))
       });
+      // Proactively alert reviewers for each finding whose breach was first seen now.
+      for (const f of toLog) {
+        await notifyFindingOverdue(f, performedByUserId);
+      }
     }
   } catch (err) {
     console.error('[ensureDueDateBreachesLogged] batch breach-log failed:', err);
@@ -138,31 +205,6 @@ async function ensureDueDateBreachesLogged(
 async function getUserName(userId: number): Promise<string> {
   const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
   return u?.name ?? `User ${userId}`;
-}
-
-/**
- * Writes a SYSTEM_EVENT to the per-finding feed (scope: 'FINDING'). Never throws
- * — errors are logged and swallowed so a feed write failure never rolls back the
- * parent operation. Mirrors logTaskActivity in task.controller.ts.
- */
-async function logFindingActivity(
-  findingId: number,
-  content: string,
-  metadata?: Record<string, unknown>,
-  client: PrismaLike = prisma
-): Promise<void> {
-  try {
-    await createFeedPost(client, {
-      type: 'SYSTEM_EVENT',
-      scope: 'FINDING',
-      scopeId: findingId,
-      content,
-      metadata,
-      authorId: null,
-    });
-  } catch (err) {
-    console.error(`[logFindingActivity] Failed to log SYSTEM_EVENT for findingId=${findingId}`, err);
-  }
 }
 
 /**
@@ -259,6 +301,10 @@ export interface CreateFindingParams {
   regulatoryReference?: string | null;
   ataChapterId?: number | null;
   hazardTagIds?: number[];
+  // When set, the new finding is recorded against the source task but immediately
+  // parked as a DUPLICATE of this existing (active, same-division) finding —
+  // closed-loop work happens on the canonical, not here.
+  duplicateOfFindingId?: number | null;
 }
 
 /**
@@ -273,7 +319,7 @@ export async function createFindingService(
   actor: { userId: number },
   params: CreateFindingParams
 ) {
-  const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds } = params;
+  const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds, duplicateOfFindingId } = params;
 
   if (!eventType || !departmentId || !description) {
     throw new HttpError(400, 'eventType, departmentId, and description are required');
@@ -326,8 +372,11 @@ export async function createFindingService(
   const reporter = await client.user.findUnique({ where: { id: actor.userId }, select: { name: true } });
   const reporterName = reporter?.name ?? `User ${actor.userId}`;
 
+  const findingId = await generateFindingId(client);
+
   const created = await client.finding.create({
     data: {
+      findingId,
       eventType,
       description,
       departmentId,
@@ -353,16 +402,61 @@ export async function createFindingService(
     taskId ?? null,
     'CREATED',
     actor.userId,
-    `Finding #${created.id} raised by ${reporterName}`,
-    { findingId: created.id, eventType, sourceTaskId: taskId ?? null }
+    `Finding ${created.findingId ?? `#${created.id}`} raised by ${reporterName}`,
+    { findingId: created.id, findingCode: created.findingId, eventType, sourceTaskId: taskId ?? null }
   );
 
-  await logFindingActivity(
-    created.id,
-    `Finding raised by ${reporterName} — ${eventType}`,
-    { findingId: created.id, eventType },
-    client
-  );
+  // Raise-time duplicate merge: record this finding against the task but park it
+  // as a DUPLICATE of an existing active finding in the same division, so the
+  // canonical carries the RCA/CAPA/closure work and this one demands none.
+  if (duplicateOfFindingId != null) {
+    const canonical = await client.finding.findUnique({
+      where: { id: duplicateOfFindingId, deletedAt: null },
+      select: { id: true, status: true, targetDivisionId: true },
+    });
+    if (!canonical) throw new HttpError(404, 'The finding to mark as a duplicate of was not found');
+    if (canonical.targetDivisionId !== resolvedDivisionId) {
+      throw new HttpError(400, 'Can only mark as a duplicate of a finding in the same division');
+    }
+    if (!FINDING_ACTIVE_STATUSES.includes(canonical.status)) {
+      throw new HttpError(400, 'Can only mark as a duplicate of an active (open) finding');
+    }
+
+    await client.findingLink.create({
+      data: {
+        fromFindingId: created.id,
+        relatedFindingId: canonical.id,
+        linkType: 'DUPLICATE',
+        note: 'Marked as duplicate at raise time',
+        createdByUserId: actor.userId,
+      },
+    });
+    const dismissed = await client.finding.update({
+      where: { id: created.id },
+      data: { status: 'Dismissed' },
+    });
+
+    await logFindingAuditAndActivity(
+      client,
+      created.id,
+      taskId ?? null,
+      FINDING_EXPANSION_ACTIONS.FINDING_LINKED,
+      actor.userId,
+      `Finding #${created.id} linked to Finding #${canonical.id} (DUPLICATE)`,
+      { findingId: created.id, relatedFindingId: canonical.id, linkType: 'DUPLICATE' }
+    );
+    await logFindingAuditAndActivity(
+      client,
+      created.id,
+      taskId ?? null,
+      FINDING_EXPANSION_ACTIONS.DISMISSED,
+      actor.userId,
+      `Finding #${created.id} dismissed: duplicate of Finding #${canonical.id} — managed there`,
+      { findingId: created.id, reason: `Duplicate of #${canonical.id}`, duplicateOfFindingId: canonical.id }
+    );
+
+    return dismissed;
+  }
 
   return created;
 }
@@ -370,28 +464,32 @@ export async function createFindingService(
 export const createFinding = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req.user!;
-    const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds } = req.body;
+    const { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds, duplicateOfFindingId } = req.body;
 
     const finding = await prisma.$transaction((tx) =>
-      createFindingService(tx, { userId }, { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds })
+      createFindingService(tx, { userId }, { taskId, targetDivisionId, fieldId, eventType, departmentId, aircraftRegistrationCode, regulatoryReference, description, ataChapterId, hazardTagIds, duplicateOfFindingId })
     );
 
     // Notify the finding reviewers (finding:review holders in the target
     // division + Director/Admin cross-division), post-commit and best-effort.
-    // The reporter (actor) is excluded — they just raised it.
-    const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', finding.targetDivisionId);
-    await createNotifications(
-      prisma,
-      reviewerIds.map((uid) => ({
-        userId: uid,
-        type: 'FINDING_CREATED' as const,
-        title: 'New finding raised',
-        body: `Finding #${finding.id}: ${finding.description.slice(0, 120)}`,
-        linkScope: 'FINDING' as const,
-        linkId: finding.id,
-      })),
-      [userId]
-    );
+    // The reporter (actor) is excluded — they just raised it. Skipped on the
+    // duplicate path: the finding is already parked as managed elsewhere, so
+    // there is no new investigation to alert reviewers about.
+    if (duplicateOfFindingId == null) {
+      const reviewerIds = await resolvePrivilegedUserIds(prisma, 'finding:review', finding.targetDivisionId);
+      await createNotifications(
+        prisma,
+        reviewerIds.map((uid) => ({
+          userId: uid,
+          type: 'FINDING_CREATED' as const,
+          title: 'New finding raised',
+          body: `Finding #${finding.id}: ${finding.description.slice(0, 120)}`,
+          linkScope: 'FINDING' as const,
+          linkId: finding.id,
+        })),
+        [userId]
+      );
+    }
 
     res.status(201).json(finding);
   } catch (error) {
@@ -400,6 +498,76 @@ export const createFinding = async (req: Request, res: Response): Promise<void> 
       return;
     }
     console.error('Error creating finding:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── GET /api/findings/duplicate-candidates ──────────────────────────────────
+
+/**
+ * Raise-time duplicate detection. Returns active findings in the same division +
+ * department that the raiser might be about to duplicate, so they can link to an
+ * existing one instead of opening a redundant investigation. Auth-only (open
+ * visibility, consistent with getFindingLinks).
+ */
+export const getDuplicateCandidates = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const departmentId = parseInt(req.query.departmentId as string, 10);
+    if (!departmentId || isNaN(departmentId)) {
+      res.status(400).json({ message: 'departmentId is required' });
+      return;
+    }
+
+    // Division scope: derive from the source task when raising from a task,
+    // otherwise the explicit target division (standalone raise).
+    let divisionId: number | null = null;
+    const taskIdRaw = req.query.taskId as string | undefined;
+    if (taskIdRaw) {
+      const taskId = parseInt(taskIdRaw, 10);
+      if (taskId && !isNaN(taskId)) {
+        const task = await prisma.task.findUnique({
+          where: { id: taskId, deletedAt: null },
+          select: { targetDivisionId: true },
+        });
+        divisionId = task?.targetDivisionId ?? null;
+      }
+    } else if (req.query.targetDivisionId) {
+      const d = parseInt(req.query.targetDivisionId as string, 10);
+      if (d && !isNaN(d)) divisionId = d;
+    }
+    // Without a division we cannot scope candidates — return nothing rather than
+    // leaking cross-division findings.
+    if (divisionId == null) {
+      res.json([]);
+      return;
+    }
+
+    const excludeId = req.query.excludeId ? parseInt(req.query.excludeId as string, 10) : null;
+
+    const candidates = await prisma.finding.findMany({
+      where: {
+        deletedAt: null,
+        targetDivisionId: divisionId,
+        departmentId,
+        status: { in: FINDING_ACTIVE_STATUSES },
+        ...(excludeId && !isNaN(excludeId) ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 8,
+      select: {
+        id: true,
+        findingId: true,
+        description: true,
+        status: true,
+        severity: true,
+        eventType: true,
+        createdAt: true,
+      },
+    });
+
+    res.json(candidates);
+  } catch (error) {
+    console.error('Error fetching duplicate candidates:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -513,7 +681,6 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
         linksFrom: { include: { relatedFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },
         linksTo: { include: { fromFinding: { select: { id: true, description: true, status: true, severity: true, eventType: true } } } },
         responseActions: {
-          where: { deletedAt: null },
           orderBy: { createdAt: 'asc' },
           include: {
             task: { select: { id: true, taskId: true, status: true } },
@@ -580,6 +747,48 @@ export const getFindingById = async (req: Request, res: Response): Promise<void>
   }
 };
 
+// ─── GET /api/findings/:id/summary ────────────────────────────────────────────
+// Lightweight, side-effect-free read for inline previews (the quick-view drawer
+// + duplicate-candidate peeks). Unlike getFindingById this loads only the fields
+// the drawer renders — no RCA / CAPA / links / responseActions tree, no trend
+// computation, and crucially no ensureDueDateBreachLogged write. Open-read,
+// consistent with the transparent viewing model.
+export const getFindingSummary = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    if (Number.isNaN(id)) { res.status(400).json({ message: 'Invalid finding id' }); return; }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        findingId: true,
+        status: true,
+        severity: true,
+        description: true,
+        eventType: true,
+        createdAt: true,
+        dueDate: true,
+        fieldId: true,
+        regulatoryReference: true,
+        aircraftRegistrationCode: true,
+        aircraftRegistration: { select: { registration: true } },
+        reportedByUser: { select: { id: true, name: true } },
+        department: { select: { id: true, name: true } },
+        ataChapter: { select: { id: true, code: true, title: true } },
+        hazardTags: { select: { hazardTag: { select: { id: true, label: true } } } }
+      }
+    });
+
+    if (!finding) { res.status(404).json({ message: 'Finding not found' }); return; }
+
+    res.json(finding);
+  } catch (error) {
+    console.error('Error fetching finding summary:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // ─── PUT /api/findings/:id/review ─────────────────────────────────────────────
 
 export const reviewFinding = async (req: Request, res: Response): Promise<void> => {
@@ -616,9 +825,28 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
     // Whether this review actually changes the finding's taxonomy (for audit).
     const taxonomyChanged = ataChapterId !== undefined || (tagIds !== null && tagIds.length > 0);
 
+    // Classification-driven due date (SLA). When the chosen severity makes a due
+    // date mandatory, reject a review that omits one — unless a per-severity
+    // default timescale is configured, in which case we auto-fill it.
+    const workflowConfig = await getFindingWorkflowConfig(prisma);
+    const sla = slaForSeverity(workflowConfig, severity);
+    let parsedDueDate = dueDate ? new Date(dueDate) : null;
+    // A malformed date string yields a truthy "Invalid Date" that would slip past
+    // the SLA checks below and then throw at .toISOString() — reject it as a 400.
+    if (parsedDueDate && isNaN(parsedDueDate.getTime())) {
+      res.status(400).json({ message: 'Invalid dueDate' });
+      return;
+    }
+    if (!parsedDueDate && sla.days != null) {
+      parsedDueDate = new Date(Date.now() + sla.days * 24 * 60 * 60 * 1000);
+    }
+    if (sla.mandatory && !parsedDueDate) {
+      res.status(400).json({ message: `A due date is required when reviewing a ${severity} finding` });
+      return;
+    }
+
     const reviewerName = await getUserName(userId);
     const newStatus = 'In Progress';
-    const parsedDueDate = dueDate ? new Date(dueDate) : null;
 
     const updated = await prisma.$transaction(async (tx) => {
       // Replace hazard tags only when the caller explicitly provided the field.
@@ -670,13 +898,6 @@ export const reviewFinding = async (req: Request, res: Response): Promise<void> 
           { findingId: finding.id, ataChapterId: ataChapterId ?? null, hazardTagIds: tagIds }
         );
       }
-
-      await logFindingActivity(
-        finding.id,
-        `Finding reviewed by ${reviewerName} — severity: ${severity}`,
-        { findingId: finding.id, severity },
-        tx
-      );
 
       return result;
     });
@@ -970,8 +1191,21 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
   try {
     const id = parseInt(req.params.id as string, 10);
     const { userId, role } = req.user!;
+    const { closureNote } = req.body ?? {};
 
     if (!requireReviewerRole(res, req.user!, 'close findings')) return;
+
+    // Closure sign-off: an auditable close-out rationale is mandatory and bounded
+    // (2000 chars, per the 2026-06-09 free-text hardening convention).
+    if (!closureNote || typeof closureNote !== 'string' || !closureNote.trim()) {
+      res.status(400).json({ message: 'A closure note is required to close a finding' });
+      return;
+    }
+    if (closureNote.length > 2000) {
+      res.status(400).json({ message: 'Closure note must be 2000 characters or fewer' });
+      return;
+    }
+    const trimmedClosureNote = closureNote.trim();
 
     const finding = await prisma.finding.findUnique({
       where: { id, deletedAt: null },
@@ -1013,14 +1247,8 @@ export const closeFinding = async (req: Request, res: Response): Promise<void> =
         'CLOSED',
         userId,
         `Finding #${finding.id} closed by ${actorName}`,
-        { findingId: finding.id, fromStatus: finding.status, toStatus: 'Closed' }
-      );
-
-      await logFindingActivity(
-        finding.id,
-        `Finding closed by ${actorName}`,
-        { findingId: finding.id },
-        tx
+        { findingId: finding.id, fromStatus: finding.status, toStatus: 'Closed', closureNote: trimmedClosureNote },
+        trimmedClosureNote
       );
 
       return result;
@@ -1083,12 +1311,6 @@ export const advanceFinding = async (req: Request, res: Response): Promise<void>
         userId,
         `Finding #${id} manually advanced — no follow-up tasks required`,
         { findingId: finding.id, fromStatus: 'In Progress', toStatus: 'Pending Verification' }
-      );
-      await logFindingActivity(
-        finding.id,
-        `Finding advanced to Pending Verification by ${actorName}`,
-        { findingId: finding.id },
-        tx
       );
       return result;
     });
@@ -1309,12 +1531,6 @@ export const dismissFinding = async (req: Request, res: Response): Promise<void>
         `Finding #${id} dismissed: ${reason}`,
         { findingId: finding.id, reason }
       );
-      await logFindingActivity(
-        finding.id,
-        `Finding dismissed by ${actorName}: ${reason.trim()}`,
-        { findingId: finding.id, reason },
-        tx
-      );
       return result;
     });
 
@@ -1392,6 +1608,195 @@ export const updateTaxonomy = async (req: Request, res: Response): Promise<void>
       return;
     }
     console.error('Error updating taxonomy:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/findings/:id/details ────────────────────────────────────────────
+
+/**
+ * Enrich a finding's optional context AFTER it was raised — ATA chapter, hazard
+ * tags, aircraft registration, regulatory reference, field reference. These feed
+ * monitoring + the trend engine (Department + ATA + Cause Code + Hazard Tags).
+ *
+ * Editable by anyone working the finding — the reporter, a follow-up assignee, or
+ * a reviewer (same-division Manager / Director) — while it is not Closed/Dismissed.
+ * Severity and status are NOT touched here; those stay reviewer-only via review /
+ * updateSeverity. Partial update: a field changes only when its key is present.
+ */
+export const updateFindingDetails = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId } = req.user!;
+    const { ataChapterId, hazardTagIds, aircraftRegistrationCode, regulatoryReference, fieldId } = req.body ?? {};
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        sourceTaskId: true,
+        reportedByUserId: true,
+        followUpTasks: { where: { deletedAt: null }, select: { assignedToUserId: true } },
+      },
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status === 'Closed' || finding.status === 'Dismissed') {
+      res.status(400).json({ message: 'Cannot update details on a Closed or Dismissed finding' });
+      return;
+    }
+
+    // Auth: reporter OR follow-up assignee OR reviewer (same-division Mgr / Director).
+    const isReporter = finding.reportedByUserId === userId;
+    const isAssignee = finding.followUpTasks.some((t) => t.assignedToUserId === userId);
+    const isReviewer = isFindingReviewer(req.user!) && (await assertManagerDivisionScope(prisma, req.user!, id));
+    if (!isReporter && !isAssignee && !isReviewer) {
+      res.status(403).json({ message: 'You do not have access to update this finding' });
+      return;
+    }
+
+    // Validate taxonomy (ATA + hazard tags) and the optional aircraft registration.
+    const tagIds = await validateTaxonomyFields(prisma, ataChapterId, hazardTagIds);
+    if (aircraftRegistrationCode) {
+      const reg = await prisma.aircraftRegistration.findUnique({
+        where: { registration: aircraftRegistrationCode },
+        select: { registration: true },
+      });
+      if (!reg) {
+        res.status(400).json({ message: `Unknown aircraft registration: ${aircraftRegistrationCode}` });
+        return;
+      }
+    }
+
+    // Scalar FKs set directly (matching createFindingService) via the unchecked
+    // update input. Only keys present in the body are touched.
+    const data: Prisma.FindingUncheckedUpdateInput = {};
+    if (ataChapterId !== undefined) data.ataChapterId = ataChapterId ?? null;
+    if (aircraftRegistrationCode !== undefined) data.aircraftRegistrationCode = aircraftRegistrationCode || null;
+    if (regulatoryReference !== undefined) data.regulatoryReference = regulatoryReference || null;
+    if (fieldId !== undefined) data.fieldId = fieldId || null;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (tagIds !== null) {
+        await replaceHazardTags(tx, id, tagIds);
+      }
+      const result = await tx.finding.update({ where: { id }, data });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.DETAILS_UPDATED,
+        userId,
+        `Details updated on Finding #${id}`,
+        {
+          findingId: finding.id,
+          ...(ataChapterId !== undefined ? { ataChapterId } : {}),
+          ...(tagIds !== null ? { hazardTagIds: tagIds } : {}),
+          ...(aircraftRegistrationCode !== undefined ? { aircraftRegistrationCode } : {}),
+          ...(regulatoryReference !== undefined ? { regulatoryReference } : {}),
+          ...(fieldId !== undefined ? { fieldId } : {}),
+        }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
+    console.error('Error updating finding details:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PUT /api/findings/:id/due-date ───────────────────────────────────────────
+// Director-only: change a finding's review/SLA due date after it has been set,
+// with a mandatory reason. Dual-writes a DUE_DATE_UPDATED event. The "overdue"
+// status is derived on read (computeDueDateBreached) from the new date, so a
+// future date clears the badge automatically — no stored flag to reset. The
+// append-only DUE_DATE_BREACHED audit row is intentionally left untouched.
+export const updateFindingDueDate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { userId, role } = req.user!;
+    const { dueDate, reason } = req.body ?? {};
+
+    // Director-only by design — narrower than the finding-reviewer set.
+    if (role !== 'Director') {
+      res.status(403).json({ message: 'Only a Director may change a finding due date' });
+      return;
+    }
+
+    if (!dueDate) {
+      res.status(400).json({ message: 'dueDate is required' });
+      return;
+    }
+    const parsedDueDate = new Date(dueDate);
+    if (isNaN(parsedDueDate.getTime())) {
+      res.status(400).json({ message: 'Invalid dueDate' });
+      return;
+    }
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!trimmedReason) {
+      res.status(400).json({ message: 'A reason is required to change the due date' });
+      return;
+    }
+    if (trimmedReason.length > 2000) {
+      res.status(400).json({ message: 'Reason must be 2000 characters or fewer' });
+      return;
+    }
+
+    const finding = await prisma.finding.findUnique({
+      where: { id, deletedAt: null },
+      select: { id: true, status: true, sourceTaskId: true, dueDate: true },
+    });
+    if (!finding) {
+      res.status(404).json({ message: 'Finding not found' });
+      return;
+    }
+    if (finding.status === 'Closed' || finding.status === 'Dismissed') {
+      res.status(400).json({ message: 'Cannot change the due date of a Closed or Dismissed finding' });
+      return;
+    }
+
+    const directorName = await getUserName(userId);
+    const prevDueStr = finding.dueDate ? finding.dueDate.toISOString().slice(0, 10) : 'none';
+    const newDueStr = parsedDueDate.toISOString().slice(0, 10);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id },
+        data: { dueDate: parsedDueDate },
+      });
+      await logFindingAuditAndActivity(
+        tx,
+        finding.id,
+        finding.sourceTaskId,
+        FINDING_EXPANSION_ACTIONS.DUE_DATE_UPDATED,
+        userId,
+        `Due date changed from ${prevDueStr} to ${newDueStr} by ${directorName} — ${trimmedReason}`,
+        {
+          findingId: finding.id,
+          previousDueDate: finding.dueDate?.toISOString() ?? null,
+          dueDate: parsedDueDate.toISOString(),
+          reason: trimmedReason,
+        }
+      );
+      return result;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    if (isHttpError(error)) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
+    console.error('Error updating finding due date:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { FindingDetail, CapaAction, CapaType, CapaLinkRole, CapaTaskLink, TaskEnriched, WorkPackageEnriched } from '../../types';
+import { useState, useEffect, useRef } from 'react';
+import { FindingDetail, CapaAction, CapaType, CapaTaskLink, WorkPackageEnriched } from '../../types';
 import { createCapa, verifyCapa, waiveCapa, deleteCapa, addCapaLink, removeCapaLink, CapaPayload } from '../../api/findingApi';
-import { getTasks } from '../../api/taskApi';
+import { getTaskOptions, TaskOption } from '../../api/taskApi';
 import { getWorkPackages } from '../../api/wpApi';
 import SearchableSelect from '../ui/SearchableSelect';
 import CreateTaskModal from '../tasks/CreateTaskModal';
@@ -12,7 +12,7 @@ import { CapaTypeBadge, CapaStatusBadge } from './FindingBadges';
 import toast from 'react-hot-toast';
 import { apiErrorMessage } from '../../api/errorMessage';
 import { ShieldCheck, Plus, Trash2, CheckCircle2, Ban, Link2 } from 'lucide-react';
-import Link from 'next/link';
+import { useQuickView } from '../quickview/QuickViewProvider';
 
 interface Props {
   finding: FindingDetail;
@@ -73,8 +73,10 @@ function CapaCard({ capa, findingId, isMgrDir, onChanged }: { capa: CapaAction; 
   const [busy, setBusy] = useState(false);
 
   const doVerify = async () => {
+    const note = window.prompt('Effectiveness sign-off — confirm the corrective action was effective and cite the evidence:');
+    if (!note || !note.trim()) return;
     setBusy(true);
-    try { await verifyCapa(findingId, capa.id); toast.success('CAPA verified'); onChanged(); }
+    try { await verifyCapa(findingId, capa.id, note.trim()); toast.success('CAPA verified'); onChanged(); }
     catch (err) { toast.error(apiErrorMessage(err, 'Failed to verify')); }
     finally { setBusy(false); }
   };
@@ -137,6 +139,7 @@ function CapaLinkedItemsList({
 }) {
   const [busy, setBusy] = useState(false);
   const [addingLink, setAddingLink] = useState(false);
+  const { openTask, openWp } = useQuickView();
 
   const doRemove = async (linkId: number) => {
     if (!window.confirm('Remove this linked item?')) return;
@@ -152,17 +155,19 @@ function CapaLinkedItemsList({
         <div key={link.id} className="flex items-center justify-between gap-2 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1">
             <Link2 className="w-3 h-3" />
-            <span className="font-medium text-slate-400 uppercase">{link.role}</span>
+            <span className={`font-medium uppercase ${link.mandatory ? 'text-amber-600' : 'text-slate-400'}`}>
+              {link.mandatory ? 'Mandatory' : 'Reference'}
+            </span>
             {link.task && (
-              <Link href={`/dashboard/tasks/${link.task.id}`} className="text-blue-600 hover:underline">
+              <button type="button" onClick={() => openTask(link.task!.id)} className="text-blue-600 hover:underline">
                 {link.task.taskId}
-              </Link>
+              </button>
             )}
             {link.task && <span className="text-slate-300">({link.task.status})</span>}
             {link.wp && (
-              <Link href={`/dashboard/work-packages/${link.wp.id}`} className="text-blue-600 hover:underline">
+              <button type="button" onClick={() => openWp(link.wp!.id)} className="text-blue-600 hover:underline">
                 {link.wp.wpId}
-              </Link>
+              </button>
             )}
             {link.wp && <span className="text-slate-300">({link.wp.status})</span>}
           </span>
@@ -192,19 +197,19 @@ function CapaLinkForm({
 }: {
   findingId: number; capaId: number; existingItems: CapaTaskLink[]; onCancel: () => void; onSaved: () => void;
 }) {
-  const [role, setRole] = useState<CapaLinkRole>('EXECUTION');
+  const [mandatory, setMandatory] = useState(true);
   const [refType, setRefType] = useState<'task' | 'wp'>('task');
   const [refId, setRefId] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const [tasks, setTasks] = useState<TaskEnriched[]>([]);
+  const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [wps, setWps] = useState<WorkPackageEnriched[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showWpModal, setShowWpModal] = useState(false);
 
   useEffect(() => {
-    Promise.all([getTasks(), getWorkPackages()])
+    Promise.all([getTaskOptions(), getWorkPackages()])
       .then(([t, w]) => { setTasks(t); setWps(w); })
       .finally(() => setLoadingOptions(false));
   }, []);
@@ -215,9 +220,22 @@ function CapaLinkForm({
     setRefId('');
   };
 
+  // Server-side task search (debounced): the option list is capped, so as the user
+  // types we re-query rather than filtering only the loaded page. WPs are small and
+  // fully loaded, so they keep the built-in client-side filter.
+  const taskSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleTaskQuery = (q: string) => {
+    if (refType !== 'task') return;
+    if (taskSearchTimer.current) clearTimeout(taskSearchTimer.current);
+    taskSearchTimer.current = setTimeout(() => {
+      getTaskOptions(q.trim() || undefined).then(setTasks).catch(() => {});
+    }, 300);
+  };
+  useEffect(() => () => { if (taskSearchTimer.current) clearTimeout(taskSearchTimer.current); }, []);
+
   const taskOptions = tasks.map((t) => ({
     value: String(t.id),
-    label: `${t.taskId} — ${t.template?.title ?? 'No template'} (${t.status})`,
+    label: `${t.taskId} — ${t.title ?? 'No template'} (${t.status})`,
   }));
   const wpOptions = wps
     .filter((w) => !['Closed', 'Inactive'].includes(w.computedStatus))
@@ -234,7 +252,7 @@ function CapaLinkForm({
     setSaving(true);
     try {
       await addCapaLink(findingId, capaId, {
-        role,
+        mandatory,
         taskId: refType === 'task' ? id : undefined,
         wpId: refType === 'wp' ? id : undefined,
       });
@@ -249,13 +267,12 @@ function CapaLinkForm({
 
   return (
     <div className="mt-2 space-y-2">
-      {/* Row 1: role, type, create shortcuts */}
+      {/* Row 1: mandatory flag, type, create shortcuts */}
       <div className="flex flex-wrap items-center gap-2">
-        <select value={role} onChange={(e) => setRole(e.target.value as CapaLinkRole)}
+        <select value={mandatory ? 'mandatory' : 'reference'} onChange={(e) => setMandatory(e.target.value === 'mandatory')}
           className="text-xs border border-slate-200 rounded px-2 py-1">
-          <option value="EXECUTION">Execution</option>
-          <option value="EFFECTIVENESS">Effectiveness</option>
-          <option value="SUPPORTING">Supporting</option>
+          <option value="mandatory">Mandatory</option>
+          <option value="reference">Reference</option>
         </select>
         <select value={refType} onChange={(e) => handleRefTypeChange(e.target.value as 'task' | 'wp')}
           className="text-xs border border-slate-200 rounded px-2 py-1">
@@ -285,6 +302,7 @@ function CapaLinkForm({
             options={currentOptions}
             value={refId}
             onChange={setRefId}
+            onQueryChange={refType === 'task' ? handleTaskQuery : undefined}
             placeholder={loadingOptions ? 'Loading…' : `Search ${refType === 'task' ? 'tasks' : 'work packages'}…`}
             disabled={loadingOptions}
           />
@@ -302,7 +320,7 @@ function CapaLinkForm({
           onSaved={(id) => {
             setShowTaskModal(false);
             setRefId(String(id));
-            getTasks().then(setTasks);
+            getTaskOptions().then(setTasks);
           }}
         />
       )}

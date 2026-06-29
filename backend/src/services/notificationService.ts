@@ -32,7 +32,10 @@ export type NotificationType =
   | 'TASK_SUBMITTED'
   | 'ESCALATION_QUEUED'
   | 'FINDING_CREATED'
+  | 'FINDING_OVERDUE'
   | 'FEED_ACTIVITY'
+  | 'FEED_MENTION'
+  | 'FEED_DIGEST'
   | 'BLUEPRINT_LAUNCHED'
   | 'TASKS_GENERATED';
 
@@ -122,6 +125,8 @@ function eventKeyOf(input: NotificationInput): NotificationEventKey | null {
     if (input.linkScope === 'TASK') return 'FEED_ACTIVITY_TASK';
     return null;
   }
+  if (input.type === 'FEED_MENTION') return 'FEED_MENTION';
+  if (input.type === 'FEED_DIGEST') return 'FEED_DIGEST';
   return isNotificationEventKey(input.type) ? input.type : null;
 }
 
@@ -276,6 +281,99 @@ export async function notifyFeedWatchers(
   }
 }
 
+/**
+ * Notifies users @mentioned in a feed comment (FEED_MENTION), skipping the author.
+ * Mentions are explicit (the client sends the resolved user ids), so this just
+ * fans out — best-effort, like the other notification helpers. A deep link is set
+ * only for the scopes that have a notification link target (TASK/WP/FINDING);
+ * DIVISION/ORG mentions notify without a link.
+ */
+export async function notifyMentions(
+  client: PrismaLike,
+  mentionUserIds: number[],
+  authorId: number,
+  scope: 'TASK' | 'WP' | 'DIVISION' | 'ORG' | 'FINDING',
+  scopeId: number | null,
+  content: string,
+  authorName: string
+): Promise<void> {
+  try {
+    const recipients = Array.from(new Set(mentionUserIds)).filter((id) => id !== authorId);
+    if (recipients.length === 0) return;
+
+    const linkScope: NotificationLinkScope | null =
+      scope === 'TASK' || scope === 'WP' || scope === 'FINDING' ? scope : null;
+    const linkId = linkScope != null ? scopeId : null;
+
+    const excerpt = content.trim();
+    const body = excerpt.length > 140 ? `${excerpt.slice(0, 140)}…` : excerpt;
+
+    const inputs: NotificationInput[] = recipients.map((userId) => ({
+      userId,
+      type: 'FEED_MENTION',
+      title: `${authorName} mentioned you`,
+      body,
+      linkScope,
+      linkId,
+    }));
+
+    await createNotifications(client, inputs, [authorId]);
+  } catch (err) {
+    console.error('[notifications] notifyMentions failed (non-fatal):', err);
+  }
+}
+
+/**
+ * Daily feed digest (Phase H). For every user who opted in (preferences.feedDigest
+ * === true), counts new non-hidden ORG posts + new posts on their own Division
+ * Board since `since`, and — when there's anything new — sends one FEED_DIGEST
+ * notification. Best-effort; pure counting (no per-user post scan) so it stays
+ * cheap. Run on a 24h interval with since = now − 24h (see index.ts).
+ */
+export async function buildFeedDigests(client: PrismaLike, since: Date): Promise<void> {
+  try {
+    const users = await client.user.findMany({
+      where: { deletedAt: null },
+      select: { id: true, divisionId: true, preferences: true },
+    });
+    const optedIn = users.filter((u) => {
+      const p = u.preferences as { feedDigest?: unknown } | null;
+      return !!p && typeof p === 'object' && (p as { feedDigest?: unknown }).feedDigest === true;
+    });
+    if (optedIn.length === 0) return;
+
+    // Count human COMMENTs only — not the pin/ack/hide/escalation SYSTEM_EVENT
+    // noise that also lands on these feeds (the digest summarises real discussion).
+    const orgCount = await client.feedPost.count({
+      where: { scope: 'ORG', type: 'COMMENT', hiddenAt: null, createdAt: { gt: since } },
+    });
+    const divisionIds = [...new Set(optedIn.map((u) => u.divisionId))];
+    const divGroups = await client.feedPost.groupBy({
+      by: ['scopeId'],
+      where: { scope: 'DIVISION', type: 'COMMENT', scopeId: { in: divisionIds }, hiddenAt: null, createdAt: { gt: since } },
+      _count: { _all: true },
+    });
+    const divCount = new Map(divGroups.map((g) => [g.scopeId, g._count._all]));
+
+    const inputs: NotificationInput[] = [];
+    for (const u of optedIn) {
+      const total = orgCount + (divCount.get(u.divisionId) ?? 0);
+      if (total <= 0) continue;
+      inputs.push({
+        userId: u.id,
+        type: 'FEED_DIGEST',
+        title: `${total} new feed update${total === 1 ? '' : 's'}`,
+        body: 'New activity on the Org Feed and your Division Board in the last 24 hours.',
+        linkScope: null,
+        linkId: null,
+      });
+    }
+    await createNotifications(client, inputs);
+  } catch (err) {
+    console.error('[notifications] buildFeedDigests failed (non-fatal):', err);
+  }
+}
+
 // ─── Retention / housekeeping ────────────────────────────────────────────────
 
 /**
@@ -318,6 +416,27 @@ export async function resolveWpWatchers(client: PrismaLike, wpId: number): Promi
   });
   if (!wp) return [];
   const ids = [wp.creatorId, ...wp.assignments.map((a) => a.userId)];
+  return Array.from(new Set(ids));
+}
+
+/**
+ * Watchers of a finding feed: the reporter, the closer (if any), plus the source
+ * task's watchers (issuer + assignee). Used to scope the realtime feed SIGNAL for
+ * FINDING feeds (M1) — NOT for inbox notifications (findings are intentionally not
+ * in notifyFeedWatchers, which covers only TASK/WP).
+ */
+export async function resolveFindingWatchers(client: PrismaLike, findingId: number): Promise<number[]> {
+  const finding = await client.finding.findUnique({
+    where: { id: findingId, deletedAt: null },
+    select: { reportedByUserId: true, closedByUserId: true, sourceTaskId: true },
+  });
+  if (!finding) return [];
+  const ids = [finding.reportedByUserId, finding.closedByUserId].filter(
+    (id): id is number => typeof id === 'number'
+  );
+  if (finding.sourceTaskId != null) {
+    ids.push(...(await resolveTaskWatchers(client, finding.sourceTaskId)));
+  }
   return Array.from(new Set(ids));
 }
 

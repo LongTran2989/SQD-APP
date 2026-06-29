@@ -13,6 +13,183 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-29 — Authentication Audit + Remediation + `/code-review`
+
+**Branch:** `claude/auth-audit-5dm9ju`
+**Scope:** Manual audit of the authentication surface (`auth.controller.ts`, `auth.middleware.ts`, `auth.routes.ts`, `rateLimit.middleware.ts`, `config/env.ts`, CORS/cookies in `index.ts`, plus the frontend auth flow: `authStore`, `client.ts`, login/update-password/forgot-password/reset-password pages, `useRequireAuth`). Then remediation of an accepted subset, then a high-effort recall-biased `/code-review` of the resulting diff. Pure hardening — **no schema migration, no new privilege keys** (role-elevation / division-scope stay hardcoded per the Phase 7 design).
+**Tests after fixes:** Backend **660/660** (was 649; +4 register-scope tests + 7 security-settings tests across the review and the Part C follow-up). Frontend `tsc --noEmit` clean; ESLint clean on all touched files. Verified live against a Postgres + backend + Next.js (headless-Chromium) sandbox stack.
+
+### Part A — Manual audit findings (remediated this session)
+
+| # | Severity | File / Area | Finding | Status |
+|---|----------|-------------|---------|--------|
+| AU-H1 | **High** | `auth.controller.ts` register/update/reset | No server-side password policy — frontend-only length check, bypassable by any API client. | ✅ Fixed — shared `utils/passwordPolicy.ts` (min 8, ≤72 bytes, letters+numbers) enforced on all three paths; reject `newPassword === oldPassword`. |
+| AU-H2 | **High** | `auth.controller.ts` | No authentication audit trail — only logout wrote `AuditLog`. | ✅ Fixed — `LOGIN_SUCCESS` / `LOGIN_FAILED` (known accounts only) / `USER_REGISTERED` / `PASSWORD_CHANGED` / `PASSWORD_RESET_REQUESTED` / `PASSWORD_RESET` via best-effort `writeAuthAudit`. AuditLog-only (auth events have no Task context — documented Rule-3 exception). |
+| AU-H3 | **High** | `auth.controller.ts` register | No role-elevation / division scope on register — a `user:create` holder could mint any role in any division. | ✅ Fixed — see Part B (AR-1–AR-4) for the hardened final form. |
+| AU-M1 | Medium | `auth.middleware.ts` / `auth.controller.ts` | JWT algorithm not pinned. | ✅ Fixed — `HS256` pinned on sign and verify. |
+| AU-M4 | Medium | `auth.middleware.ts` | Forced-password-change users were 403'd out of `/logout`. | ✅ Fixed — `/logout` added to the forced-change allowlist. |
+| AU-L1 | Low | `auth.controller.ts` register | Optional email never format-validated. | ✅ Fixed — `EMAIL_REGEX` check. |
+| AU-U1 | Low (UX) | `update-password` / `reset-password` | No strength meter / upfront requirements; frontend rule drifted from server. | ✅ Fixed — `PasswordStrength` mirrors the server policy; shared `isPasswordValid()` so client gating matches the server. |
+| AU-U2 | Low (UX/a11y) | login / update / reset | No show/hide password toggle. | ✅ Fixed — reusable `PasswordInput`. |
+| AU-U4 | Low | `forgot-password` | Stale `director@sqd.com` placeholder (a deprecated credential). | ✅ Fixed — `you@example.com`. |
+| AU-U5 | Low (UX) | login | 429 rate-limit collapsed into a generic "connection error". | ✅ Fixed — surfaces the rate-limit message. |
+| AU-M2 | Medium | `rateLimit.middleware.ts` | Auth limiter is in-memory + IP-keyed only; no per-account lockout; multiplies across instances. | ⏭ Deferred (**DEF-8**) — needs Redis-backed store + per-`employeeId` lockout. |
+| AU-M3 | Medium | `auth.controller.ts` forgotPassword | Timing side-channel (DB+hash work only on the existent-email path) enables email enumeration. | ⏭ Deferred (**DEF-9**). |
+| AU-L2 | Low | `auth.controller.ts` cookie opts | `secure`/`sameSite` keyed on `NODE_ENV` alone. | ⏭ Deferred — tie to an explicit deploy flag. |
+| AU-U8 | Low (UX) | `client.ts` / login page | Multi-tab / single-session 401s redirected to `/login` silently with no explanation. | ✅ Fixed (follow-up) — the API client maps session-invalidation 401s to a friendly reason in `sessionStorage`; login shows an amber notice. See "Follow-up implementation" below. |
+| AU-U6/7/9 | Low (UX/a11y) | forced-change logout path, client-only route gate, dead-end success pages | Various smaller UX gaps. | ⏭ Deferred — not in the accepted remediation scope. |
+
+### Part B — `/code-review` (high effort, recall-biased) on the auth diff
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| AR-1 | **High (effectiveness)** | `auth.controller.ts` register + `auth.test.ts` | The division-scope guard was effectively **dead code** (only Director/Admin hold `user:create` by default, both bypass it as global) and its test passed for the wrong reason (403 came from `requirePrivilege`, not the guard). | ✅ Fixed — test grants Manager `user:create` via `PrivilegeConfig` so the guard is actually reached; asserts the guard's message; adds same-division allow + string-coercion cases. |
+| AR-2 | Medium (escalation) | `auth.controller.ts` register | H3 blocked only `Director` creation, not `Admin` (also globally-privileged). | ✅ Fixed — **user-confirmed decision:** only a Director may mint a Director **or** an Admin (`ELEVATED_ROLE_NAMES`). |
+| AR-3 | Medium (robustness) | `auth.controller.ts` register | `divisionId` from the body never coerced — a string spuriously 403'd same-division creators and 500'd the Prisma Int lookup. | ✅ Fixed — `Number()` + positive-integer validation → clean 400. |
+| AR-4 | Medium (altitude) | `auth.controller.ts` register | Inline `role==='Director'||'Admin'` diverged from the shared `hasCrossDivisionReach()` (which also honours `task:assign_any`). | ✅ Fixed — calls `hasCrossDivisionReach(req.user)`. |
+| AR-5 | Low-med (a11y) | `PasswordInput.tsx` | `label htmlFor`/`id` undefined when `label` passed without `id` (every update/reset field) — label not associated. | ✅ Fixed — `useId()` fallback id. |
+| AR-6 | Low-med (a11y) | `PasswordInput.tsx` | Show/hide toggle `tabIndex={-1}` → keyboard-unreachable. | ✅ Fixed — removed. |
+| AR-7 | Low (UX) | `PasswordStrength.tsx` | A >72-byte password showed an all-green checklist + "Strong" but submit was blocked (contradiction). | ✅ Fixed — 72-byte cap is now a visible rule; `isPasswordValid` derives from the rule set; meter never exceeds "Weak" until all rules pass. |
+| AR-8 | Low (robustness) | `auth.controller.ts` logout | The untouched inline `LOGOUT` audit write lacks `writeAuthAudit`'s best-effort try/catch, so an audit failure 500s logout after the session is revoked. | ✅ Fixed (follow-up) — refactored `LOGOUT` to `await writeAuthAudit('LOGOUT', userId)`. |
+| AR-9 | Low (type-safety) | `auth.controller.ts` register | Read actor via `(req as any).user`. | ✅ Fixed — typed `req.user`. |
+| AR-10 | Low | `auth.controller.ts` resetPassword | Policy validated before the token lookup, so a bad token + weak password returns the policy error. | ✔ Accepted-as-is — policy is public; minor, keeps validation ordering uniform with register/update. |
+
+**Cut at the review cap (verified, not actioned):** two equivalent error-message helpers coexist (`apiErrorMessage` / `getApiErrorMessage`); the frontend `PasswordStrength` policy is a deliberate hand-kept mirror of the backend (drift risk); `LOGIN_FAILED` records the victim's `performedByUserId` (plausibly by-design — confirm forensic intent).
+
+### Part C — Follow-up implementation (same session, after the review)
+
+Accepted follow-ups beyond the review table, with a user decision on the multi-tab question.
+
+- **AR-8 — logout audit best-effort:** the inline `LOGOUT` `AuditLog.create` now goes through `writeAuthAudit`, so an audit-store failure can't 500 a logout that already revoked the session.
+- **AU-U8 — sign-out explanation:** `client.ts` maps session-invalidation 401 messages (another tab / another device / disabled account) to a friendly reason stashed in `sessionStorage`; the login page renders it as an amber notice instead of a silent redirect.
+- **Multi-tab question — user decision:** asked whether to add a setting to "allow multiple tab instances." The X-Acting-User-Id guard is a security control (it only blocks a *different* user hijacking a shared-cookie tab; same-user multi-tab already works), so disabling it was advised against. **User chose to expose `ENFORCE_SINGLE_SESSION` in the UI instead** (the right lever for the real "one user, multiple devices" need).
+  - New **Admin/Director-only Security settings tab** + `GET`/`PUT /api/settings/security` (reads/writes the `ENFORCE_SINGLE_SESSION` SystemSetting the auth middleware already consumes; default ON; writes a `SECURITY_SETTING_CHANGED` AuditLog).
+  - New **`settings:security` privilege key** (catalog + `DEFAULT_PRIVILEGES` Director & Admin; configurable in the matrix) gates the endpoint — chosen over reusing `settings:privileges` so Directors (not just Admins) can manage it. **This is the first new privilege key since Phase 7 — note for later: any new role-creation that should manage security must be granted it.**
+- **Tests:** `securitySettings.test.ts` (default-on, persist, audit, 400 non-boolean, 403 without the privilege, 401 unauthenticated, Director-allowed). **Backend 660/660.** Frontend ESLint clean (one justified `eslint-disable react-hooks/set-state-in-effect` for the SSR-safe `sessionStorage` read on login). Verified live via headless Chromium: Security tab renders + toggle PUTs/flips; a session-change 401 surfaces the U8 notice.
+
+**Still deferred after this session (tracked for later):** DEF-8 (Redis-backed + per-account auth rate limiting), DEF-9 (forgot-password timing enumeration), AU-L2 (cookie flags keyed on `NODE_ENV`), AU-U6/U7/U9 (forced-change logout UX, server-side route gating, success-page dead-ends), AU-M3, and the three review-cap items above. None are prod blockers at the current privilege matrix.
+
+---
+
+## Session: 2026-06-28 — Work Assignment Workflow Review (Tasks & WPs)
+
+**Branch:** `claude/review-work-assignment-workflow-jrw9md`
+**Scope:** Manual security/workflow review of the Task + Work Package assignment workflow — `task.controller.ts`, `wp.controller.ts`, `autoGenService.ts`, the task/WP routes, and the privilege model. Root pattern of the findings: a role-level privilege check passes but the **division-scope** or **segregation-of-duties** check that should accompany it is missing. Pure hardening — **no schema migration, no new privilege keys** (division-scope checks stay hardcoded per the Phase 7 design).
+**Tests after fixes:** Backend **635/635** (was 621; +14: 11 task + 3 WP hardening tests; 1 existing WP test re-worded for the new message). Full suite green (29 suites). Includes the follow-up `/code-review` round below.
+
+| # | Severity | File / Endpoint | Finding | Status |
+|---|----------|-----------------|---------|--------|
+| WAW-1 | **High (SoD)** | `task.controller.ts` `reviewTask` | The self-approval guard only fired when the actor was **both** issuer and assignee. A Manager who *performed* a task (assignee) but was not the issuer could approve their own work via `task:review_div`. Violates the aviation-QA "perform ≠ approve" rule. | ✅ Fixed — block any review action when `assignedToUserId === userId`. |
+| WAW-2 | **High (division escalation)** | `wp.controller.ts` `createWorkPackage` | No division-scope check; a Manager with `wp:create` could create a WP (and, via auto-gen, inject tasks) into **any** division. | ✅ Fixed — non-Director/Admin restricted to own division. |
+| WAW-3 | **High (division escalation)** | `task.controller.ts` `createTaskService` | No `targetDivisionId` scope; a Manager could create an Unassigned task aimed at another division (then claimable by that division's Staff). Create-side analogue of DEF-4. | ✅ Fixed — gate cross-division target behind `task:assign_any`. Safe for auto-gen/escalation/WP-bypass callers. |
+| WAW-4 | Medium | `wp.controller.ts` `assignUserToWp` | Division check keyed on the `'Manager'` role string, so any other non-global role granted `wp:assign` skipped it. | ✅ Fixed — generic non-Director/Admin own-division check. |
+| WAW-5 | Low-med (SoD) | `task.controller.ts` `rateTask` | A user could rate their own performed task (skews efficiency analytics). | ✅ Fixed — block when `assignedToUserId === userId`. |
+| WAW-6 | Medium (defense-in-depth) | `wp.controller.ts` `updateWorkPackageStatus` | The non-creator `wp:manage_status` path had no division scope. Not reachable by default roles (only Director/Admin hold the key), but unsafe if granted to a scoped role. | ✅ Fixed — own-division check on the privilege path. |
+| WAW-7 | Medium | `task.controller.ts` `updateTaskWp` | A task could be linked to a WP in another division. | ✅ Fixed — WP division must match the task's target division unless `task:assign_any`. |
+| WAW-8 | Low-med (SoD) | `task.controller.ts` `decideDeadlineExtension` | The requester of an extension (e.g. the issuer, who is also a reviewer) could approve their own request. | ✅ Fixed — block when `extension.requestedBy === userId`. |
+| WAW-9 | Low (gap) | `assignTask`/`selfAssignTask`/`reassignTask` | Tasks carry a required `skillLevel` (0–4) that is never enforced against the assignee. | ⏭ Deferred (new **DEF-7**) — `User` has no competency field; needs a migration + seed + UI. |
+| WAW-10 | Low | `task.controller.ts` `setDeadline` / `createTask` / `createQuickTask` | No "deadline in the future" validation — a past deadline could be set, instantly marking the task Overdue. | ✅ Fixed — reject deadlines before start-of-today on the human-facing paths (service/auto-gen stay permissive). |
+| WAW-11 | Low (abuse) | `task.routes.ts` / `wp.routes.ts` | Only the comment route was rate-limited; create/assign/save-data/etc. were unthrottled (e.g. 512 KB `saveTaskData` payloads). | ✅ Fixed — shared per-user `createMutationRateLimiter` on all mutating task/WP routes (auto-disabled under test). |
+| WAW-12 | Low (correctness) | `task.controller.ts` `createTask` handler | The handler silently dropped `title` (the service supports it; only Quick Task could set one). | ✅ Fixed — destructure + length-guard + pass through. |
+| WAW-13 | Info | `getTaskById` / `getTaskActivity` / `getWorkPackages` | Full transparency: any authenticated user reads all task data / WP detail cross-division. | ✔ Accepted-as-is — intentional transparency model (see DEF-6); flagged as a conscious risk acceptance. |
+
+**Related deferrals unchanged:** DEF-3 (`transferIssuerRights` target division scope) and DEF-4 (`assignTask` on a task targeted at another division) were **not** touched by this pass — WAW-3 closes only the *create* side; the *assign-existing* side of DEF-4 remains open pending product confirmation.
+
+### Follow-up `/code-review` (high effort, recall-biased) — on the WAW diff
+
+Reviewed the hardening diff itself; 4 findings, all actioned.
+
+| # | Severity | File / Endpoint | Finding | Status |
+|---|----------|-----------------|---------|--------|
+| WAW-R1 | Medium (functional/UX) | `task.routes.ts` | One shared 30/min limiter covered all 18 task-mutation routes as a single combined bucket — a Director/Manager doing a batch of reviews/assignments, or frequent `saveTaskData` autosaves, could hit 429. | ✅ Fixed — `saveTaskData` gets its own generous bucket (240/min); the shared action limiter ceiling raised to 90/min. |
+| WAW-R2 | Low-med (regression) | `task.controller.ts` `updateTaskWp` | `targetDivisionId` is nullable (`Int?`); the new check `wp.divisionId !== task.targetDivisionId` made `!== null` always true, so a null-target task could no longer be linked by a non-`assign_any` actor. | ✅ Fixed — `task.targetDivisionId != null` guard; null-target tasks stay freely linkable. Test SR-11. |
+| WAW-R3 | Low (TZ edge) | `task.controller.ts` `pastDeadlineError` | Compared a UTC-midnight date-only deadline against local `startOfToday()`, wrongly rejecting a same-day deadline on a negative-UTC-offset server. | ✅ Fixed — compare UTC epoch-days (TZ-independent); `setDeadline` reuses the helper. Test SR-10. |
+| WAW-R4 | Medium (altitude/maintainability) | `wp.controller.ts` + `task.controller.ts` | The division-scope idiom was copy-pasted at 5 sites with two divergent signals (task `assign_any` vs WP role-string), risking inconsistent cross-division reach for custom roles and drift. | ✅ Fixed — extracted `hasCrossDivisionReach` (`utils/privilegeAccess.ts`); all 5 sites call it. Director/Admin or any role with `task:assign_any` now have consistent reach across tasks and WPs. |
+
+---
+
+## Session: 2026-06-23 — Database Architecture Review + Remediation (Phases 1–5) + Post-Phase-5 Code Review
+
+**Branch:** `claude/relaxed-lamport-sst3dn` (commits for Phases 1–5 + the review-fix commit).
+**Scope:** A senior-architect review of `schema.prisma` + the data-access layer, then a phased remediation, then a high-effort `/code-review` of the resulting diff. Two parts below.
+**Tests after fixes:** Backend 595/595 (was 582; +13). Frontend `tsc --noEmit` clean, `next build` ✓, lint net-improved (123→121 problems; residual `set-state-in-effect` are the pre-existing project pattern).
+
+### Part A — Architecture review findings (remediated across Phases 1–5)
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| B1 | **High (active 500)** | `dashboard.controller.ts` `getFeed` | Selected the non-existent `Finding.findingId` column; findings DO write `scope:'FINDING'` feed posts (`findingService`), so the dashboard feed threw `PrismaClientValidationError` for any user with a reported finding. No dashboard test existed. | ✅ Fixed (Phase 1) — drop the bad select; new `dashboard.controller.test.ts` reproduces + guards. |
+| P1 | High (perf) | `dashboard.controller.ts` `getSummary` | 8+ independent `count()` queries run serially per role branch. | ✅ Fixed (Phase 2) — `Promise.all` per cluster. |
+| P2 | Low (perf) | `task.controller.ts` `taskInclude()` | Proposed narrowing `timeBooking` JSON. | ✔ Accepted-as-is / **not done** — verified it would strip `assigneeEntry`/`collaborators` that `TimeBookingPanel` reads on the detail page (shared 21-site helper incl. `getTaskById`). |
+| I1 | Medium (perf) | `Finding` model | Only one composite index; hot status/division/reporter reads fell back to seq scans. | ✅ Fixed (Phase 3) — 3 composites (all trailing `deletedAt`) + migration `20260623000000`. |
+| D1 | Medium (integrity) | `Task/Finding/WorkPackage.status`, `Finding.severity` | Free-text status/severity, app-validated only; schema comments already drifted (e.g. dead `'Approved'`). | ✅ Fixed (Phase 4a) — CHECK constraints (migration `20260623000100`) + dead-`'Approved'` cleanup (9 read-filters) + comment fixes + proof test. |
+| D2 | Low (hardening) | `FindingLink` | No DB guard against a self-referential link. | ✅ Fixed (Phase 4a) — `CHECK (fromFindingId <> relatedFindingId)`; app already enforced it (`findingLink.controller.ts:64`), so belt-and-suspenders. |
+| B2 | Medium (compliance/UX) | `Finding` model | No human-readable business code (unlike Task/WP/Template); root cause of the B1 confusion. | ✅ Fixed (Phase 4b) — `Finding.findingId` (`FND-000001`, advisory-locked global sequence) + backfill migration `20260623000200` + wired into create path, feed label, 5 frontend display sites. |
+| — | High (scale) | `getTasks`/`getMyTasks`/`getUnassignedTasks` | Unbounded list scans; frontend pulled the whole table to filter/count client-side. | ✅ Fixed (Phase 5) — server-side pagination `{tasks,total,page,pageSize}` + `/tasks/stats`, `/tasks/assignees`, `/tasks/options`; tasks page reworked; pickers bounded. |
+
+### Part B — Post-Phase-5 `/code-review` (high effort, recall-biased)
+
+User triaged: fix #1, #4, #5, #6; accept #3; #2 is a deploy-pipeline question (flagged, not code).
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| PR5-1 | Medium (regression) | `work-packages/[id]/page.tsx`, `CapaPanel.tsx` | Slim/bounded task pickers (cap 100, no search) could not reach tasks beyond the first page. | ✅ Fixed — `SearchableSelect` gains optional `onQueryChange`; CapaPanel re-queries `getTaskOptions(search)` (debounced); WP "Add existing task" modal gains a search box that refetches `getTaskList({search})`. |
+| PR5-2 | Medium (deploy) | `migrations/20260623000100…` | CHECK constraints + `findingId` backfill live only in raw migration SQL, which `db push` never applies; if prod is provisioned via `db push` (like the test setup; no `migrate deploy` script / `migration_lock.toml`), D1 integrity + backfill silently don't ship. | ✅ **Resolved (2026-06-23)** — investigated with a throwaway PG cluster: discovered the migration history could not rebuild from empty at all (`0_init` covered 23/45 tables; an `ALTER "CapaAction"` sorted before its `CREATE`). User confirmed pre-prod → **squashed to a clean baseline**: `0_init` (45 tables from `schema.prisma`) + `…000100` (the 5 CHECK constraints, the only non-schema-expressible objects; runtime `findingId` needs no DB sequence — `generateFindingId` uses `pg_advisory_xact_lock` + max-query). Added `migration_lock.toml`, `migrate:deploy`/`migrate:dev`/`migrate:status` scripts, and `prisma/migrations/README.md`. Validated: `migrate deploy` on empty → clean (2 migrations, 5 constraints, "up to date"); `migrate diff` → no drift. Deploy via `migrate deploy` against a fresh DB. |
+| PR5-3 | Low (removed behavior) | `task.controller.ts` `buildTaskFilters` | Server search matches taskId + template title only; the old client search also matched `schemaSnapshot[0].label`. | ✔ Accepted-as-is — fuzzy extra; matching JSON field labels server-side isn't worth the complexity. |
+| PR5-4 | Low-med (staleness) | `tasks/page.tsx` | Tab badges fetched once on mount; only refreshed on a self-assign failure. | ✅ Fixed — `getTaskStats`/`getTaskAssignees` also refresh on tab navigation. |
+| PR5-5 | Low (efficiency) | `tasks/page.tsx` | Filter change while page>1 fired a wasted request for the stale page (+ empty flash) before the reset effect. | ✅ Fixed — render-time "adjust state when a value changes" (`prevFiltersKey` in state) snaps page to 1 before the fetch runs. |
+| PR5-6 | Low (UX) | `tasks/page.tsx` | Empty-state always showed "No tasks found"; the "adjust filters" hint was dead. | ✅ Fixed — `hasActiveFilters` distinguishes empty scope from filtered-to-zero. |
+
+**Note:** `CLAUDE_HANDOVER.md` updated to **rev 18** (2026-06-24) after the user verified the branch locally (595/595, build clean, DB CHECK constraint confirmed at runtime): new §2 entry (Phases 1–5 + pagination + squash), Test Suite count, gotchas #56–58, §12.5 deploy steps, and a new **§12.8 "Pre-deploy items to MONITOR & RECTIFY"** (most important: the test-DB/prod CHECK-constraint parity gap). `CLAUDE.md` master-user line corrected (employeeId `VAE00071` / `Abc@12345`). **Deploy flag (PR5-2): RESOLVED** — migration history squashed to a clean baseline + `migrate deploy` workflow wired and validated (see PR5-2 row above and `backend/prisma/migrations/README.md`).
+
+---
+
+## Session: 2026-06-22 — Quick-View Enrichment + Back-to-Finding Code Review
+
+**Branch reviewed:** `claude/nice-darwin-nwyj81` (commit `251ebad` — `GET /tasks/:id/related-findings`, task quick-view enrichment, reusable finding quick-view drawer, CAPA-aware back-link, +7 tests).
+**Scope:** xhigh-effort `/code-review` of the `HEAD~1..HEAD` diff (9 files). 6 findings. User triaged: fix #1 (correctness) + #5 (Rule 2), then directed "fix all maintainability and performance" → also #3 (perf) + #4 (maintainability); #2 and #6 accepted-as-is.
+**Tests after fixes:** Backend 582/582 (was 579; +3 covering the lightweight summary endpoint). Frontend `tsc --noEmit` clean, `next build` ✓, changed files ESLint-clean (the residual `set-state-in-effect` at `tasks/[id]/page.tsx:87` is the pre-existing `loadTask()` pattern, untouched).
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| QV-1 | Medium (regression) | `tasks/[id]/page.tsx` back-link | Back-link was sourced only from the async, error-swallowed `relatedFindings` fetch, so a follow-up task lost the link that `task.parentFinding` already provided synchronously — on any transient `getRelatedFindings` failure, and flashed it in late on every load. | ✅ Fixed — `relatedFindings[0] ?? task.parentFinding ?? linkedFindings[0] ?? null`: keeps CAPA coverage primary, falls back to in-hand data. |
+| QV-2 | Low (coupling) | `RaiseFindingPanel.tsx` | Now calls `useQuickView()`, which throws if the panel is rendered outside a `QuickViewProvider`. | ✔ Accepted-as-is — both call sites are under the dashboard layout (provider mounted); consuming the QuickView context is the established pattern for every quick-view consumer (decoupling via props would make this the lone exception), and crash-on-misuse is the standard React context contract. |
+| QV-3 | Low (perf + side-effect) | `FindingQuickViewPanel.tsx` → `getFindingById` | The lightweight preview fetched the full detail payload (RCA/CAPA/links/responseActions/**trend**) and, worse, triggered `ensureDueDateBreachLogged` — a **write/audit side-effect on a GET** — on every preview / duplicate-peek. | ✅ Fixed — new side-effect-free `GET /findings/:id/summary` (lean projection, no trend, no breach logging); drawer + `getFindingSummary` consume it. +3 tests (S01–S03). |
+| QV-4 | Low (maintainability) | `quickview/*Panel.tsx` | `Row` + `formatDate` were copy-pasted across the 3 drawers, and the "latest activity" list was duplicated between the Task and Finding panels. | ✅ Fixed — extracted `quickview/shared.tsx` (`QvRow`, `formatQvDate`, `QvFeed`); all three panels now consume it. |
+| QV-5 | Very low (Rule 2) | `task.controller.ts` `getRelatedFindings` | `followUpTasks: { some: { id } }` relation filter omitted `deletedAt: null` (Rule 2 — "no exceptions"). Not exploitable (the id is a verified-live task and only Findings are returned), but a literal breach. | ✅ Fixed — `{ some: { id, deletedAt: null } }`. |
+| QV-6 | Info (behavior) | `tasks/[id]/page.tsx` back-link | Primary related finding is chosen by ascending id, so a task that is both a follow-up of A and CAPA-linked to an older B points "Back to Finding #B". | ✔ Accepted-as-is — still a valid related finding and "(+N more)" flags the rest; parent-first ordering would reintroduce the chance of linking a soft-deleted parent that the related-findings query correctly excludes. |
+
+**Note:** `CLAUDE_HANDOVER.md` §2/§8 updated 2026-06-24 (rev 18) — see the session immediately above.
+
+---
+
+## Session: 2026-06-22 — Quick-View Enrichment + Back-to-Finding Security Review
+
+**Branch reviewed:** `claude/nice-darwin-nwyj81`, cumulative diff back to merge-base `519563d` (covers both `251ebad` and the `1ecd3de` code-review fix pass above).
+**Scope:** `/security-review` 3-phase methodology (Phase 1 identification sub-agent → Phase 2 per-candidate false-positive filter → Phase 3 keep confidence ≥8). Phase 1 sub-agent scrutinized: `PUT /findings/:id/details`, `PUT /findings/:id/due-date`, `POST /findings` (`duplicateOfFindingId` path), `GET /findings/duplicate-candidates`, the new `GET /findings/:id/summary`, the new `GET /tasks/:id/related-findings`, the CAPA-link refactor, and all new/changed frontend components for XSS sinks.
+**Result:** **Zero candidate vulnerabilities identified** — Phase 1 returned no findings, so Phases 2–3 (parallel false-positive filtering) were not needed per the skill's own instructions. Verified directly: authz present on every new/changed mutation endpoint; all new read endpoints are consistent with the documented transparent-viewing model (cross-division read is intentional, not a vuln — see `CLAUDE.md`); no SQL injection (all `$queryRaw` parameterized); no `dangerouslySetInnerHTML`/`innerHTML`/`bypassSecurityTrust*` in any new component; every new `:id` route param is NaN-guarded before use. One non-vulnerability note: `updateCapa`'s `ownerUserId` FK handling was flagged for code-quality attention but is not a security issue.
+**Status:** ✔ No findings — nothing to fix or defer.
+
+---
+
+## Session: 2026-06-21 — Finding Workflow Hardening (P1–P4) Code Review
+
+**Branch reviewed:** `claude/nice-darwin-nwyj81` (commits `6facc70`, `263eef1`, `6343051`, `b7847fb` — the severity-configurable closed loop, SLA due dates, proactive overdue alerts, stuck-finding surface, CAPA-link simplification, and schema/feed cleanup).
+**Scope:** High-effort `/code-review` of the P1–P4 diff (scoped to the 4 commits; the unrelated PR #47 files in `main...HEAD` were excluded). User triaged: apply #1, #2, #3, #5; keep #4.
+**Tests after fixes:** Backend 566/566 (was 553; +13 covering duplicate handling, detail enrichment, invalid dueDate). Frontend `tsc --noEmit` clean; new components ESLint-clean (the only residual `set-state-in-effect` warnings are the pre-existing project-wide pattern).
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| CR-1 | Medium (soft-delete leak, Rule 2) | `finding.controller.ts` `notifyFindingOverdue` | The overdue notifier re-queried the finding with `findUnique({ where: { id } })` — **no `deletedAt: null`** — so a soft-deleted finding could still fire reviewer notifications. | ✅ Fixed — re-query removed entirely; the notifier now takes the already-loaded `{ id, targetDivisionId, description }` from the soft-delete-filtered parent reads (`getFindingById` / `listFindings`). |
+| CR-2 | Low (robustness) | `finding.controller.ts` `reviewFinding` | A malformed `dueDate` string produced a truthy `Invalid Date` that bypassed the SLA auto-fill + mandatory checks, then threw `RangeError` at `.toISOString()` → 500. | ✅ Fixed — `isNaN(parsedDueDate.getTime())` → 400. Regression test F24b. |
+| CR-3 | Low (efficiency) | `finding.controller.ts` `ensureDueDateBreachesLogged` | The batch breach loop re-queried each finding inside `notifyFindingOverdue` despite already holding the rows. | ✅ Fixed — folded into CR-1: loaded rows passed through, per-finding round-trip removed. |
+| CR-4 | Info (behavior change) | `findingService.ts` `logFindingAuditAndActivity` | P4 moved the FINDING-scope feed write inside the business `$transaction` (previously a best-effort, swallowed call), so a feed-post failure now rolls back the operation. | ✔ Accepted-as-is — correct per Rule 3 (atomic dual-write); `createFeedPost` is a plain insert + best-effort NOTIFY, so it only fails on a real DB error, where rollback is the audit-safe outcome. This change is what fixed RCA/CAPA/Link events silently missing from the finding timeline. |
+| CR-5 | Low (type completeness) | `frontend/src/types/index.ts` `NotificationType` | The frontend union omitted `FINDING_OVERDUE` (added to the backend union in P2), leaving the types out of sync. | ✅ Fixed — added `'FINDING_OVERDUE'`. |
+
+**Follow-up work shipped in the same session (user-requested, not review findings):** raise-time duplicate detection (`GET /findings/duplicate-candidates`) + raiser mark-as-duplicate (`duplicateOfFindingId` parks the new finding as a `Dismissed` `DUPLICATE` of an active same-division canonical); post-raise detail enrichment (`PUT /findings/:id/details`, reporter/assignee/reviewer); follow-up-task quick-view drawer + history-independent "Back to Finding" link. Pending user confirmation before `CLAUDE_HANDOVER.md` feature-status update (Rule 12).
+
+---
+
 ## Session: 2026-06-21 — Doc/Code Consistency Audit + Soft-Delete Filter Investigation
 
 **Branch reviewed:** `claude/adoring-faraday-cwqbne` (working tree).
@@ -134,6 +311,7 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 |----|----------|------|---------------------|
 | DEF-5 | Low | No `PUT` endpoint for `FILE_UPLOAD_CONFIG`; "Admin-configurable" (Rule 10) currently means a manual DB upsert. | Settings-panel endpoint is a follow-up feature, not a review bug. Default policy + clamp behave correctly meanwhile. |
 | DEF-6 | Low | `download`/`list` are auth-only (no per-entity scope), consistent with the app's transparency model. If finding/task/WP visibility is ever tightened, attachments won't follow until a scope check is added at `assertEntityExists`. | Matches current product design (`buildFindingScope → {}`); revisit only if visibility is locked down. |
+| DEF-7 | Low (feature) | Skill gating not enforced: tasks carry a required `skillLevel` (0–4) but `assignTask`/`selfAssignTask`/`reassignTask` never compare it to the assignee — `User` has no competency field. (WAW-9, 2026-06-28.) | Needs a schema migration (`User.skillLevel` or a competency model) + seed + UI; out of scope for a hardening pass. |
 
 ---
 
@@ -223,3 +401,26 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 | 2026-06-10 | `claude/vigilant-mendel-3sajt0` | Phase 8 Time-Booking Workflow Refinements | `/code-review`. Findings: LOGGABLE_STATUSES constant, `In Review` banner copy. All fixed. No new tests (UX-only changes). |
 | 2026-06-12 | `claude/exciting-darwin-gyohuf` | Phase 7 Deferred Items (User Management, Settings, Taxonomy) | `/security-review` + `/code-review`. Findings: session revocation on credential change (H1), route-level privilege guard (M1), default password not disclosed in UI (M2), whitespace-only name validation (M3), max-length on taxonomy inputs (L1), numeric divisionId validation (L2), Prisma singleton (L3). All fixed. |
 | 2026-05-29 | Pre-Phase-5 | Auth controller | Manual audit. 5 findings (updatePassword, enumeration, rate limiting, JWT fallback, plaintext token). All fixed in `claude/amazing-ritchie-soasus`. See §11 of `CLAUDE_HANDOVER.md`. |
+
+---
+
+## Session: 2026-06-28 — Feed workstream `/code-review` (Phases A–H)
+
+**Branch:** `claude/feed-features-audit-iac2uw`
+**Scope:** High-effort, recall-biased `/code-review` of the entire feed improvement workstream (~3,200 lines / 44 files): comment length cap + per-user write rate-limit + disseminate validation (A), keyset pagination + filters (B), scoped SSE feed signals (C), soft-hide + pinning (D), @mentions (E), inline `#CODE` entity links (E.2), comment attachments (F), acknowledgement/read-receipts (G), feed search + daily digest (H).
+**Tests after fixes:** Backend **621/621** (was 619; +2 regression tests). Frontend `tsc --noEmit` + lint clean on changed files. Verified live against a Postgres + backend + Next.js sandbox stack.
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| F1 | Medium (correctness) | `frontend/.../feed/CommentContent.tsx` | `entityLinks[code]` on a plain-object map resolves reserved keys (`#toString`, `#constructor`, `#__proto__`…) to inherited prototype members, rendering `<Link href="undefined/undefined">`. | ✅ Fixed — `Object.prototype.hasOwnProperty.call(entityLinks, code)` guard. |
+| F2 | Medium (moderation bypass) | `feed.controller.ts` `ackPost` | No `hiddenAt` guard, so a Director-hidden comment could be acknowledged and re-surfaced via a SYSTEM_EVENT (inconsistent with `pinPost`). | ✅ Fixed — select `hiddenAt`, reject hidden with 400. Test added. |
+| F3 | Medium (correctness) | `notificationService.ts` `buildFeedDigests` | Digest counts filtered only `scope+hiddenAt+createdAt`, so pin/ack/hide SYSTEM_EVENT noise inflated "N new feed updates". | ✅ Fixed — added `type:'COMMENT'` to both count queries. Test strengthened (SYSTEM_EVENT excluded). |
+| F4 | Low-med (amplification) | `feedService.ts` `resolveMentions` | Unbounded `mentionUserIds` → huge `IN` query + mass notification fan-out. | ✅ Fixed — `MAX_MENTIONS_PER_COMMENT = 50` cap. |
+| F5 | Low (consistency) | `feed.controller.ts` `getPinnedFeed` | Omitted the `mentions` enrichment `getFeed` has, so pinned comments dropped their @mention line. | ✅ Fixed — mirror getFeed's mention resolution. Test added. |
+| F6 | Low (edge) | `escalation.controller.ts` DISSEMINATE | `taggedDivisionIds` filter `typeof n === 'number'` admitted non-integers (`3.5`) into an `Int` `IN`. | ✅ Fixed — `&& Number.isInteger(n)` (matches `resolveMentions`). |
+| F7 | Low (info shape) | `feed.controller.ts` getFeed/getPinnedFeed | `...p` spread emits internal columns (`hiddenReason`, `hiddenByUserId`, `pinnedByUserId`, raw `metadata`). | ✔ Accepted-as-is — `hiddenReason` only reaches Director/Admin (hidden posts are gated); who-moderated is already public via the SYSTEM_EVENT. Fix's fragility (destructure/lint) not worth near-zero value. |
+| F8 | Low-med (UX) | `frontend/.../feed/FeedPanel.tsx` | A pinned comment rendered in both the pinned strip and the inline list, with two independent moderation menus. | ✅ Fixed — exclude `pinnedIds` from `visiblePosts`. |
+| F9 | Low (cleanup) | `task.controller.ts` | `MAX_COMMENT_LEN = 5000` duplicated the "centralised" `feedService` constant. | ✅ Fixed — import `MAX_COMMENT_LEN` from `feedService`. |
+| F10 | Low (UX) | `frontend/.../feed/FeedPanel.tsx` | Posting-with-attachments / moderation calls `reloadFeed()`, discarding loaded "Load earlier" history. | ⏭ Deferred — same tradeoff as the existing moderation/escalation reload paths; the correct fix (append the enriched new comment) is fiddly for marginal benefit. |
+
+**Cut at the review cap (low severity, not actioned):** `MentionField` keeps stale `q/results/open` after a post; task-feed auto-scroll edge cases; a `cursor===null` "Load earlier" wedge when `activities` is momentarily empty; minor efficiency nits (entity/attachment/ack `Promise.all` issued after the author await; sequential `notifyFeedWatchers`→author→`notifyMentions`).

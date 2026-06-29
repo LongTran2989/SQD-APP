@@ -210,14 +210,13 @@ export const getTimeBookingAnalytics = async (req: Request, res: Response): Prom
 // privilege-gated, RBAC division-scoping pushed into the Prisma WHERE clause
 // (never post-fetch), single findMany → single-pass JS aggregation.
 //
-// RBAC note: unlike the Findings *list* (open read access via buildFindingScope),
-// analytics intentionally scopes Managers to their own division — same model as
-// time-booking analytics. See CLAUDE_HANDOVER.md.
+// RBAC note: findings analytics is organisation-wide transparent, consistent with
+// the open Findings list/detail (buildFindingScope → {}). Any role with
+// analytics:view sees org-wide finding data; the optional ?divisionId param lets
+// anyone narrow to a single division. See CLAUDE_HANDOVER.md.
 
 export const getFindingsAnalytics = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { role, divisionId } = req.user!;
-
     // Only management roles may view analytics
     if (!hasPrivilege(req.user!, 'analytics:view')) {
       res.status(403).json({ message: 'You do not have permission to view analytics.' });
@@ -256,15 +255,10 @@ export const getFindingsAnalytics = async (req: Request, res: Response): Promise
     const hasDateFilter =
       createdAtFilter.gte !== undefined || createdAtFilter.lte !== undefined || createdAtFilter.lt !== undefined;
 
-    // RBAC division scoping — pushed into the DB WHERE clause so the query never fetches rows
-    // outside the caller's scope. Managers are always constrained to their own division.
-    // Directors/Admins may optionally narrow with the ?divisionId query param.
-    const targetDivisionId: number | undefined =
-      role === 'Manager'
-        ? divisionId
-        : divisionFilter !== undefined
-        ? divisionFilter
-        : undefined;
+    // Findings are organisation-wide transparent, so analytics defaults to all
+    // divisions for every role. The optional ?divisionId param narrows to one
+    // division (available to all roles), pushed into the DB WHERE clause.
+    const targetDivisionId: number | undefined = divisionFilter;
 
     const where: Prisma.FindingWhereInput = {
       deletedAt: null,

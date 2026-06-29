@@ -57,6 +57,18 @@ export const uploadAttachment = (
     .then((r) => r.data);
 };
 
+// Uploads a batch of files against a feed COMMENT (entityType FEED_POST), one at
+// a time so the per-entity quota check sees each prior upload. Returns the created
+// Attachment rows; on a failure the already-uploaded files remain (the comment is
+// already posted). Used by the composers after a comment is created (Phase F).
+export const uploadCommentAttachments = async (postId: number, files: File[]): Promise<Attachment[]> => {
+  const out: Attachment[] = [];
+  for (const file of files) {
+    out.push(await uploadAttachment(file, { entityType: 'FEED_POST', entityId: postId }));
+  }
+  return out;
+};
+
 export const deleteAttachment = (id: number): Promise<{ message: string }> =>
   apiClient.delete(`/attachments/${id}`).then((r) => r.data);
 

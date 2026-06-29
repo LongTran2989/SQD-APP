@@ -1,6 +1,10 @@
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import {
+  FINDING_WORKFLOW_CONFIG_KEY,
+  DEFAULT_FINDING_WORKFLOW_CONFIG,
+} from '../constants/findingWorkflowConfig';
 
 // Hard guard: abort immediately if pointed at anything other than the test DB.
 // This prevents accidentally wiping the dev or production database if someone
@@ -34,6 +38,11 @@ beforeAll(async () => {
     where: { key: 'ENFORCE_SINGLE_SESSION' },
     update: { value: 'false' },
     create: { key: 'ENFORCE_SINGLE_SESSION', value: 'false' }
+  });
+  await prisma.systemSetting.upsert({
+    where: { key: FINDING_WORKFLOW_CONFIG_KEY },
+    update: { value: JSON.stringify(DEFAULT_FINDING_WORKFLOW_CONFIG) },
+    create: { key: FINDING_WORKFLOW_CONFIG_KEY, value: JSON.stringify(DEFAULT_FINDING_WORKFLOW_CONFIG) }
   });
 });
 

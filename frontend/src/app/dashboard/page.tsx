@@ -8,6 +8,7 @@ import { QuickActionBar } from '../../components/dashboard/QuickActionBar';
 import { ActivityFeedWidget } from '../../components/dashboard/ActivityFeedWidget';
 import { EscalationWidget } from '../../components/dashboard/EscalationWidget';
 import { WorkPackageWidget } from '../../components/dashboard/WorkPackageWidget';
+import { StuckFindingsWidget } from '../../components/dashboard/StuckFindingsWidget';
 
 import { CheckCircle2, Clock, AlertTriangle, ShieldCheck } from 'lucide-react';
 import {
@@ -144,6 +145,7 @@ export default function DashboardHome() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column (WPs & Charts) */}
         <div className="lg:col-span-2 space-y-6">
+          <StuckFindingsWidget />
           <WorkPackageWidget wps={wps} isLoading={isLoadingWps} />
         </div>
 

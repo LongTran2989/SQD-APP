@@ -187,6 +187,115 @@ describe('Findings Backend (Phase 6)', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
+  // Group 1b — Raise-time duplicate detection + mark-as-duplicate
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('Duplicate handling', () => {
+    const candidates = (token: string, query: string) =>
+      request(app).get(`/api/findings/duplicate-candidates?${query}`).set('Authorization', `Bearer ${token}`);
+
+    it('DUP01: returns an active finding in the same division + department', async () => {
+      const c = await raiseFinding(staffToken);
+      const res = await candidates(staffToken, `departmentId=${departmentId}&taskId=${sourceTaskId}`);
+      expect(res.status).toBe(200);
+      expect(res.body.map((f: { id: number }) => f.id)).toContain(c.body.id);
+    });
+
+    it('DUP02: missing departmentId → 400', async () => {
+      const res = await candidates(staffToken, `taskId=${sourceTaskId}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('DUP03: excludes a different department, and excludes Dismissed findings', async () => {
+      const c = await raiseFinding(staffToken);
+      // Different department → not returned (here: no other dept seeded, so expect empty)
+      const other = await candidates(staffToken, `departmentId=${departmentId + 99999}&taskId=${sourceTaskId}`);
+      expect(other.body).toHaveLength(0);
+      // Dismiss the candidate → it drops out of the active-candidate list.
+      await request(app).put(`/api/findings/${c.body.id}/dismiss`).set('Authorization', `Bearer ${managerToken}`).send({ reason: 'not valid' });
+      const after = await candidates(staffToken, `departmentId=${departmentId}&taskId=${sourceTaskId}`);
+      expect(after.body.map((f: { id: number }) => f.id)).not.toContain(c.body.id);
+    });
+
+    it('DUP04: raise with duplicateOfFindingId → new finding Dismissed + DUPLICATE link + dual-write', async () => {
+      const canonical = await raiseFinding(staffToken);
+      const res = await raiseFinding(staffToken, { duplicateOfFindingId: canonical.body.id });
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('Dismissed');
+
+      const link = await prisma.findingLink.findFirst({
+        where: { fromFindingId: res.body.id, relatedFindingId: canonical.body.id, linkType: 'DUPLICATE' },
+      });
+      expect(link).not.toBeNull();
+
+      const dismissedAudit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(res.body.id), actionType: 'DISMISSED' } });
+      expect(dismissedAudit).not.toBeNull();
+      const linkedAudit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(res.body.id), actionType: 'FINDING_LINKED' } });
+      expect(linkedAudit).not.toBeNull();
+      // Finding timeline carries the events (FINDING-scope feed post).
+      const feed = await prisma.feedPost.findFirst({ where: { scope: 'FINDING', scopeId: res.body.id } });
+      expect(feed).not.toBeNull();
+    });
+
+    it('DUP05: duplicateOfFindingId not found → 404', async () => {
+      const res = await raiseFinding(staffToken, { duplicateOfFindingId: 999999 });
+      expect(res.status).toBe(404);
+    });
+
+    it('DUP06: duplicateOfFindingId in another division → 400', async () => {
+      const f2 = await prisma.finding.create({ data: { eventType: 'X', description: 'other div', departmentId, status: 'Open', targetDivisionId: division2Id, reportedByUserId: staffId } });
+      const res = await raiseFinding(staffToken, { duplicateOfFindingId: f2.id });
+      expect(res.status).toBe(400);
+    });
+
+    it('DUP07: duplicateOfFindingId that is not active (Closed) → 400', async () => {
+      const fc = await prisma.finding.create({ data: { eventType: 'X', description: 'closed canonical', departmentId, status: 'Closed', targetDivisionId: divisionId, reportedByUserId: staffId } });
+      const res = await raiseFinding(staffToken, { duplicateOfFindingId: fc.id });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 1c — Enrich finding details post-raise (PUT /:id/details)
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('Update finding details', () => {
+    it('DET01: reporter can enrich optional context → 200 + DETAILS_UPDATED audit', async () => {
+      const f = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${staffToken}`).send({ regulatoryReference: 'EASA Part-M', fieldId: 'FLD-1' });
+      expect(res.status).toBe(200);
+      expect(res.body.regulatoryReference).toBe('EASA Part-M');
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(f.body.id), actionType: 'DETAILS_UPDATED' } });
+      expect(audit).not.toBeNull();
+    });
+
+    it('DET02: a non-contributor (other-division manager) → 403', async () => {
+      const f = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${manager2Token}`).send({ regulatoryReference: 'x' });
+      expect(res.status).toBe(403);
+    });
+
+    it('DET03: a same-division reviewer (manager) can enrich → 200', async () => {
+      const f = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${managerToken}`).send({ fieldId: 'FLD-2' });
+      expect(res.status).toBe(200);
+    });
+
+    it('DET04: blocked on a Dismissed finding → 400', async () => {
+      const f = await raiseFinding(staffToken);
+      await request(app).put(`/api/findings/${f.body.id}/dismiss`).set('Authorization', `Bearer ${managerToken}`).send({ reason: 'dup' });
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${staffToken}`).send({ fieldId: 'x' });
+      expect(res.status).toBe(400);
+    });
+
+    it('DET05: unknown aircraft registration → 400', async () => {
+      const f = await raiseFinding(staffToken);
+      const res = await request(app).put(`/api/findings/${f.body.id}/details`).set('Authorization', `Bearer ${staffToken}`).send({ aircraftRegistrationCode: 'ZZ-NOPE' });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
   // Group 2 — List Findings (RBAC scoping)
   // ────────────────────────────────────────────────────────────────────────
 
@@ -284,6 +393,12 @@ describe('Findings Backend (Phase 6)', () => {
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch(/already been reviewed/i);
     });
+
+    it('F24b: a malformed dueDate string → 400 (not a 500 at toISOString)', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1', dueDate: 'not-a-date' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/dueDate/i);
+    });
   });
 
   // ────────────────────────────────────────────────────────────────────────
@@ -306,6 +421,77 @@ describe('Findings Backend (Phase 6)', () => {
       await prisma.finding.update({ where: { id: findingId }, data: { dueDate: new Date(Date.now() + 86400000), status: 'In Progress' } });
       const res = await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${directorToken}`);
       expect(res.body.dueDateBreached).toBe(false);
+    });
+
+    it('F32: first observed breach notifies division reviewers once (idempotent)', async () => {
+      const r = await raiseFinding(staffToken);
+      const findingId = r.body.id;
+      await prisma.finding.update({ where: { id: findingId }, data: { dueDate: new Date(Date.now() - 86400000), status: 'In Progress' } });
+      // Observed by staff (not a reviewer) — the division Manager should be alerted.
+      await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${staffToken}`);
+      let notifs = await prisma.notification.findMany({ where: { userId: managerId, type: 'FINDING_OVERDUE', linkId: findingId } });
+      expect(notifs.length).toBe(1);
+      // A second read must not duplicate the alert (one-time guard).
+      await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${staffToken}`);
+      notifs = await prisma.notification.findMany({ where: { userId: managerId, type: 'FINDING_OVERDUE', linkId: findingId } });
+      expect(notifs.length).toBe(1);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 4b — Director-editable review due date (PUT /:id/due-date)
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('Update due date (Director)', () => {
+    let findingId: number;
+    const future = (days: number) => new Date(Date.now() + days * 86400000).toISOString();
+    beforeEach(async () => {
+      const r = await raiseFinding(staffToken);
+      findingId = r.body.id;
+      // Review so it carries an initial SLA due date (status → In Progress).
+      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1', dueDate: future(7) });
+    });
+
+    it('DD01: Director changes the due date with a reason → 200 + DUE_DATE_UPDATED audit', async () => {
+      const newDue = future(30);
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: newDue, reason: 'Extended after scope review' });
+      expect(res.status).toBe(200);
+      expect(new Date(res.body.dueDate).toISOString().slice(0, 10)).toBe(new Date(newDue).toISOString().slice(0, 10));
+      const audit = await prisma.auditLog.findFirst({ where: { entityType: 'Finding', entityId: String(findingId), actionType: 'DUE_DATE_UPDATED' } });
+      expect(audit).not.toBeNull();
+      expect((audit!.details as any).reason).toBe('Extended after scope review');
+    });
+
+    it('DD02: a Manager cannot change the due date → 403', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${managerToken}`).send({ dueDate: future(30), reason: 'x' });
+      expect(res.status).toBe(403);
+    });
+
+    it('DD03: missing reason → 400', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: future(30) });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/reason/i);
+    });
+
+    it('DD04: malformed dueDate → 400', async () => {
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: 'not-a-date', reason: 'x' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/dueDate/i);
+    });
+
+    it('DD05: cannot change the due date of a Closed finding → 400', async () => {
+      await prisma.finding.update({ where: { id: findingId }, data: { status: 'Closed' } });
+      const res = await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: future(30), reason: 'x' });
+      expect(res.status).toBe(400);
+    });
+
+    it('DD06: extending a breached due date into the future clears the overdue flag on read', async () => {
+      await prisma.finding.update({ where: { id: findingId }, data: { dueDate: new Date(Date.now() - 86400000) } });
+      let g = await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(g.body.dueDateBreached).toBe(true);
+      await request(app).put(`/api/findings/${findingId}/due-date`).set('Authorization', `Bearer ${directorToken}`).send({ dueDate: future(14), reason: 'Granting extension' });
+      g = await request(app).get(`/api/findings/${findingId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(g.body.dueDateBreached).toBe(false);
     });
   });
 
@@ -576,10 +762,13 @@ describe('Findings Backend (Phase 6)', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   describe('Close', () => {
+    // Uses an Observation severity so the finding closes without the graded
+    // closed-loop gate (RCA + verified corrective CAPA), which applies only to
+    // Level 1 / Level 2 per the default FINDING_WORKFLOW_CONFIG.
     async function makePendingVerification(): Promise<number> {
       const r = await raiseFinding(staffToken);
       const findingId = r.body.id;
-      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Level 1' });
+      await request(app).put(`/api/findings/${findingId}/review`).set('Authorization', `Bearer ${managerToken}`).send({ severity: 'Observation' });
       const gen = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: autoCloseTemplateId, title: 'CAR' }] });
       const followUpId = gen.body.createdTasks[0].id;
       await prisma.task.update({ where: { id: followUpId }, data: { assignedToUserId: staffId, status: 'Assigned' } });
@@ -589,26 +778,32 @@ describe('Findings Backend (Phase 6)', () => {
 
     it('F60: cannot close when not Pending Verification → 400', async () => {
       const r = await raiseFinding(staffToken);
-      const res = await request(app).put(`/api/findings/${r.body.id}/close`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${r.body.id}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'Closing out' });
+      expect(res.status).toBe(400);
+    });
+
+    it('F60b: cannot close without a closure note → 400', async () => {
+      const findingId = await makePendingVerification();
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
       expect(res.status).toBe(400);
     });
 
     it('F61: Manager can close a Pending Verification finding directly (no Stage 2 gate)', async () => {
       const findingId = await makePendingVerification();
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'Verified and closed' });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');
     });
 
     it('F62: Staff cannot close → 403', async () => {
       const findingId = await makePendingVerification();
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${staffToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${staffToken}`).send({ closureNote: 'x' });
       expect(res.status).toBe(403);
     });
 
     it('F63: Manager closes → status Closed, closedBy set', async () => {
       const findingId = await makePendingVerification();
-      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`);
+      const res = await request(app).put(`/api/findings/${findingId}/close`).set('Authorization', `Bearer ${managerToken}`).send({ closureNote: 'Closed after verification' });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Closed');
       expect(res.body.closedByUserId).toBe(managerId);
@@ -649,6 +844,130 @@ describe('Findings Backend (Phase 6)', () => {
 
       const finding = await prisma.finding.findUnique({ where: { id: findingId } });
       expect(finding?.status).toBe('In Progress');
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 9 — Related findings for a task (back-to-finding link + quick-view)
+  // GET /api/tasks/:id/related-findings — every finding a task ties back to,
+  // by any relation: source (it raised it), follow-up parent, or CAPA link.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('Related findings for a task', () => {
+    const mkFinding = (overrides: Record<string, unknown> = {}) =>
+      prisma.finding.create({
+        data: { description: 'Rel test finding', eventType: 'Procedural Breach', departmentId, reportedByUserId: staffId, ...overrides }
+      });
+
+    const mkTask = (taskId: string, overrides: Record<string, unknown> = {}) =>
+      prisma.task.create({
+        data: { taskId, templateId: allowsFindingsTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Closed', schemaSnapshot: [] as any, assignmentType: 'INDIVIDUAL', ...overrides }
+      });
+
+    const mkCapa = (findingId: number, overrides: Record<string, unknown> = {}) =>
+      prisma.capaAction.create({
+        data: { findingId, type: 'CORRECTIVE', description: 'Fix it', createdByUserId: managerId, ...overrides }
+      });
+
+    const getRelated = (taskId: number, token = staffToken) =>
+      request(app).get(`/api/tasks/${taskId}/related-findings`).set('Authorization', `Bearer ${token}`);
+
+    it('R01: returns the finding a task raised (source), excluding unrelated findings', async () => {
+      const f = await mkFinding({ sourceTaskId });
+      await mkFinding(); // unrelated — must not appear
+      const res = await getRelated(sourceTaskId);
+      expect(res.status).toBe(200);
+      expect(res.body.map((x: any) => x.id)).toEqual([f.id]);
+      expect(res.body[0]).toEqual(expect.objectContaining({ id: f.id, status: 'Open', description: 'Rel test finding' }));
+      expect(res.body[0]).toHaveProperty('severity');
+    });
+
+    it('R02: returns the finding a follow-up task belongs to (parentFindingId)', async () => {
+      const f = await mkFinding();
+      const t = await mkTask('REL-T-002', { parentFindingId: f.id });
+      const res = await getRelated(t.id);
+      expect(res.status).toBe(200);
+      expect(res.body.map((x: any) => x.id)).toEqual([f.id]);
+    });
+
+    it('R03: returns the finding a CAPA action links to — task is neither source nor follow-up', async () => {
+      const f = await mkFinding();
+      const t = await mkTask('REL-T-003');
+      const capa = await mkCapa(f.id);
+      await prisma.capaTaskLink.create({ data: { capaId: capa.id, taskId: t.id, mandatory: true } });
+      const res = await getRelated(t.id);
+      expect(res.status).toBe(200);
+      expect(res.body.map((x: any) => x.id)).toEqual([f.id]);
+    });
+
+    it('R04: a task related by multiple paths returns the finding once (dedup)', async () => {
+      const f = await mkFinding({ sourceTaskId });
+      const capa = await mkCapa(f.id);
+      await prisma.capaTaskLink.create({ data: { capaId: capa.id, taskId: sourceTaskId, mandatory: true } });
+      const res = await getRelated(sourceTaskId);
+      expect(res.status).toBe(200);
+      expect(res.body.map((x: any) => x.id)).toEqual([f.id]); // not [f.id, f.id]
+    });
+
+    it('R05: excludes soft-deleted findings', async () => {
+      await mkFinding({ sourceTaskId, deletedAt: new Date() });
+      const res = await getRelated(sourceTaskId);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('R06: excludes a finding linked only via a soft-deleted CAPA action', async () => {
+      const f = await mkFinding();
+      const t = await mkTask('REL-T-006');
+      const capa = await mkCapa(f.id, { deletedAt: new Date() });
+      await prisma.capaTaskLink.create({ data: { capaId: capa.id, taskId: t.id, mandatory: true } });
+      const res = await getRelated(t.id);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('R07: 404 for a non-existent task', async () => {
+      const res = await getRelated(99999999);
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Group 10 — Finding summary (lightweight, side-effect-free preview read)
+  // GET /api/findings/:id/summary — used by the quick-view drawer.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('Finding summary', () => {
+    const getSummary = (id: number, token = staffToken) =>
+      request(app).get(`/api/findings/${id}/summary`).set('Authorization', `Bearer ${token}`);
+
+    it('S01: returns the preview fields and omits the heavy detail tree', async () => {
+      const raised = await raiseFinding(staffToken);
+      const res = await getSummary(raised.body.id);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(expect.objectContaining({
+        id: raised.body.id,
+        status: 'Open',
+        description: 'Torque values missing',
+        eventType: 'Procedural Breach'
+      }));
+      expect(res.body.reportedByUser).toEqual(expect.objectContaining({ id: staffId }));
+      expect(res.body.department).toEqual(expect.objectContaining({ id: departmentId }));
+      expect(Array.isArray(res.body.hazardTags)).toBe(true);
+      // Detail-only fields must NOT be in the lightweight projection.
+      expect(res.body).not.toHaveProperty('trend');
+      expect(res.body).not.toHaveProperty('capaActions');
+      expect(res.body).not.toHaveProperty('rca');
+    });
+
+    it('S02: 404 for a non-existent finding', async () => {
+      const res = await getSummary(99999999);
+      expect(res.status).toBe(404);
+    });
+
+    it('S03: 404 for a soft-deleted finding', async () => {
+      const raised = await raiseFinding(staffToken);
+      await prisma.finding.update({ where: { id: raised.body.id }, data: { deletedAt: new Date() } });
+      const res = await getSummary(raised.body.id);
+      expect(res.status).toBe(404);
     });
   });
 });
