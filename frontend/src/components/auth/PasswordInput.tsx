@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
 interface PasswordInputProps {
@@ -30,17 +30,21 @@ export default function PasswordInput({
   autoFocus,
 }: PasswordInputProps) {
   const [visible, setVisible] = useState(false);
+  // Fall back to a generated id so the label is always associated with the
+  // input even when a caller passes `label` without an explicit `id` (audit #5).
+  const reactId = useId();
+  const inputId = id ?? reactId;
 
   return (
     <div className="space-y-1.5">
       {label && (
-        <label htmlFor={id} className="block text-sm font-semibold text-slate-700">
+        <label htmlFor={inputId} className="block text-sm font-semibold text-slate-700">
           {label}
         </label>
       )}
       <div className="relative">
         <input
-          id={id}
+          id={inputId}
           type={visible ? 'text' : 'password'}
           required={required}
           autoFocus={autoFocus}
@@ -56,7 +60,6 @@ export default function PasswordInput({
           className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors focus:outline-none focus:text-blue-600"
           aria-label={visible ? 'Hide password' : 'Show password'}
           aria-pressed={visible}
-          tabIndex={-1}
         >
           {visible ? <EyeOff className="w-5 h-5" aria-hidden="true" /> : <Eye className="w-5 h-5" aria-hidden="true" />}
         </button>
