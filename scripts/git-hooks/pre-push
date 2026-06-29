@@ -1,0 +1,70 @@
+#!/bin/sh
+# Pre-push safety check for TEST_P1 / main.
+#
+# Warns (does not block) when a push to TEST_P1 or main:
+#   1. Touches backend/prisma/schema.prisma without a new migration folder in the
+#      same push (schema.prisma and its migration must be committed together).
+#   2. Touches backend/prisma/schema.prisma at all (reminder to run
+#      `prisma generate` + `migrate:deploy` on the target server).
+#   3. Targets TEST_P1 specifically (reminder not to re-run deploy.sh on a live,
+#      populated server).
+#
+# Install (not auto-installed by git clone):
+#   cmd:  copy scripts\git-hooks\pre-push .git\hooks\pre-push
+#   bash: cp scripts/git-hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+#
+# Bypass for one push: git push --no-verify
+
+remote="$1"
+z40=0000000000000000000000000000000000000000
+
+while read local_ref local_sha remote_ref remote_sha; do
+  branch=$(echo "$remote_ref" | sed -e 's#refs/heads/##')
+
+  case "$branch" in
+    TEST_P1|main)
+      ;;
+    *)
+      continue
+      ;;
+  esac
+
+  if [ "$remote_sha" = "$z40" ]; then
+    range="$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+
+  schema_changed=$(git diff --name-only "$range" -- backend/prisma/schema.prisma | grep -q . && echo yes)
+  migration_added=$(git diff --name-only --diff-filter=A "$range" -- backend/prisma/migrations | grep -q . && echo yes)
+
+  if [ "$schema_changed" = "yes" ]; then
+    echo ""
+    echo "============================================================"
+    echo "  WARNING: schema.prisma changed in this push to '$branch'."
+    if [ "$migration_added" != "yes" ]; then
+      echo "  No new file under backend/prisma/migrations/ was found in"
+      echo "  this push. schema.prisma + its migration folder must be"
+      echo "  committed TOGETHER (see migrations/README.md, Case A) --"
+      echo "  double check you didn't split them across pushes, or that"
+      echo "  you didn't forget 'npm run migrate:dev' before committing."
+    fi
+    echo "  After deploying, run on the target server:"
+    echo "    cd backend && npx prisma generate && npm run migrate:deploy"
+    echo "  (Rule 9, CLAUDE.md.) This hook cannot do it for you."
+    echo "============================================================"
+    echo ""
+  fi
+
+  if [ "$branch" = "TEST_P1" ]; then
+    echo "------------------------------------------------------------"
+    echo "  Reminder: TEST_P1 is what the test VPS deploys from."
+    echo "  Do NOT re-run 'sudo bash deploy.sh' on a populated server"
+    echo "  to pick this up -- prisma/seed.ts is not idempotent and"
+    echo "  will error on duplicate rows. Use the manual update steps"
+    echo "  in TEST_P1_DEPLOYMENT_GUIDE.md (Scenario 1) instead."
+    echo "------------------------------------------------------------"
+  fi
+done
+
+exit 0
