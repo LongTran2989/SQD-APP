@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import PasswordInput from '../../components/auth/PasswordInput';
@@ -37,13 +38,15 @@ export default function LoginPage() {
       const { user } = response.data;
       login(user);
       router.push('/dashboard');
-    } catch (err: any) {
-      if (err.response?.status === 401) {
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number; data?: { message?: string } } };
+      const status = axiosErr.response?.status;
+      if (status === 401) {
         setError('Invalid Staff ID or password.');
-      } else if (err.response?.status === 429) {
+      } else if (status === 429) {
         // Surface the rate-limit response rather than disguising it as a
         // connection problem (audit U5).
-        setError(err.response?.data?.message || 'Too many attempts. Please try again in a few minutes.');
+        setError(axiosErr.response?.data?.message || 'Too many attempts. Please try again in a few minutes.');
       } else {
         setError('An error occurred connecting to the server.');
       }
@@ -66,7 +69,7 @@ export default function LoginPage() {
           {/* Header */}
           <div className="flex flex-col items-center mb-8">
             <div className="w-16 h-16 flex items-center justify-center mb-4">
-              <img src="/logo.png" alt="SQD Logo" className="w-full h-full object-contain" />
+              <Image src="/logo.png" alt="SQD Logo" width={64} height={64} className="w-full h-full object-contain" />
             </div>
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight text-balance">
               SQD-APP

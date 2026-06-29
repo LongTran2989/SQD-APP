@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '../../api/client';
+import { apiErrorMessage } from '../../api/errorMessage';
 import PasswordInput from '../../components/auth/PasswordInput';
 import PasswordStrength, { isPasswordValid } from '../../components/auth/PasswordStrength';
 import { KeyRound, ShieldAlert, CheckCircle2 } from 'lucide-react';
@@ -50,9 +51,9 @@ function ResetPasswordForm() {
       await apiClient.post('/auth/reset-password', { token, newPassword });
       setStatus('success');
       setMessage('Your password has been successfully reset.');
-    } catch (err: any) {
+    } catch (err: unknown) {
       setStatus('error');
-      setMessage(err.response?.data?.message || 'The reset link is invalid or has expired.');
+      setMessage(apiErrorMessage(err, 'The reset link is invalid or has expired.'));
     }
   };
 

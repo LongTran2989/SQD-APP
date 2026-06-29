@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '../../api/client';
+import { apiErrorMessage } from '../../api/errorMessage';
 import { useAuthStore } from '../../store/authStore';
 import PasswordInput from '../../components/auth/PasswordInput';
 import PasswordStrength, { isPasswordValid } from '../../components/auth/PasswordStrength';
@@ -57,8 +58,8 @@ export default function UpdatePasswordPage() {
       // Log the user in officially.
       login(user);
       router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'An error occurred updating your password.');
+    } catch (err: unknown) {
+      setError(apiErrorMessage(err, 'An error occurred updating your password.'));
     } finally {
       setLoading(false);
     }

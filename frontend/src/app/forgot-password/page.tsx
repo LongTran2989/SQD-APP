@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { apiClient } from '../../api/client';
+import { apiErrorMessage } from '../../api/errorMessage';
 import { Mail, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 export default function ForgotPasswordPage() {
@@ -19,9 +20,9 @@ export default function ForgotPasswordPage() {
       await apiClient.post('/auth/forgot-password', { email });
       setStatus('success');
       setMessage('If an account matches that email, a reset link has been sent.');
-    } catch (err: any) {
+    } catch (err: unknown) {
       setStatus('error');
-      setMessage(err.response?.data?.message || 'An error occurred. Please try again later.');
+      setMessage(apiErrorMessage(err, 'An error occurred. Please try again later.'));
     }
   };
 
@@ -50,7 +51,7 @@ export default function ForgotPasswordPage() {
         </Link>
         
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight mb-2">Forgot Password</h1>
-        <p className="text-slate-500 mb-6">Enter your email address and we'll send you a link to reset your password.</p>
+        <p className="text-slate-500 mb-6">Enter your email address and we&apos;ll send you a link to reset your password.</p>
 
         {status === 'error' && (
           <div role="alert" aria-live="polite" className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
