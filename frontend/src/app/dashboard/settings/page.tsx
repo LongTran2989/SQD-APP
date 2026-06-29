@@ -34,8 +34,8 @@ export default function SettingsPage() {
   // Clamp to valid + accessible tab.
   const resolveTab = (t: SettingsTab | null): SettingsTab => {
     if (!t) return defaultTab;
-    if ((t === 'privileges' || t === 'reference-data' || t === 'security') && !isAdmin) return defaultTab;
-    if ((t === 'user-management' || t === 'taxonomy' || t === 'notifications') && !isAdminDirector) return 'my-account';
+    if ((t === 'privileges' || t === 'reference-data') && !isAdmin) return defaultTab;
+    if ((t === 'user-management' || t === 'taxonomy' || t === 'notifications' || t === 'security') && !isAdminDirector) return 'my-account';
     return t;
   };
 
@@ -59,7 +59,7 @@ export default function SettingsPage() {
     { key: 'notifications',    label: 'Notifications',    Icon: Bell,        show: isAdminDirector },
     { key: 'privileges',       label: 'Privileges',       Icon: ShieldCheck, show: isAdmin },
     { key: 'reference-data',   label: 'Reference Data',   Icon: Database,    show: isAdmin },
-    { key: 'security',         label: 'Security',         Icon: Shield,      show: isAdmin },
+    { key: 'security',         label: 'Security',         Icon: Shield,      show: isAdminDirector },
   ];
 
   return (

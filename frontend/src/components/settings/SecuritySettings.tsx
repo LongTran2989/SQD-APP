@@ -7,11 +7,11 @@ import { useAuthStore } from '../../store/authStore';
 import { getSecuritySettings, updateSecuritySettings } from '../../api/securitySettingsApi';
 import { apiErrorMessage } from '../../api/errorMessage';
 
-const ADMIN_ONLY = ['Admin'];
+const ADMIN_DIRECTOR = ['Admin', 'Director'];
 
 export default function SecuritySettings() {
   const user = useAuthStore((s) => s.user);
-  const canManage = user ? ADMIN_ONLY.includes(user.role) : false;
+  const canManage = user ? ADMIN_DIRECTOR.includes(user.role) : false;
 
   const [enforceSingleSession, setEnforceSingleSession] = useState(true);
   const [loading, setLoading] = useState(canManage);

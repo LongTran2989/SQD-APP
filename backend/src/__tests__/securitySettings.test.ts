@@ -11,14 +11,17 @@ const prisma = new PrismaClient({ adapter });
 
 describe('Security Settings (ENFORCE_SINGLE_SESSION admin toggle)', () => {
   let adminToken: string;
+  let directorToken: string;
   let staffToken: string;
   let divisionId: number;
   const ADMIN_EMAIL = 'admin_sec@sqd.com';
+  const DIRECTOR_EMAIL = 'director_sec@sqd.com';
   const STAFF_EMAIL = 'staff_sec@sqd.com';
-  const emails = [ADMIN_EMAIL, STAFF_EMAIL];
+  const emails = [ADMIN_EMAIL, DIRECTOR_EMAIL, STAFF_EMAIL];
 
   beforeAll(async () => {
     const adminRole = await prisma.role.upsert({ where: { name: 'Admin' }, update: {}, create: { name: 'Admin' } });
+    const directorRole = await prisma.role.upsert({ where: { name: 'Director' }, update: {}, create: { name: 'Director' } });
     const staffRole = await prisma.role.upsert({ where: { name: 'Staff' }, update: {}, create: { name: 'Staff' } });
     const dept = await prisma.department.upsert({ where: { name: 'Sec Dept' }, update: {}, create: { name: 'Sec Dept' } });
     const division = await prisma.division.upsert({
@@ -32,12 +35,16 @@ describe('Security Settings (ENFORCE_SINGLE_SESSION admin toggle)', () => {
     const adminUser = await prisma.user.create({
       data: { name: 'Admin Sec', email: ADMIN_EMAIL, passwordHash: 'hash', forcePasswordChange: false, activeSessionId: 'admin-sec-sess', divisionId, roleId: adminRole.id }
     });
+    const directorUser = await prisma.user.create({
+      data: { name: 'Director Sec', email: DIRECTOR_EMAIL, passwordHash: 'hash', forcePasswordChange: false, activeSessionId: 'dir-sec-sess', divisionId, roleId: directorRole.id }
+    });
     const staffUser = await prisma.user.create({
       data: { name: 'Staff Sec', email: STAFF_EMAIL, passwordHash: 'hash', forcePasswordChange: false, activeSessionId: 'staff-sec-sess', divisionId, roleId: staffRole.id }
     });
 
     const secret = process.env.JWT_SECRET as string;
     adminToken = jwt.sign({ userId: adminUser.id, role: 'Admin', divisionId, sessionId: 'admin-sec-sess' }, secret);
+    directorToken = jwt.sign({ userId: directorUser.id, role: 'Director', divisionId, sessionId: 'dir-sec-sess' }, secret);
     staffToken = jwt.sign({ userId: staffUser.id, role: 'Staff', divisionId, sessionId: 'staff-sec-sess' }, secret);
   });
 
@@ -91,7 +98,17 @@ describe('Security Settings (ENFORCE_SINGLE_SESSION admin toggle)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('forbids a non-Admin from reading or writing (403)', async () => {
+  it('allows a Director (settings:security granted by default)', async () => {
+    const get = await request(app).get('/api/settings/security').set('Authorization', `Bearer ${directorToken}`);
+    expect(get.status).toBe(200);
+    const put = await request(app)
+      .put('/api/settings/security')
+      .set('Authorization', `Bearer ${directorToken}`)
+      .send({ enforceSingleSession: true });
+    expect(put.status).toBe(200);
+  });
+
+  it('forbids a role without settings:security from reading or writing (403)', async () => {
     const get = await request(app).get('/api/settings/security').set('Authorization', `Bearer ${staffToken}`);
     expect(get.status).toBe(403);
     const put = await request(app)

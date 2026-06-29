@@ -5,10 +5,10 @@ import { requirePrivilege } from '../middleware/rbac.middleware';
 
 const router = Router();
 
-// Admin-only security policy panel. Gated on `settings:privileges` (in the Admin
-// floor, so Admin can never be locked out), consistent with the privilege panel.
+// Security policy panel, gated on the dedicated `settings:security` privilege
+// (default-granted to Director + Admin, configurable in the privilege matrix).
 router.use(authenticateJWT);
-router.get('/', requirePrivilege('settings:privileges'), getSecuritySettings);
-router.put('/', requirePrivilege('settings:privileges'), updateSecuritySettings);
+router.get('/', requirePrivilege('settings:security'), getSecuritySettings);
+router.put('/', requirePrivilege('settings:security'), updateSecuritySettings);
 
 export default router;
