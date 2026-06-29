@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { JWT_SECRET } from '../config/env';
 import { validatePassword } from '../utils/passwordPolicy';
+import { hasCrossDivisionReach } from '../utils/privilegeAccess';
 
 import { prisma } from '../lib/prisma';
 
@@ -12,10 +13,13 @@ import { prisma } from '../lib/prisma';
 // auth.middleware) prevents algorithm-confusion attacks. See auth audit M1.
 const JWT_ALGORITHM = 'HS256' as const;
 
-// Roles only a Director may mint via register — blocks a non-Director (e.g. an
-// Admin holding `user:create`) from escalating by creating a Director. Admin and
-// below remain creatable by any `user:create` holder. See audit H3.
-const DIRECTOR_ONLY_ROLE_NAMES = new Set(['Director']);
+// Globally-privileged roles only a Director may mint via register. Both Director
+// and Admin carry global access (Admin also holds `user:create` /
+// `user:manage_roles`), so minting either is gated to the top role — a
+// non-Director holder of `user:create` cannot escalate by creating one. Lower
+// roles remain creatable by any `user:create` holder, subject to the
+// division-scope check. See audit H3 / code-review #2.
+const ELEVATED_ROLE_NAMES = new Set(['Director', 'Admin']);
 
 // Basic shape check for the optional email field. Format only — deliverability
 // is never assumed. See audit L1.
@@ -210,12 +214,22 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { employeeId, email, password, name, roleName, divisionId } = req.body;
+    const { employeeId, email, password, name, roleName } = req.body;
 
     // employeeId is the login identifier (login authenticates by employeeId), so
     // it is required for a usable account. email is optional (used for reset).
-    if (!employeeId || !password || !name || !roleName || !divisionId) {
+    if (!employeeId || !password || !name || !roleName || req.body.divisionId == null) {
       res.status(400).json({ message: 'employeeId, password, name, roleName and divisionId are required' });
+      return;
+    }
+
+    // Coerce divisionId — the body may deliver it as a string (form-encoded /
+    // loosely-typed clients). Without this, a string would never equal the
+    // numeric JWT divisionId in the scope check below (spurious 403) and would
+    // throw a 500 in the Prisma Int lookup. See code-review #3.
+    const divisionId = Number(req.body.divisionId);
+    if (!Number.isInteger(divisionId) || divisionId <= 0) {
+      res.status(400).json({ message: 'Invalid division' });
       return;
     }
 
@@ -252,18 +266,20 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     // Scope guards (audit H3). The route already requires `user:create`; these
     // bound WHAT the holder may create so a non-Director cannot escalate.
-    const creator = (req as any).user as { userId: number; role: string; divisionId: number } | undefined;
+    const creator = req.user;
 
-    // 1. Only a Director may mint a Director account.
-    if (DIRECTOR_ONLY_ROLE_NAMES.has(roleName) && creator?.role !== 'Director') {
-      res.status(403).json({ message: 'Only a Director may create Director accounts' });
+    // 1. Only a Director may mint a globally-privileged (Director/Admin) account.
+    if (ELEVATED_ROLE_NAMES.has(roleName) && creator?.role !== 'Director') {
+      res.status(403).json({ message: 'Only a Director may create Director or Admin accounts' });
       return;
     }
 
-    // 2. Non-Director/Admin creators may only create users inside their own
-    //    division — they cannot seed accounts into other divisions.
-    const creatorIsGlobal = creator?.role === 'Director' || creator?.role === 'Admin';
-    if (!creatorIsGlobal && creator?.divisionId !== divisionId) {
+    // 2. Creators without cross-division reach may only create users inside their
+    //    own division. Uses the shared hasCrossDivisionReach signal (Director /
+    //    Admin / any role granted task:assign_any) so a custom cross-division
+    //    role is honoured here exactly as it is for task & WP assignment, instead
+    //    of a divergent role-string check. See code-review #4.
+    if (!hasCrossDivisionReach(creator) && creator?.divisionId !== divisionId) {
       res.status(403).json({ message: 'You may only create users within your own division' });
       return;
     }

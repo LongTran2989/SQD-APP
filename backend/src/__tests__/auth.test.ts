@@ -277,11 +277,14 @@ describe('Authentication & Session Management Endpoints', () => {
         }
       });
       const adminToken = jwt.sign({ userId: admin.id, role: 'Admin', divisionId }, process.env.JWT_SECRET as string);
+      // Register a non-elevated role: Admin may create Staff, but only a Director
+      // may create another Admin/Director (code-review #2).
+      await prisma.role.upsert({ where: { name: 'Staff' }, update: {}, create: { name: 'Staff' } });
 
       const regRes = await request(app)
         .post('/api/auth/register')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ employeeId: 'TST-NEWBIE', password: 'temppass123', name: 'New Bie', roleName: 'Admin', divisionId });
+        .send({ employeeId: 'TST-NEWBIE', password: 'temppass123', name: 'New Bie', roleName: 'Staff', divisionId });
       expect(regRes.status).toBe(201);
 
       // The new user is forced to change the temporary password on first login (202).
@@ -602,9 +605,24 @@ describe('Authentication & Session Management Endpoints', () => {
       directorRoleId = directorRole.id;
       const managerRole = await prisma.role.upsert({ where: { name: 'Manager' }, update: {}, create: { name: 'Manager' } });
       managerRoleId = managerRole.id;
+      await prisma.role.upsert({ where: { name: 'Staff' }, update: {}, create: { name: 'Staff' } });
+      // Grant Manager `user:create` so a Manager token passes requirePrivilege and
+      // actually REACHES the division-scope guard inside register — otherwise the
+      // 403 would come from requirePrivilege and the guard would be untested
+      // (code-review #1).
+      await prisma.privilegeConfig.upsert({
+        where: { roleId: managerRoleId },
+        update: { permissions: { 'user:create': true } },
+        create: { roleId: managerRoleId, permissions: { 'user:create': true } }
+      });
       const department = await prisma.department.upsert({ where: { name: 'Auth Test Dept' }, update: {}, create: { name: 'Auth Test Dept' } });
       const other = await prisma.division.upsert({ where: { code: 'OTH' }, update: {}, create: { name: 'Other Div', code: 'OTH', departmentId: department.id } });
       otherDivisionId = other.id;
+    });
+
+    afterAll(async () => {
+      // Don't leak the Manager privilege grant into other suites sharing the DB.
+      await prisma.privilegeConfig.deleteMany({});
     });
 
     const tokenFor = async (empId: string, roleId: number, roleName: string, divId: number) => {
@@ -630,6 +648,15 @@ describe('Authentication & Session Management Endpoints', () => {
       expect(res.status).toBe(403);
     });
 
+    it('forbids an Admin from creating another Admin (only a Director may, code-review #2)', async () => {
+      const adminToken = await tokenFor('TST-ADMIN-ESC2', adminRoleId, 'Admin', divisionId);
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ employeeId: 'TST-WANNABE-ADMIN', password: 'temppass123', name: 'Wannabe Admin', roleName: 'Admin', divisionId });
+      expect(res.status).toBe(403);
+    });
+
     it('allows a Director to create a Director', async () => {
       const dirToken = await tokenFor('TST-DIR', directorRoleId, 'Director', divisionId);
       const res = await request(app)
@@ -639,13 +666,43 @@ describe('Authentication & Session Management Endpoints', () => {
       expect(res.status).toBe(201);
     });
 
-    it('forbids a Manager from creating a user in another division', async () => {
+    it('allows a Director to create an Admin', async () => {
+      const dirToken = await tokenFor('TST-DIR2', directorRoleId, 'Director', divisionId);
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Authorization', `Bearer ${dirToken}`)
+        .send({ employeeId: 'TST-NEW-ADMIN', password: 'temppass123', name: 'New Admin', roleName: 'Admin', divisionId });
+      expect(res.status).toBe(201);
+    });
+
+    it('forbids a Manager (with user:create) from creating a user in another division', async () => {
       const mgrToken = await tokenFor('TST-MGR', managerRoleId, 'Manager', divisionId);
       const res = await request(app)
         .post('/api/auth/register')
         .set('Authorization', `Bearer ${mgrToken}`)
         .send({ employeeId: 'TST-CROSS-DIV', password: 'temppass123', name: 'Cross', roleName: 'Staff', divisionId: otherDivisionId });
+      // 403 must come from the division-scope guard, not requirePrivilege — assert
+      // the guard's message to prove it was actually reached (code-review #1).
       expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/own division/i);
+    });
+
+    it('allows a Manager (with user:create) to create a user in their own division', async () => {
+      const mgrToken = await tokenFor('TST-MGR-OK', managerRoleId, 'Manager', divisionId);
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Authorization', `Bearer ${mgrToken}`)
+        .send({ employeeId: 'TST-SAME-DIV', password: 'temppass123', name: 'Same Div', roleName: 'Staff', divisionId });
+      expect(res.status).toBe(201);
+    });
+
+    it('coerces a string divisionId from the request body (code-review #3)', async () => {
+      const adminToken = await tokenFor('TST-ADMIN-STR', adminRoleId, 'Admin', divisionId);
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ employeeId: 'TST-STRDIV', password: 'temppass123', name: 'Str Div', roleName: 'Staff', divisionId: String(divisionId) });
+      expect(res.status).toBe(201);
     });
 
     it('rejects registration into a non-existent division', async () => {
@@ -653,7 +710,7 @@ describe('Authentication & Session Management Endpoints', () => {
       const res = await request(app)
         .post('/api/auth/register')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ employeeId: 'TST-BADDIV', password: 'temppass123', name: 'BadDiv', roleName: 'Admin', divisionId: 999999 });
+        .send({ employeeId: 'TST-BADDIV', password: 'temppass123', name: 'BadDiv', roleName: 'Staff', divisionId: 999999 });
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch(/division/i);
     });
