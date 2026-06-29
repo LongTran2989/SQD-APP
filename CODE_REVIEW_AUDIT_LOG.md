@@ -17,7 +17,7 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 **Branch:** `claude/auth-audit-5dm9ju`
 **Scope:** Manual audit of the authentication surface (`auth.controller.ts`, `auth.middleware.ts`, `auth.routes.ts`, `rateLimit.middleware.ts`, `config/env.ts`, CORS/cookies in `index.ts`, plus the frontend auth flow: `authStore`, `client.ts`, login/update-password/forgot-password/reset-password pages, `useRequireAuth`). Then remediation of an accepted subset, then a high-effort recall-biased `/code-review` of the resulting diff. Pure hardening — **no schema migration, no new privilege keys** (role-elevation / division-scope stay hardcoded per the Phase 7 design).
-**Tests after fixes:** Backend **653/653** (was 649; +4 register-scope tests, on top of the new auth tests added during remediation). Frontend `tsc --noEmit` clean; ESLint clean on all touched auth files. Verified live against a Postgres + backend + Next.js (headless-Chromium) sandbox stack.
+**Tests after fixes:** Backend **660/660** (was 649; +4 register-scope tests + 7 security-settings tests across the review and the Part C follow-up). Frontend `tsc --noEmit` clean; ESLint clean on all touched files. Verified live against a Postgres + backend + Next.js (headless-Chromium) sandbox stack.
 
 ### Part A — Manual audit findings (remediated this session)
 
@@ -36,7 +36,8 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 | AU-M2 | Medium | `rateLimit.middleware.ts` | Auth limiter is in-memory + IP-keyed only; no per-account lockout; multiplies across instances. | ⏭ Deferred (**DEF-8**) — needs Redis-backed store + per-`employeeId` lockout. |
 | AU-M3 | Medium | `auth.controller.ts` forgotPassword | Timing side-channel (DB+hash work only on the existent-email path) enables email enumeration. | ⏭ Deferred (**DEF-9**). |
 | AU-L2 | Low | `auth.controller.ts` cookie opts | `secure`/`sameSite` keyed on `NODE_ENV` alone. | ⏭ Deferred — tie to an explicit deploy flag. |
-| AU-U6/7/8/9 | Low (UX/a11y) | forced-change logout path, client-only route gate, multi-tab toast, dead-end success pages | Various smaller UX gaps. | ⏭ Deferred — not in the accepted remediation scope. |
+| AU-U8 | Low (UX) | `client.ts` / login page | Multi-tab / single-session 401s redirected to `/login` silently with no explanation. | ✅ Fixed (follow-up) — the API client maps session-invalidation 401s to a friendly reason in `sessionStorage`; login shows an amber notice. See "Follow-up implementation" below. |
+| AU-U6/7/9 | Low (UX/a11y) | forced-change logout path, client-only route gate, dead-end success pages | Various smaller UX gaps. | ⏭ Deferred — not in the accepted remediation scope. |
 
 ### Part B — `/code-review` (high effort, recall-biased) on the auth diff
 
@@ -49,11 +50,24 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 | AR-5 | Low-med (a11y) | `PasswordInput.tsx` | `label htmlFor`/`id` undefined when `label` passed without `id` (every update/reset field) — label not associated. | ✅ Fixed — `useId()` fallback id. |
 | AR-6 | Low-med (a11y) | `PasswordInput.tsx` | Show/hide toggle `tabIndex={-1}` → keyboard-unreachable. | ✅ Fixed — removed. |
 | AR-7 | Low (UX) | `PasswordStrength.tsx` | A >72-byte password showed an all-green checklist + "Strong" but submit was blocked (contradiction). | ✅ Fixed — 72-byte cap is now a visible rule; `isPasswordValid` derives from the rule set; meter never exceeds "Weak" until all rules pass. |
-| AR-8 | Low (robustness) | `auth.controller.ts` logout | The untouched inline `LOGOUT` audit write lacks `writeAuthAudit`'s best-effort try/catch, so an audit failure 500s logout after the session is revoked. | ⏭ Deferred — refactor `LOGOUT` to `writeAuthAudit`. |
+| AR-8 | Low (robustness) | `auth.controller.ts` logout | The untouched inline `LOGOUT` audit write lacks `writeAuthAudit`'s best-effort try/catch, so an audit failure 500s logout after the session is revoked. | ✅ Fixed (follow-up) — refactored `LOGOUT` to `await writeAuthAudit('LOGOUT', userId)`. |
 | AR-9 | Low (type-safety) | `auth.controller.ts` register | Read actor via `(req as any).user`. | ✅ Fixed — typed `req.user`. |
 | AR-10 | Low | `auth.controller.ts` resetPassword | Policy validated before the token lookup, so a bad token + weak password returns the policy error. | ✔ Accepted-as-is — policy is public; minor, keeps validation ordering uniform with register/update. |
 
 **Cut at the review cap (verified, not actioned):** two equivalent error-message helpers coexist (`apiErrorMessage` / `getApiErrorMessage`); the frontend `PasswordStrength` policy is a deliberate hand-kept mirror of the backend (drift risk); `LOGIN_FAILED` records the victim's `performedByUserId` (plausibly by-design — confirm forensic intent).
+
+### Part C — Follow-up implementation (same session, after the review)
+
+Accepted follow-ups beyond the review table, with a user decision on the multi-tab question.
+
+- **AR-8 — logout audit best-effort:** the inline `LOGOUT` `AuditLog.create` now goes through `writeAuthAudit`, so an audit-store failure can't 500 a logout that already revoked the session.
+- **AU-U8 — sign-out explanation:** `client.ts` maps session-invalidation 401 messages (another tab / another device / disabled account) to a friendly reason stashed in `sessionStorage`; the login page renders it as an amber notice instead of a silent redirect.
+- **Multi-tab question — user decision:** asked whether to add a setting to "allow multiple tab instances." The X-Acting-User-Id guard is a security control (it only blocks a *different* user hijacking a shared-cookie tab; same-user multi-tab already works), so disabling it was advised against. **User chose to expose `ENFORCE_SINGLE_SESSION` in the UI instead** (the right lever for the real "one user, multiple devices" need).
+  - New **Admin/Director-only Security settings tab** + `GET`/`PUT /api/settings/security` (reads/writes the `ENFORCE_SINGLE_SESSION` SystemSetting the auth middleware already consumes; default ON; writes a `SECURITY_SETTING_CHANGED` AuditLog).
+  - New **`settings:security` privilege key** (catalog + `DEFAULT_PRIVILEGES` Director & Admin; configurable in the matrix) gates the endpoint — chosen over reusing `settings:privileges` so Directors (not just Admins) can manage it. **This is the first new privilege key since Phase 7 — note for later: any new role-creation that should manage security must be granted it.**
+- **Tests:** `securitySettings.test.ts` (default-on, persist, audit, 400 non-boolean, 403 without the privilege, 401 unauthenticated, Director-allowed). **Backend 660/660.** Frontend ESLint clean (one justified `eslint-disable react-hooks/set-state-in-effect` for the SSR-safe `sessionStorage` read on login). Verified live via headless Chromium: Security tab renders + toggle PUTs/flips; a session-change 401 surfaces the U8 notice.
+
+**Still deferred after this session (tracked for later):** DEF-8 (Redis-backed + per-account auth rate limiting), DEF-9 (forgot-password timing enumeration), AU-L2 (cookie flags keyed on `NODE_ENV`), AU-U6/U7/U9 (forced-change logout UX, server-side route gating, success-page dead-ends), AU-M3, and the three review-cap items above. None are prod blockers at the current privilege matrix.
 
 ---
 
