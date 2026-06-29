@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -37,7 +37,10 @@ const writeAuthAudit = async (
         entityType: 'User',
         entityId: String(userId),
         performedByUserId: userId,
-        details: details ?? undefined
+        // Match the codebase's AuditLog detail pattern (e.g. findingService):
+        // cast to Prisma's JSON input type, and use DbNull (never `undefined`)
+        // when absent — `exactOptionalPropertyTypes` rejects an explicit undefined.
+        details: (details as Prisma.InputJsonValue) ?? Prisma.DbNull
       }
     });
   } catch (err) {
