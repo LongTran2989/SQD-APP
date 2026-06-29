@@ -5,10 +5,14 @@ import { JWT_SECRET } from '../config/env';
 
 import { prisma } from '../lib/prisma';
 
-// The only route a forced-password-change user may reach (relative to the
-// /api/auth router mount). Kept as a named constant rather than a bare string
-// compare scattered in the gate.
-const UPDATE_PASSWORD_PATH = '/update-password';
+// The routes a forced-password-change user may reach (relative to the /api/auth
+// router mount): the change form itself, and logout so a stuck user can cleanly
+// end the server-side session instead of abandoning the tab (audit M4).
+const FORCED_CHANGE_ALLOWED_PATHS = new Set(['/update-password', '/logout']);
+
+// Pin the accepted signing algorithm to match the signer (auth.controller),
+// closing off algorithm-confusion attacks. See audit M1.
+const JWT_ALGORITHMS = ['HS256'] as const;
 
 export interface AuthPayload {
   userId: number;
@@ -47,7 +51,7 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
   }
 
   if (token) {
-    jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+    jwt.verify(token, JWT_SECRET, { algorithms: [...JWT_ALGORITHMS] }, async (err, decoded) => {
       if (err) {
         res.status(401).json({ message: 'Unauthorized: Invalid token' });
         return;
@@ -68,7 +72,7 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
       }
 
       // Enforce password change policy
-      if (authPayload.forcePasswordChange && req.path !== UPDATE_PASSWORD_PATH) {
+      if (authPayload.forcePasswordChange && !FORCED_CHANGE_ALLOWED_PATHS.has(req.path)) {
         res.status(403).json({ message: 'Forbidden: Password change required' });
         return;
       }

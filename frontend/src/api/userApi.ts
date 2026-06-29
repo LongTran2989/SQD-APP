@@ -1,5 +1,9 @@
 import { apiClient } from './client';
-import { UserPreferences } from '../types';
+import { UserPreferences, MentionUser } from '../types';
+
+// @mention picker lookup — any authenticated user. Returns up to 8 matches.
+export const mentionSearch = (q: string): Promise<MentionUser[]> =>
+  apiClient.get('/users/mention-search', { params: { q } }).then((r) => r.data);
 
 // Deep-merges an allowlisted subset of UI state into the caller's own preferences.
 export const updateMyPreferences = (preferences: UserPreferences): Promise<{ preferences: UserPreferences }> =>

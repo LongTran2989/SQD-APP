@@ -7,6 +7,7 @@ import {
   listAttachments,
   downloadAttachment,
   deleteAttachment,
+  updateAttachment,
   getUploadConfig,
 } from '../controllers/attachment.controller';
 import { ABSOLUTE_MAX_UPLOAD_BYTES } from '../constants/fileUpload';
@@ -47,6 +48,7 @@ router.get('/config', getUploadConfig);
 router.get('/', listAttachments);
 router.post('/', handleUpload, uploadAttachment);
 router.get('/:id/download', downloadAttachment);
+router.patch('/:id', updateAttachment);
 router.delete('/:id', deleteAttachment);
 
 export default router;

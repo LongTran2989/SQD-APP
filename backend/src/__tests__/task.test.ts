@@ -1131,8 +1131,8 @@ describe('Task Backend (Phase 5.2)', () => {
         .get('/api/tasks?statuses=Unassigned')
         .set('Authorization', `Bearer ${directorToken}`);
       expect(res.status).toBe(200);
-      expect(res.body.length).toBeGreaterThan(0);
-      expect(res.body.every((t: { status: string }) => t.status === 'Unassigned')).toBe(true);
+      expect(res.body.tasks.length).toBeGreaterThan(0);
+      expect(res.body.tasks.every((t: { status: string }) => t.status === 'Unassigned')).toBe(true);
     });
 
     it('PR5-B: filter by assignedToUserId', async () => {
@@ -1141,14 +1141,59 @@ describe('Task Backend (Phase 5.2)', () => {
         .get(`/api/tasks?assignedToUserId=${staffId}`)
         .set('Authorization', `Bearer ${directorToken}`);
       expect(res.status).toBe(200);
-      expect(res.body.every((t: { assignedToUserId: number }) => t.assignedToUserId === staffId)).toBe(true);
+      expect(res.body.tasks.every((t: { assignedToUserId: number }) => t.assignedToUserId === staffId)).toBe(true);
     });
 
     it('PR5-C: list includes lastActivityAt', async () => {
       const res = await request(app).get('/api/tasks').set('Authorization', `Bearer ${directorToken}`);
       expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('total');
+      if (res.body.tasks.length > 0) {
+        expect(res.body.tasks[0]).toHaveProperty('lastActivityAt');
+      }
+    });
+
+    it('P5: paginates — pageSize caps the page and total reflects the full match count', async () => {
+      for (let i = 0; i < 3; i++) {
+        await prisma.task.create({ data: { taskId: `TSK-PG${i}${Date.now() % 100000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      }
+      const res = await request(app).get('/api/tasks?pageSize=2&page=1').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.pageSize).toBe(2);
+      expect(res.body.page).toBe(1);
+      expect(res.body.tasks.length).toBeLessThanOrEqual(2);
+      expect(res.body.total).toBeGreaterThanOrEqual(3);
+    });
+
+    it('P5: GET /api/tasks/stats returns the three badge counts', async () => {
+      const res = await request(app).get('/api/tasks/stats').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('unassigned');
+      expect(res.body).toHaveProperty('myAttention');
+      expect(res.body).toHaveProperty('allAttention');
+      expect(typeof res.body.unassigned).toBe('number');
+    });
+
+    it('P5: GET /api/tasks/assignees returns distinct {id,name} in scope', async () => {
+      await prisma.task.create({ data: { taskId: `TSK-AS${Date.now() % 100000}`, templateId: publishedTemplateId, issuerId: managerId, assignedToUserId: staffId, targetDivisionId: divisionId, status: 'Assigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      const res = await request(app).get('/api/tasks/assignees').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      const ids = res.body.map((u: { id: number }) => u.id);
+      expect(new Set(ids).size).toBe(ids.length); // distinct
+      expect(res.body.every((u: any) => 'id' in u && 'name' in u)).toBe(true);
+    });
+
+    it('P5: GET /api/tasks/options returns a slim picker list (no enrichment)', async () => {
+      await prisma.task.create({ data: { taskId: `TSK-OP${Date.now() % 100000}`, templateId: publishedTemplateId, issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned', schemaSnapshot: [], assignmentType: 'INDIVIDUAL' } });
+      const res = await request(app).get('/api/tasks/options').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
       if (res.body.length > 0) {
-        expect(res.body[0]).toHaveProperty('lastActivityAt');
+        const o = res.body[0];
+        expect(o).toHaveProperty('taskId');
+        expect(o).toHaveProperty('status');
+        expect(o).not.toHaveProperty('lastActivityAt'); // slim, not enriched
       }
     });
 
@@ -2154,7 +2199,7 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`);
 
       expect(res.status).toBe(200);
-      const found = res.body.find((t: any) => t.id === task.id);
+      const found = res.body.tasks.find((t: any) => t.id === task.id);
       expect(found).toBeUndefined();
     });
 
@@ -2214,7 +2259,7 @@ describe('Task Backend (Phase 5.2)', () => {
 
       expect(res.status).toBe(200);
       // Every returned task must have staff as assignee or issuer
-      res.body.forEach((t: any) => {
+      res.body.tasks.forEach((t: any) => {
         expect(
           t.assignedToUser?.id === staffId || t.issuer?.id === staffId
         ).toBe(true);
@@ -2252,8 +2297,8 @@ describe('Task Backend (Phase 5.2)', () => {
         .set('Authorization', `Bearer ${managerToken}`);
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      res.body.forEach((t: any) => {
+      expect(Array.isArray(res.body.tasks)).toBe(true);
+      res.body.tasks.forEach((t: any) => {
         expect(t.status).toBe('Unassigned');
       });
     });
@@ -2469,6 +2514,198 @@ describe('Task Backend (Phase 5.2)', () => {
         where: { scope: 'TASK', scopeId: id, type: 'SYSTEM_EVENT', content: { contains: 'Time logged' } }
       });
       expect(activityEntry).not.toBeNull();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Security Review Hardening (2026-06-28) — SoD, division scope, validation
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('Security Review Hardening', () => {
+    function uid(): string { return String(Date.now()).slice(-6) + Math.floor(Math.random() * 100); }
+
+    it('SR-1: Manager who is the assignee (not issuer) cannot review their own task → 403', async () => {
+      // issuer = director, assignee = manager. The manager is a same-division
+      // reviewer (task:review_div) but performed the task, so review is blocked.
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${uid()}`, templateId: publishedTemplateId,
+          issuerId: directorId, assignedToUserId: managerId,
+          targetDivisionId: divisionId, status: 'In Review',
+          schemaSnapshot: [], assignmentType: 'INDIVIDUAL'
+        }
+      });
+      const res = await request(app)
+        .put(`/api/tasks/${task.id}/review`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ action: 'approve' });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/same person/i);
+    });
+
+    it('SR-2: A user cannot rate their own performed task → 403', async () => {
+      // assignee = manager, rater = manager (final state + time booking present).
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${uid()}`, templateId: publishedTemplateId,
+          issuerId: directorId, assignedToUserId: managerId,
+          targetDivisionId: divisionId, status: 'Closed',
+          schemaSnapshot: [], assignmentType: 'INDIVIDUAL'
+        }
+      });
+      await prisma.timeBooking.create({ data: { taskId: task.id, assigneeEntry: { userId: managerId, hours: 1 }, collaborators: [], totalHours: 1 } });
+      const res = await request(app)
+        .put(`/api/tasks/${task.id}/rate`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ rating: 5 });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/your own task/i);
+    });
+
+    it('SR-3: Manager cannot create a task targeting another division → 403', async () => {
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: division2Id });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/your own division/i);
+    });
+
+    it('SR-4: Director can create a task targeting another division → 201', async () => {
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: division2Id });
+      expect(res.status).toBe(201);
+      expect(res.body.targetDivisionId).toBe(division2Id);
+    });
+
+    it('SR-5: Creating a task with a past deadline → 400', async () => {
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId, deadline: '2000-01-01' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/past/i);
+    });
+
+    it('SR-6: Setting a past deadline → 400', async () => {
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${uid()}`, templateId: publishedTemplateId,
+          issuerId: managerId, assignedToUserId: staffId,
+          targetDivisionId: divisionId, status: 'Assigned',
+          schemaSnapshot: [], assignmentType: 'INDIVIDUAL'
+        }
+      });
+      const res = await request(app)
+        .put(`/api/tasks/${task.id}/deadline`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ deadline: '2000-01-01' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/past/i);
+    });
+
+    it('SR-7: Linking a task to a Work Package in another division → 403', async () => {
+      const foreignWp = await prisma.workPackage.create({
+        data: {
+          wpId: `TSK2-WP-${uid()}`, name: 'Foreign WP', type: 'AUDIT',
+          divisionId: division2Id, timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: manager2Id, status: 'Open'
+        }
+      });
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${uid()}`, templateId: publishedTemplateId,
+          issuerId: managerId, targetDivisionId: divisionId, status: 'Unassigned',
+          schemaSnapshot: [], assignmentType: 'INDIVIDUAL'
+        }
+      });
+      const res = await request(app)
+        .patch(`/api/tasks/${task.id}/wp`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ wpId: foreignWp.id });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/own division/i);
+      await prisma.workPackage.delete({ where: { id: foreignWp.id } });
+    });
+
+    it('SR-8: The requester of a deadline extension cannot decide their own request → 403', async () => {
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${uid()}`, templateId: publishedTemplateId,
+          issuerId: managerId, assignedToUserId: staffId,
+          targetDivisionId: divisionId, status: 'Assigned',
+          deadline: new Date(Date.now() + 7 * 86400000),
+          schemaSnapshot: [], assignmentType: 'INDIVIDUAL'
+        }
+      });
+      // The issuer (manager) requests an extension...
+      const reqRes = await request(app)
+        .put(`/api/tasks/${task.id}/deadline/request`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ reason: 'Need more time', proposedDeadline: new Date(Date.now() + 14 * 86400000).toISOString() });
+      expect(reqRes.status).toBe(200);
+
+      // ...and cannot then decide it themselves.
+      const selfDecide = await request(app)
+        .put(`/api/tasks/${task.id}/deadline/decide`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ extensionIndex: 0, decision: 'approve' });
+      expect(selfDecide.status).toBe(403);
+      expect(selfDecide.body.message).toMatch(/your own/i);
+
+      // A different reviewer (director) CAN decide it.
+      const otherDecide = await request(app)
+        .put(`/api/tasks/${task.id}/deadline/decide`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ extensionIndex: 0, decision: 'approve' });
+      expect(otherDecide.status).toBe(200);
+    });
+
+    it('SR-9: POST /api/tasks persists a supplied title', async () => {
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId, title: 'Custom task title' });
+      expect(res.status).toBe(201);
+      expect(res.body.title).toBe('Custom task title');
+    });
+
+    it('SR-10: a same-day (today) deadline is accepted on create → 201', async () => {
+      // Guards the timezone fix — same-day must be allowed regardless of server TZ.
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC date)
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId, deadline: today });
+      expect(res.status).toBe(201);
+    });
+
+    it('SR-11: a task with no target division can still be linked to a WP → 200', async () => {
+      // Regression guard: the division lock must not block a (schema-nullable)
+      // null-targetDivision task from being linked.
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: `TSK-WP-SR11${String(Date.now()).slice(-5)}`, name: 'Null-target link WP', type: 'AUDIT',
+          divisionId, timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: managerId, status: 'Open',
+        },
+      });
+      const task = await prisma.task.create({
+        data: {
+          taskId: `TSK-${String(Date.now()).slice(-6)}`, templateId: publishedTemplateId,
+          issuerId: managerId, targetDivisionId: null, status: 'Unassigned',
+          schemaSnapshot: [], assignmentType: 'INDIVIDUAL',
+        },
+      });
+      const res = await request(app)
+        .patch(`/api/tasks/${task.id}/wp`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ wpId: wp.id });
+      expect(res.status).toBe(200);
+      expect(res.body.wpId).toBe(wp.id);
+      await prisma.workPackage.delete({ where: { id: wp.id } });
     });
   });
 });

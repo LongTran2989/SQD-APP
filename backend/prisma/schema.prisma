@@ -110,6 +110,9 @@ model User {
   // Files this user uploaded (Attachment owner back-relation).
   uploadedAttachments Attachment[] @relation("AttachmentUploadedBy")
 
+  // Feed comment acknowledgements this user made (Phase G).
+  feedAcknowledgements FeedPostAcknowledgement[] @relation("UserFeedAcks")
+
   // Auto-generate ownership (Template Sets / WP Blueprints this user owns).
   ownedTemplateSets TemplateSet[] @relation("TemplateSetOwner")
   ownedBlueprints   WpBlueprint[] @relation("WpBlueprintOwner")
@@ -252,7 +255,7 @@ model Task {
   templateId Int
   template   Template @relation(fields: [templateId], references: [id])
 
-  status String @default("Unassigned") // Assigned, InProgress, Review, Approved, Rejected, etc.
+  status String @default("Unassigned") // TASK_STATUSES (constants/taskStatus.ts): Unassigned, Assigned, In Progress, In Review, Follow-up Required, Closed, Rejected, Terminated, Inactive. Enforced by a CHECK constraint (see migration 20260623000100_add_status_check_constraints).
 
   issuerId Int
   issuer   User @relation("TaskIssuer", fields: [issuerId], references: [id])
@@ -325,10 +328,10 @@ model TaskData {
 
 model Finding {
   id          Int     @id @default(autoincrement())
-  severity    String? // Observation, Level 1, Level 2
-  category    String? // Legacy classification (Safety, Documentation, Tools, etc.) — optional; eventType is the primary classifier
+  findingId   String? @unique // Human-readable business code, e.g. FND-000001 (org-wide sequence). Nullable for clean two-step migration/backfill; always set at creation going forward.
+  severity    String? // FINDING_SEVERITIES: Observation, Level 1, Level 2 (nullable). CHECK-constrained — see migration 20260623000100.
   description String
-  status      String  @default("Open") // Open, In Progress, Pending Verification, Closed
+  status      String  @default("Open") // FINDING_STATUSES: Open, In Progress, Pending Verification, Closed, Dismissed. CHECK-constrained — see migration 20260623000100.
 
   fieldId              String?
   dueDate              DateTime?
@@ -336,16 +339,6 @@ model Finding {
   aircraftRegistrationCode String?
   aircraftRegistration AircraftRegistration? @relation(fields: [aircraftRegistrationCode], references: [registration])
   regulatoryReference  String?
-  // @deprecated superseded by structured RCA + CAPA
-  errorCode        String?
-  // @deprecated superseded by structured RCA + CAPA
-  rootCause        String?
-  // @deprecated
-  correctiveAction String?
-  // @deprecated
-  recurrence       Boolean?
-  // @deprecated
-  violatorIds      Json?
 
   sourceTaskId Int?
   sourceTask   Task? @relation("FindingSourceTask", fields: [sourceTaskId], references: [id])
@@ -380,6 +373,12 @@ model Finding {
   updatedAt DateTime  @updatedAt
 
   @@index([departmentId, ataChapterId]) // supports the trend recurrence query
+  // Hot read paths: dashboard status counts, division dashboards, and the
+  // "my reported findings" feed/list. All filter deletedAt: null (Rule 2), so it
+  // trails each composite. Finding is the 2nd-hottest table after Task.
+  @@index([status, deletedAt])
+  @@index([targetDivisionId, status, deletedAt])
+  @@index([reportedByUserId, deletedAt])
 }
 
 // -----------------------------------------------------------------------
@@ -476,8 +475,10 @@ model CapaAction {
 }
 
 // Join table linking a CAPA item to one or more existing Tasks / Work Packages.
-// A CAPA may have many linked items; each link carries a role describing how the
-// task/WP relates to the action (EXECUTION | EFFECTIVENESS | SUPPORTING).
+// Each link is either mandatory (must be Closed before the CAPA can be verified
+// and the finding closed) or non-mandatory (reference-only). This replaces the
+// former EXECUTION / EFFECTIVENESS / SUPPORTING role taxonomy — effectiveness is
+// now an explicit human sign-off recorded at verify time, not an inferred role.
 model CapaTaskLink {
   id        Int          @id @default(autoincrement())
   capaId    Int
@@ -486,7 +487,7 @@ model CapaTaskLink {
   task      Task?        @relation("CapaLinkedTasks", fields: [taskId], references: [id])
   wpId      Int?
   wp        WorkPackage? @relation("CapaLinkedWPs", fields: [wpId], references: [id])
-  role      String // EXECUTION | EFFECTIVENESS | SUPPORTING
+  mandatory Boolean      @default(true)
   createdAt DateTime     @default(now())
 
   @@index([capaId])
@@ -581,7 +582,9 @@ model FindingResponseAction {
   createdByUserId Int
   createdByUser   User @relation("FindingResponseActionCreatedBy", fields: [createdByUserId], references: [id])
 
-  deletedAt DateTime?
+  // Response actions are append-only (created with their follow-up task, never
+  // deleted). If a delete path is ever added, reintroduce a `deletedAt` here and
+  // add `where: { deletedAt: null }` to every read (Rule 2).
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -731,7 +734,7 @@ model WorkPackage {
   targetDepartmentId Int?
   targetDepartment   Department? @relation("WorkPackageTargetDepartment", fields: [targetDepartmentId], references: [id], onDelete: SetNull)
 
-  status          String @default("Open") // Open, In Progress, Overdue, Closed, Inactive
+  status          String @default("Open") // Open, In Progress, Overdue, Closed, Inactive. CHECK-constrained — see migration 20260623000100.
   inactivationLog Json?
   closedAt        DateTime? // stamped when status manually transitions to 'Closed' (anchors LAST_DONE recurrence)
 
@@ -782,6 +785,7 @@ model TemplateSet {
   ownerId     Int
   owner       User     @relation("TemplateSetOwner", fields: [ownerId], references: [id])
   isActive    Boolean  @default(true)
+  externalRef String?  @unique // Excel SetRef for idempotent seed upsert
 
   items        TemplateSetItem[]
   workPackages WorkPackage[] // back-relation via WorkPackage.autoGenSetId
@@ -853,6 +857,7 @@ model WpBlueprint {
   ownerId  Int
   owner    User    @relation("WpBlueprintOwner", fields: [ownerId], references: [id])
   isActive Boolean @default(true)
+  externalRef String? @unique // Excel BlueprintRef for idempotent seed upsert
 
   instances WorkPackage[] // back-relation via WorkPackage.blueprintId
 
@@ -905,10 +910,39 @@ model FeedPost {
   flag              EscalationFlag? @relation(fields: [flagId], references: [id])
   taggedDivisionIds Json? // Org Feed only — int array of tagged divisions
 
+  // ── Moderation flags (Phase D) ──────────────────────────────────────────────
+  // Soft-hide (M4): a hidden COMMENT is kept (immutable audit trail) but excluded
+  // from feed reads. Director/Admin only; reversible via unhide. Pinning: a COMMENT
+  // pinned to a WP/DIVISION/ORG feed surfaces in a "Pinned" strip. Both are
+  // post-level admin flags — never physical deletes.
+  hiddenAt       DateTime?
+  hiddenByUserId Int?
+  hiddenReason   String?
+  pinnedAt       DateTime?
+  pinnedByUserId Int?
+
   createdAt DateTime @default(now())
 
+  acknowledgements FeedPostAcknowledgement[]
+
   @@index([scope, scopeId, createdAt])
+  @@index([scope, scopeId, pinnedAt]) // pinned-posts lookup per feed
   @@index([flagId])
+}
+
+// A user's acknowledgement ("I have read this") of a feed COMMENT — Phase G.
+// Immutable, idempotent (one per user per post via the unique constraint). Used
+// for compliance read-receipts on directives/announcements.
+model FeedPostAcknowledgement {
+  id             Int      @id @default(autoincrement())
+  feedPostId     Int
+  feedPost       FeedPost @relation(fields: [feedPostId], references: [id], onDelete: Cascade)
+  userId         Int
+  user           User     @relation("UserFeedAcks", fields: [userId], references: [id])
+  acknowledgedAt DateTime @default(now())
+
+  @@unique([feedPostId, userId])
+  @@index([feedPostId])
 }
 
 // One flag tracks an escalation through its entire lifecycle (no flag chains).
@@ -980,7 +1014,8 @@ model Attachment {
   fileType   String // MIME type, validated against FILE_UPLOAD_CONFIG
   fileSize   Int // bytes
   bucket     String // logical storage root: sqd-tasks | sqd-findings | sqd-templates
-  storageKey String @unique // path within the storage backend (driver-agnostic)
+  storageKey String  @unique // path within the storage backend (driver-agnostic)
+  caption    String? // user-editable label, distinct from fileName (report_block galleries)
 
   // Polymorphic owner. entityType ∈ TASK | FINDING | TEMPLATE | WP; entityId is
   // the owning record id (String to mirror AuditLog.entityId). fieldId scopes a

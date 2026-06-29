@@ -2,15 +2,19 @@
 
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { MessageCircle, Send } from 'lucide-react';
-import { FeedPostEnriched, FeedScope, EscalationTargetScope, User } from '../../types';
-import { getFeed, postFeedComment, canPostToFeed } from '../../api/feedApi';
+import { MessageCircle, Send, Pin, Search, X } from 'lucide-react';
+import { FeedPostEnriched, FeedScope, FeedPostType, EscalationTargetScope, User, MentionUser } from '../../types';
+import { getFeedPage, getPinnedFeed, postFeedComment, canPostToFeed, searchFeed, FeedSearchResult } from '../../api/feedApi';
 import { getApiErrorMessage } from '../../utils/apiError';
+import { uploadCommentAttachments } from '../../api/attachmentApi';
 import FeedPostItem from './FeedPostItem';
+import FeedFilterBar from './FeedFilterBar';
+import MentionField from './MentionField';
+import AttachmentPicker from './AttachmentPicker';
 import NewUpdatesPill from '../ui/NewUpdatesPill';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { feedKey } from '../../store/realtimeStore';
-import { getInitials } from '../../utils/feedHelpers';
+import { getInitials, formatTimestamp } from '../../utils/feedHelpers';
 
 interface FeedPanelProps {
   scope: FeedScope;
@@ -28,29 +32,110 @@ interface FeedPanelProps {
 export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed', readOnly = false }: FeedPanelProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const [posts, setPosts] = useState<FeedPostEnriched[]>([]);
+  const [pinned, setPinned] = useState<FeedPostEnriched[]>([]);
+  const [cursor, setCursor] = useState<number | null>(null); // next `before` for older posts; null = start of feed
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [hidden, setHidden] = useState<Set<FeedPostType>>(new Set());
+  const [showHidden, setShowHidden] = useState(false); // Director/Admin: reveal soft-hidden comments
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
+  const [mentionSel, setMentionSel] = useState<MentionUser[]>([]);
+  const [attachFiles, setAttachFiles] = useState<File[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<FeedSearchResult[] | null>(null);
 
-  // Load the feed on mount / scope change. setState lives in the promise
-  // callbacks (not synchronously in the effect body) — mirrors the Sidebar's
-  // badge-polling pattern. A 404 (missing target) or transient error just
+  // Moderation rights (Phase D). Hide/unhide is Director/Admin; pin/unpin mirrors
+  // posting rights and is only offered on the pinnable (WP/Division/Org) scopes.
+  const canModerate = currentUser.role === 'Director' || currentUser.role === 'Admin';
+  const isPinnableScope = scope === 'WP' || scope === 'DIVISION' || scope === 'ORG';
+  const canPin = isPinnableScope && canPostToFeed(currentUser.role, currentUser.divisionId, scope, scopeId);
+
+  const loadPinned = () => {
+    if (!isPinnableScope) return;
+    getPinnedFeed(scope, scopeId).then(setPinned).catch(() => {});
+  };
+
+  // Load the newest page on mount / scope change (and when Show-hidden toggles).
+  // setState lives in the promise callbacks (not synchronously in the effect body)
+  // — mirrors the Sidebar's badge-polling pattern. A 404 / transient error just
   // leaves an empty feed.
   useEffect(() => {
     let cancelled = false;
-    getFeed(scope, scopeId)
-      .then((data) => { if (!cancelled) setPosts(data); })
-      .catch(() => { if (!cancelled) setPosts([]); })
+    getFeedPage(scope, scopeId, { includeHidden: showHidden })
+      .then((page) => { if (!cancelled) { setPosts(page.posts); setCursor(page.nextCursor); } })
+      .catch(() => { if (!cancelled) { setPosts([]); setCursor(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [scope, scopeId]);
+  }, [scope, scopeId, showHidden]);
 
-  // Auto-scroll to newest on load / new entries.
+  // Pinned strip loads independently of pagination/hidden state.
   useEffect(() => {
-    if (feedRef.current) {
-      feedRef.current.scrollTop = feedRef.current.scrollHeight;
+    let cancelled = false;
+    if (isPinnableScope) {
+      getPinnedFeed(scope, scopeId).then((p) => { if (!cancelled) setPinned(p); }).catch(() => {});
     }
-  }, [posts.length]);
+    return () => { cancelled = true; };
+  }, [scope, scopeId, isPinnableScope]);
+
+  // Per-feed search (Phase H), debounced. A query < 2 chars exits search mode (the
+  // normal feed shows). All setState lives in the timer/promise callbacks.
+  useEffect(() => {
+    let cancelled = false;
+    const term = searchQuery.trim();
+    const t = setTimeout(() => {
+      if (term.length < 2) { setSearchResults(null); return; }
+      searchFeed(term, { scope, scopeId: scopeId ?? undefined, limit: 50 })
+        .then((r) => { if (!cancelled) setSearchResults(r.results); })
+        .catch(() => { if (!cancelled) setSearchResults([]); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [searchQuery, scope, scopeId]);
+
+  // Older posts are prepended above the current page; the scroll container keeps
+  // its position (we only grow the top), so the reader isn't yanked.
+  const handleLoadEarlier = async () => {
+    if (cursor == null || loadingEarlier) return;
+    setLoadingEarlier(true);
+    const el = feedRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    try {
+      const page = await getFeedPage(scope, scopeId, { before: cursor, includeHidden: showHidden });
+      setPosts((prev) => [...page.posts, ...prev]);
+      setCursor(page.nextCursor);
+      // Preserve the reader's view by restoring the scroll offset after growth.
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop += el.scrollHeight - prevHeight;
+      });
+    } catch {
+      /* transient — leave the feed as-is */
+    } finally {
+      setLoadingEarlier(false);
+    }
+  };
+
+  const toggleHidden = (t: FeedPostType) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t); else next.add(t);
+      return next;
+    });
+
+  // A pinned comment already shows in the pinned strip above — exclude it from the
+  // inline list so it isn't rendered twice (with two moderation menus).
+  const pinnedIds = new Set(pinned.map((p) => p.id));
+  const visiblePosts = posts.filter((p) => !hidden.has(p.type) && !pinnedIds.has(p.id));
+
+  // Auto-scroll to newest only when the BOTTOM entry changes (initial load or an
+  // appended post) — never when older posts are prepended via "Load earlier".
+  const lastIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    const lastId = posts.length ? posts[posts.length - 1].id : null;
+    if (lastId !== lastIdRef.current) {
+      if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+      lastIdRef.current = lastId;
+    }
+  }, [posts]);
 
   const canPost = !readOnly && canPostToFeed(currentUser.role, currentUser.divisionId, scope, scopeId);
 
@@ -63,10 +148,13 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
   // Re-fetch after an escalation so the source-feed SYSTEM_EVENT (and any card
   // landing on this same feed) appears. Mirrors the load effect's setState.
   const reloadFeed = () => {
-    getFeed(scope, scopeId)
-      .then(setPosts)
+    getFeedPage(scope, scopeId, { includeHidden: showHidden })
+      .then((page) => { setPosts(page.posts); setCursor(page.nextCursor); })
       .catch(() => {});
   };
+
+  // After a hide/unhide/pin/unpin: refresh both the feed and the pinned strip.
+  const onModerated = () => { reloadFeed(); loadPinned(); };
 
   // Live activity: surface a "new updates" pill (and refetch on tab refocus)
   // rather than yanking new posts in while the user is reading.
@@ -76,9 +164,23 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
     if (!comment.trim()) return;
     setPosting(true);
     try {
-      const created = await postFeedComment(scope, scopeId, comment.trim());
-      setPosts((prev) => [...prev, created]);
+      const created = await postFeedComment(scope, scopeId, comment.trim(), mentionSel.map((m) => m.id));
       setComment('');
+      setMentionSel([]);
+      // Attachments upload AFTER the comment exists (they need its id), then we
+      // reload so the comment renders with its files. Without files we just append.
+      if (attachFiles.length) {
+        const files = attachFiles;
+        setAttachFiles([]);
+        try {
+          await uploadCommentAttachments(created.id, files);
+        } catch (err) {
+          toast.error(getApiErrorMessage(err, 'Some attachments failed to upload'));
+        }
+        reloadFeed();
+      } else {
+        setPosts((prev) => [...prev, created]);
+      }
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Failed to post comment'));
     } finally {
@@ -96,25 +198,99 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100 flex-shrink-0">
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b border-slate-100 flex-shrink-0">
         <MessageCircle className="w-4 h-4 text-slate-400" />
         <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{title}</h2>
         <span className="ml-auto text-xs text-slate-400">{posts.length} entries</span>
+        <div className="w-full flex items-center justify-between gap-2">
+          <FeedFilterBar hidden={hidden} onToggle={toggleHidden} />
+          {canModerate && (
+            <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer select-none">
+              <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="accent-rose-500" />
+              Show hidden
+            </label>
+          )}
+        </div>
+        <div className="w-full relative">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search comments in this feed…"
+            className="w-full pl-8 pr-8 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {searchQuery && (
+            <button type="button" onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" aria-label="Clear search">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Feed list */}
+      {/* Pinned strip */}
+      {pinned.length > 0 && (
+        <div className="px-4 py-3 border-b border-amber-100 bg-amber-50/50 space-y-3 flex-shrink-0 max-h-48 overflow-y-auto">
+          <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-700 uppercase tracking-wide">
+            <Pin className="w-3 h-3" /> Pinned
+          </div>
+          {pinned.map((post) => (
+            <FeedPostItem
+              key={`pin-${post.id}`}
+              post={post}
+              currentUserId={currentUser.id}
+              canModerate={canModerate}
+              canPin={canPin}
+              onModerated={onModerated}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Search results — replace the feed list while a search is active */}
+      {searchResults !== null ? (
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2 min-h-0">
+          <p className="text-[11px] text-slate-400">
+            {searchResults.length} result{searchResults.length === 1 ? '' : 's'} for “{searchQuery.trim()}”
+          </p>
+          {searchResults.length === 0 ? (
+            <div className="text-center text-slate-400 text-sm py-8">No matching comments.</div>
+          ) : (
+            searchResults.map((r) => (
+              <div key={r.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-xs font-semibold text-slate-700">{r.author?.name ?? 'Unknown'}</span>
+                  <span className="text-[10px] text-slate-400">{formatTimestamp(r.createdAt)}</span>
+                </div>
+                <p className="text-sm text-slate-700 break-words">{r.content}</p>
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+      /* Feed list */
       <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
         <NewUpdatesPill show={hasNew} onClick={refresh} />
+        {!loading && cursor != null && (
+          <div className="flex justify-center">
+            <button
+              onClick={handleLoadEarlier}
+              disabled={loadingEarlier}
+              className="px-3 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-full border border-blue-200 transition-colors disabled:opacity-50"
+            >
+              {loadingEarlier ? 'Loading…' : 'Load earlier'}
+            </button>
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : posts.length === 0 ? (
+        ) : visiblePosts.length === 0 ? (
           <div className="text-center text-slate-400 text-sm py-8">
             No activity yet. Comments and events will appear here.
           </div>
         ) : (
-          posts.map((post) => (
+          visiblePosts.map((post) => (
             <FeedPostItem
               key={post.id}
               post={post}
@@ -122,10 +298,14 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
               flagTargets={flagTargets}
               onFlagged={reloadFeed}
               onActioned={reloadFeed}
+              canModerate={canModerate}
+              canPin={canPin}
+              onModerated={onModerated}
             />
           ))
         )}
       </div>
+      )}
 
       {/* Composer */}
       {canPost && (
@@ -139,7 +319,7 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Write a comment... (Ctrl+Enter to send)"
+                placeholder="Write a comment… (#CODE links a task/WP/finding · Ctrl+Enter to send)"
                 rows={2}
                 className="w-full px-3.5 py-2.5 pr-12 border border-slate-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
               />
@@ -156,6 +336,10 @@ export default function FeedPanel({ scope, scopeId, currentUser, title = 'Feed',
                 )}
               </button>
             </div>
+          </div>
+          <div className="mt-2 pl-10 flex flex-wrap items-center gap-2">
+            <MentionField selected={mentionSel} onChange={setMentionSel} />
+            <AttachmentPicker files={attachFiles} onChange={setAttachFiles} disabled={posting} />
           </div>
         </div>
       )}

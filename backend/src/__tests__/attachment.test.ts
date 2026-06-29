@@ -307,4 +307,169 @@ describe('Attachments / File Upload infrastructure', () => {
     expect(Array.isArray(res.body.categories)).toBe(true);
     expect(res.body.totalPerEntityBytes).toBeGreaterThan(0);
   });
+
+  // ─── Caption update (PATCH) ─────────────────────────────────────────────────
+  // Note: the task created in beforeEach is assigned to uploaderId with status
+  // 'Assigned' (an editable status), so uploaderToken is both the uploader AND
+  // the task assignee for these tests unless otherwise noted.
+  it('A14 — assignee can caption their own upload; writes AuditLog + FeedPost', async () => {
+    const up = await request(app).post('/api/attachments').set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'TASK').field('entityId', String(taskId))
+      .attach('file', Buffer.from('img'), { filename: 'photo.png', contentType: PNG });
+
+    const res = await request(app)
+      .patch(`/api/attachments/${up.body.id}`)
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .send({ caption: 'Corrosion on bracket A' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.caption).toBe('Corrosion on bracket A');
+
+    const audit = await prisma.auditLog.findFirst({ where: { actionType: 'ATTACHMENT_CAPTION_UPDATED' } });
+    expect(audit).not.toBeNull();
+
+    const feed = await prisma.feedPost.findFirst({ where: { scope: 'TASK', scopeId: taskId, content: { contains: 'Caption updated' } } });
+    expect(feed).not.toBeNull();
+  });
+
+  it('A15 — assignee can caption an attachment uploaded by someone else on their task', async () => {
+    const up = await request(app).post('/api/attachments').set('Authorization', `Bearer ${managerToken}`)
+      .field('entityType', 'TASK').field('entityId', String(taskId))
+      .attach('file', Buffer.from('img'), { filename: 'photo.png', contentType: PNG });
+
+    const res = await request(app)
+      .patch(`/api/attachments/${up.body.id}`)
+      .set('Authorization', `Bearer ${uploaderToken}`) // assignee, not the uploader here
+      .send({ caption: 'Annotated by assignee' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.caption).toBe('Annotated by assignee');
+  });
+
+  it('A16 — a non-assignee Staff without delete_any cannot caption', async () => {
+    const up = await request(app).post('/api/attachments').set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'TASK').field('entityId', String(taskId))
+      .attach('file', Buffer.from('img'), { filename: 'photo.png', contentType: PNG });
+
+    const res = await request(app)
+      .patch(`/api/attachments/${up.body.id}`)
+      .set('Authorization', `Bearer ${otherStaffToken}`)
+      .send({ caption: 'Should be blocked' });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('A17 — a delete_any privilege holder can caption regardless of task status', async () => {
+    const up = await request(app).post('/api/attachments').set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'TASK').field('entityId', String(taskId))
+      .attach('file', Buffer.from('img'), { filename: 'photo.png', contentType: PNG });
+
+    await prisma.task.update({ where: { id: taskId }, data: { status: 'Closed' } });
+
+    const res = await request(app)
+      .patch(`/api/attachments/${up.body.id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ caption: 'Manager override on closed task' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.caption).toBe('Manager override on closed task');
+  });
+
+  it('A18 — the assignee is blocked once the task leaves an editable status', async () => {
+    const up = await request(app).post('/api/attachments').set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'TASK').field('entityId', String(taskId))
+      .attach('file', Buffer.from('img'), { filename: 'photo.png', contentType: PNG });
+
+    await prisma.task.update({ where: { id: taskId }, data: { status: 'In Review' } });
+
+    const res = await request(app)
+      .patch(`/api/attachments/${up.body.id}`)
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .send({ caption: 'Too late to edit' });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('A19 — caption over 300 characters is rejected', async () => {
+    const up = await request(app).post('/api/attachments').set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'TASK').field('entityId', String(taskId))
+      .attach('file', Buffer.from('img'), { filename: 'photo.png', contentType: PNG });
+
+    const res = await request(app)
+      .patch(`/api/attachments/${up.body.id}`)
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .send({ caption: 'x'.repeat(301) });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('A20 — an empty-string caption clears it to null', async () => {
+    const up = await request(app).post('/api/attachments').set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'TASK').field('entityId', String(taskId))
+      .attach('file', Buffer.from('img'), { filename: 'photo.png', contentType: PNG });
+
+    await request(app).patch(`/api/attachments/${up.body.id}`).set('Authorization', `Bearer ${uploaderToken}`).send({ caption: 'first' });
+    const res = await request(app)
+      .patch(`/api/attachments/${up.body.id}`)
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .send({ caption: '' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.caption).toBeNull();
+  });
+
+  it('A21 — captioning a soft-deleted attachment → 404', async () => {
+    const up = await request(app).post('/api/attachments').set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'TASK').field('entityId', String(taskId))
+      .attach('file', Buffer.from('img'), { filename: 'photo.png', contentType: PNG });
+    await request(app).delete(`/api/attachments/${up.body.id}`).set('Authorization', `Bearer ${uploaderToken}`);
+
+    const res = await request(app)
+      .patch(`/api/attachments/${up.body.id}`)
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .send({ caption: 'too late' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('A22 — rejects unauthenticated caption update', async () => {
+    const res = await request(app).patch('/api/attachments/1').send({ caption: 'nope' });
+    expect(res.status).toBe(401);
+  });
+
+  // ─── Comment attachments (Phase F) ──────────────────────────────────────────
+  it('A23 — attaches a file to a feed COMMENT; it surfaces on the activity read', async () => {
+    const comment = await prisma.feedPost.create({
+      data: { type: 'COMMENT', scope: 'TASK', scopeId: taskId, content: 'see attached', authorId: uploaderId },
+    });
+
+    const up = await request(app)
+      .post('/api/attachments')
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'FEED_POST')
+      .field('entityId', String(comment.id))
+      .attach('file', Buffer.from('%PDF-1.4 evidence'), { filename: 'note.pdf', contentType: PDF });
+    expect(up.status).toBe(201);
+
+    const read = await request(app)
+      .get(`/api/tasks/${taskId}/activity`)
+      .set('Authorization', `Bearer ${uploaderToken}`);
+    expect(read.status).toBe(200);
+    const posted = read.body.find((p: { id: number }) => p.id === comment.id);
+    expect(posted.attachments).toHaveLength(1);
+    expect(posted.attachments[0].fileName).toBe('note.pdf');
+  });
+
+  it('A24 — rejects attaching to a non-COMMENT feed post (404)', async () => {
+    const sysEvent = await prisma.feedPost.create({
+      data: { type: 'SYSTEM_EVENT', scope: 'TASK', scopeId: taskId, content: 'system note' },
+    });
+    const up = await request(app)
+      .post('/api/attachments')
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .field('entityType', 'FEED_POST')
+      .field('entityId', String(sysEvent.id))
+      .attach('file', Buffer.from('%PDF-1.4 x'), { filename: 'x.pdf', contentType: PDF });
+    expect(up.status).toBe(404);
+  });
 });

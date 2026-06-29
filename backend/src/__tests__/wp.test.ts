@@ -514,7 +514,9 @@ describe('Work Package Backend', () => {
         .send({ userId: otherUser.id });
 
       expect(res.status).toBe(403);
-      expect(res.body.message).toMatch(/same division/i);
+      // Wording updated in the 2026-06-28 hardening (division check is now
+      // privilege-generic, not Manager-role-specific); behaviour unchanged.
+      expect(res.body.message).toMatch(/own division/i);
 
       // Cleanup
       await prisma.user.delete({ where: { id: otherUser.id } });
@@ -914,6 +916,56 @@ describe('Work Package Backend', () => {
 
       const notes = await prisma.notification.findMany({ where: { userId: staffUserId, type: 'TASKS_GENERATED', linkId: wp.id } });
       expect(notes).toHaveLength(0);
+    });
+  });
+
+  // ─── Security Review Hardening (2026-06-28) — division scope ──────────
+  describe('Security Review Hardening', () => {
+    it('SR-WP-1: Manager cannot create a Work Package in another division → 403', async () => {
+      const res = await request(app)
+        .post('/api/work-packages')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          name: 'Cross-div WP', type: 'AUDIT', divisionId: otherDivisionId,
+          timeframeFrom: '2026-07-01', timeframeTo: '2026-07-31',
+        });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/own division/i);
+    });
+
+    it('SR-WP-2: Director can create a Work Package in another division → 201', async () => {
+      const res = await request(app)
+        .post('/api/work-packages')
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({
+          name: 'Director cross-div WP', type: 'AUDIT', divisionId: otherDivisionId,
+          timeframeFrom: '2026-07-01', timeframeTo: '2026-07-31',
+        });
+      expect(res.status).toBe(201);
+      expect(res.body.divisionId).toBe(otherDivisionId);
+    });
+
+    it('SR-WP-3: Manager cannot assign a user from another division to a WP → 403', async () => {
+      const wp = await prisma.workPackage.create({
+        data: {
+          wpId: 'WPT-WP-SR03', name: 'Assign Scope WP', type: 'AUDIT', divisionId,
+          timeframeFrom: new Date(), timeframeTo: new Date(Date.now() + 86400000),
+          creatorId: managerUserId, status: 'Open',
+        },
+      });
+      const staffRole = await prisma.role.findUnique({ where: { name: 'Staff' } });
+      const foreignUser = await prisma.user.create({
+        data: { name: 'Foreign Staff', email: `foreign_staff_${Date.now()}@sqd.com`, passwordHash: 'hash', forcePasswordChange: false, divisionId: otherDivisionId, roleId: staffRole!.id },
+      });
+
+      const res = await request(app)
+        .post(`/api/work-packages/${wp.id}/assign`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ userId: foreignUser.id });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/own division/i);
+
+      await prisma.user.delete({ where: { id: foreignUser.id } });
     });
   });
 });

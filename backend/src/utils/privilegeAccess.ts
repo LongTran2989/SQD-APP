@@ -39,3 +39,17 @@ export function hasPrivilege(actor: PrivilegeActor | undefined | null, key: Priv
   const defaults = DEFAULT_PRIVILEGES[actor.role as RoleName];
   return defaults?.[key] ?? false;
 }
+
+/**
+ * Single "can act outside my own division" signal, shared by every division-scope
+ * guard in the task AND work-package controllers (create / link / assign / status).
+ * Global roles (Director, Admin) always have reach; any other role explicitly
+ * granted `task:assign_any` does too — so a custom role's cross-division reach is
+ * consistent across both domains instead of tasks honouring the privilege while
+ * WPs only check the role string. Division-scope stays hardcoded by design
+ * (Phase 7 keeps it out of the privilege matrix); this only centralises the check.
+ */
+export function hasCrossDivisionReach(actor: PrivilegeActor | undefined | null): boolean {
+  if (!actor || !actor.role) return false;
+  return actor.role === 'Director' || actor.role === 'Admin' || hasPrivilege(actor, 'task:assign_any');
+}

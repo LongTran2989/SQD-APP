@@ -166,6 +166,7 @@ describe('Notification Center & SSE (live notifications)', () => {
 
     it('marks one notification read (own only)', async () => {
       const [unread] = await prisma.notification.findMany({ where: { userId: staffAId, readAt: null } });
+      if (!unread) throw new Error('expected an unread notification for staffA');
       const res = await request(app).patch(`/api/notifications/${unread.id}/read`).set('Authorization', `Bearer ${staffAToken}`);
       expect(res.status).toBe(200);
       const after = await prisma.notification.findUnique({ where: { id: unread.id } });
@@ -174,6 +175,7 @@ describe('Notification Center & SSE (live notifications)', () => {
 
     it('cannot mark another user’s notification read (404)', async () => {
       const [othersNotif] = await prisma.notification.findMany({ where: { userId: staffBId } });
+      if (!othersNotif) throw new Error('expected a notification for staffB');
       const res = await request(app).patch(`/api/notifications/${othersNotif.id}/read`).set('Authorization', `Bearer ${staffAToken}`);
       expect(res.status).toBe(404);
       const after = await prisma.notification.findUnique({ where: { id: othersNotif.id } });
@@ -203,9 +205,11 @@ describe('Notification Center & SSE (live notifications)', () => {
 
       const inbox = await inboxOf(staffAId);
       expect(inbox).toHaveLength(1);
-      expect(inbox[0].type).toBe('TASK_ASSIGNED');
-      expect(inbox[0].linkScope).toBe('TASK');
-      expect(inbox[0].linkId).toBe(task.id);
+      const [notif] = inbox;
+      if (!notif) throw new Error('expected a notification in staffA inbox');
+      expect(notif.type).toBe('TASK_ASSIGNED');
+      expect(notif.linkScope).toBe('TASK');
+      expect(notif.linkId).toBe(task.id);
       // The assigning manager gets nothing.
       expect(await inboxOf(managerId)).toHaveLength(0);
     });
@@ -257,7 +261,9 @@ describe('Notification Center & SSE (live notifications)', () => {
 
       const assigneeFeed = (await inboxOf(staffAId)).filter((n) => n.type === 'FEED_ACTIVITY');
       expect(assigneeFeed).toHaveLength(1);
-      expect((assigneeFeed[0].metadata as { count?: number })?.count).toBe(2);
+      const [collapsed] = assigneeFeed;
+      if (!collapsed) throw new Error('expected a collapsed FEED_ACTIVITY notification');
+      expect((collapsed.metadata as { count?: number })?.count).toBe(2);
     });
 
     it('notifies WP watchers on a WP feed comment', async () => {
@@ -331,7 +337,7 @@ describe('Notification Center & SSE (live notifications)', () => {
       await new Promise<void>((resolve) => server.listen(0, resolve));
       const { port } = server.address() as { port: number };
 
-      const result = await new Promise<{ status: number; contentType?: string }>((resolve, reject) => {
+      const result = await new Promise<{ status: number; contentType: string | undefined }>((resolve, reject) => {
         const req = http.get(
           { host: '127.0.0.1', port, path: '/api/events/stream', headers: { Authorization: `Bearer ${staffAToken}` } },
           (res) => {

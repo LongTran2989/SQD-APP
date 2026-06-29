@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { FindingDetail, FindingSeverity } from '../../types';
 import { reviewFinding, dismissFinding, updateFindingSeverity } from '../../api/findingApi';
 import { SeverityBadge } from './FindingBadges';
+import { formatDueDate } from '../../utils/dateFormat';
+import { formatFindingRef } from '../../utils/findingFormat';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 import { ShieldCheck } from 'lucide-react';
@@ -16,9 +18,14 @@ interface Props {
 
 const SEVERITIES: FindingSeverity[] = ['Observation', 'Level 1', 'Level 2'];
 
-function formatDate(d: string | null): string {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+// Default corrective-action timescales (days) per severity. Mirrors the seed
+// DEFAULT_FINDING_WORKFLOW_CONFIG on the backend, which remains authoritative —
+// this is a convenience prefill + "required" hint only. Severities listed here
+// require a due date at review time.
+const SEVERITY_SLA_DAYS: Record<string, number> = { 'Level 1': 7, 'Level 2': 30 };
+
+function isoDatePlusDays(days: number): string {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
@@ -27,7 +34,21 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
 
   const [severity, setSeverity] = useState<FindingSeverity | ''>('');
   const [dueDate, setDueDate] = useState('');
+  const [dueDateAutoFilled, setDueDateAutoFilled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const dueDateRequired = !!severity && severity in SEVERITY_SLA_DAYS;
+
+  const handleSeverityChange = (next: FindingSeverity | '') => {
+    setSeverity(next);
+    // Prefill the SLA due date when the field is empty or still holds a prior
+    // auto-fill (never clobber a value the reviewer typed themselves).
+    const slaDays = next ? SEVERITY_SLA_DAYS[next] : undefined;
+    if (slaDays != null && (!dueDate || dueDateAutoFilled)) {
+      setDueDate(isoDatePlusDays(slaDays));
+      setDueDateAutoFilled(true);
+    }
+  };
 
   // Dismiss states
   const [showDismissModal, setShowDismissModal] = useState(false);
@@ -43,6 +64,10 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
   const handleSubmit = async () => {
     if (!severity) {
       toast.error('Please select a severity');
+      return;
+    }
+    if (dueDateRequired && !dueDate) {
+      toast.error(`A due date is required for a ${severity} finding`);
       return;
     }
     setSubmitting(true);
@@ -130,7 +155,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
           <div className="flex items-center gap-3">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide w-28">Due Date</span>
             <span className={`text-sm ${finding.dueDateBreached ? 'text-red-600 font-semibold' : 'text-slate-700'}`}>
-              {formatDate(finding.dueDate)}
+              {formatDueDate(finding.dueDate)}
             </span>
           </div>
         </div>
@@ -142,7 +167,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
             </label>
             <select
               value={severity}
-              onChange={(e) => setSeverity(e.target.value as FindingSeverity)}
+              onChange={(e) => handleSeverityChange(e.target.value as FindingSeverity)}
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Select severity…</option>
@@ -153,17 +178,20 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
-              Due Date (SLA)
+              Due Date (SLA) {dueDateRequired && <span className="text-red-400">*</span>}
             </label>
             <input
               type="date"
               max="9999-12-31"
               value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              onChange={(e) => { setDueDate(e.target.value); setDueDateAutoFilled(false); }}
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            {dueDateRequired && (
+              <p className="mt-1 text-xs text-slate-400">Pre-filled from the {severity} SLA — adjust if needed.</p>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div>
             <button
               type="button"
               onClick={handleSubmit}
@@ -172,13 +200,18 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
             >
               {submitting ? 'Submitting…' : 'Submit Review'}
             </button>
+          </div>
+          {/* Destructive, irreversible action — separated from the primary flow
+              and de-emphasised to avoid an accidental dismiss. */}
+          <div className="pt-3 mt-1 border-t border-slate-100">
             <button
               type="button"
               onClick={() => setShowDismissModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors"
+              className="text-xs font-medium text-red-600 hover:text-red-700 hover:underline"
             >
-              Dismiss
+              Dismiss this finding instead
             </button>
+            <p className="mt-0.5 text-xs text-slate-400">Use only for findings raised in error — this is permanent.</p>
           </div>
         </div>
       )}
@@ -187,7 +220,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
       {showDismissModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <h3 className="text-base font-bold text-slate-800 mb-3">Dismiss Finding #{finding.id}?</h3>
+            <h3 className="text-base font-bold text-slate-800 mb-3">Dismiss Finding {formatFindingRef(finding)}?</h3>
             <p className="text-sm text-slate-500 mb-4">
               Please enter the reason for dismissing this finding. This action cannot be undone.
             </p>
@@ -224,7 +257,7 @@ export default function ReviewPanel({ finding, canReview, onReviewed }: Props) {
       {showCorrectModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <h3 className="text-base font-bold text-slate-800 mb-3">Correct Severity for Finding #{finding.id}</h3>
+            <h3 className="text-base font-bold text-slate-800 mb-3">Correct Severity for Finding {formatFindingRef(finding)}</h3>
             <div className="space-y-4 mb-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">

@@ -206,19 +206,21 @@ describe('Findings Analytics (GET /api/analytics/findings)', () => {
     expect(body.avgDaysToClose).toBe(7); // (10 + 4) / 2
   });
 
-  // ── RBAC division scoping ──
+  // ── Division transparency + optional narrowing ──
+  // Findings analytics is organisation-wide for every role (matches the open
+  // Findings list); ?divisionId narrows to a single division for anyone.
 
-  it('A13: Manager sees only their own division (ANA)', async () => {
+  it('A13: Manager sees all findings org-wide, not just their division', async () => {
     const { body } = await get(managerToken);
-    expect(body.totalCount).toBe(4); // F1–F4
+    expect(body.totalCount).toBe(6); // F1–F4 (ANA) + G1, G2 (AN2)
     expect(body.closedCount).toBe(2);
-    expect(body.dismissedCount).toBe(0);
-    expect(countFor(body.byEventType, 'Other')).toBe(0); // G2 is in AN2 — excluded
+    expect(body.dismissedCount).toBe(1); // G2 (AN2) now visible
+    expect(countFor(body.byEventType, 'Other')).toBe(1); // G2 in AN2 now included
   });
 
-  it('A14: a Manager in another division (AN2) sees only AN2 findings', async () => {
+  it('A14: a Manager in another division (AN2) also sees the full org-wide dataset', async () => {
     const { body } = await get(manager2Token);
-    expect(body.totalCount).toBe(2); // G1, G2
+    expect(body.totalCount).toBe(6);
     expect(countFor(body.byStatus, 'Dismissed')).toBe(1);
   });
 
@@ -227,9 +229,9 @@ describe('Findings Analytics (GET /api/analytics/findings)', () => {
     expect(body.totalCount).toBe(2);
   });
 
-  it('A16: Manager cannot escape their scope via ?divisionId', async () => {
+  it('A16: Manager may narrow to any division via ?divisionId (transparency)', async () => {
     const { body } = await get(managerToken, `?divisionId=${division2Id}`);
-    expect(body.totalCount).toBe(4); // still their own division, not AN2
+    expect(body.totalCount).toBe(2); // narrowed to AN2, which the Manager can now see
   });
 
   // ── Query filters ──

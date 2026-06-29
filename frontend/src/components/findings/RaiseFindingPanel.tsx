@@ -1,15 +1,18 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { raiseFinding } from '../../api/findingApi';
+import { raiseFinding, getDuplicateCandidates, DuplicateCandidate } from '../../api/findingApi';
+import { formatFindingRef } from '../../utils/findingFormat';
 import { getDatasource, getDivisions as getDivisionsApi } from '../../api/taskApi';
 import { listAtaChapters, listHazardTags, listEventTypes } from '../../api/taxonomyApi';
 import { apiErrorMessage } from '../../api/errorMessage';
 import { AtaChapter, HazardTag, EventType } from '../../types';
 import toast from 'react-hot-toast';
-import { X, AlertTriangle } from 'lucide-react';
+import { X, AlertTriangle, ChevronDown, ChevronRight, Layers, Eye } from 'lucide-react';
 import { FINDING_EVENT_TYPES } from '../../constants/findingEventTypes';
 import SearchableSelect from '../ui/SearchableSelect';
+import { FindingStatusBadge } from './FindingBadges';
+import { useQuickView } from '../quickview/QuickViewProvider';
 
 interface Props {
   taskId?: number;
@@ -18,6 +21,7 @@ interface Props {
 }
 
 export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) {
+  const { openFinding } = useQuickView();
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
   const [targetDivisionId, setTargetDivisionId] = useState('');
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
@@ -36,7 +40,10 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
   const [regulatoryReference, setRegulatoryReference] = useState('');
   const [description, setDescription] = useState('');
   const [fieldId, setFieldId] = useState('');
+  const [showOptional, setShowOptional] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [candidates, setCandidates] = useState<DuplicateCandidate[]>([]);
+  const [duplicateOfId, setDuplicateOfId] = useState<number | null>(null);
 
   useEffect(() => {
     getDatasource('departments').then(setDepartments).catch(() => {});
@@ -60,6 +67,29 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
     () => operatorCode ? allRegistrations.filter((r) => r.operatorCode === operatorCode) : allRegistrations,
     [allRegistrations, operatorCode],
   );
+
+  // Raise-time duplicate detection: once a department is chosen (and the division
+  // is known), surface active findings the raiser might be duplicating. Debounced.
+  // A stale duplicate selection is dropped when the candidate list it came from
+  // no longer contains it.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      if (!departmentId || (!taskId && !targetDivisionId)) {
+        setCandidates([]);
+        return;
+      }
+      getDuplicateCandidates({
+        departmentId: Number(departmentId),
+        ...(taskId ? { taskId } : { targetDivisionId: Number(targetDivisionId) }),
+      })
+        .then((list) => {
+          setCandidates(list);
+          setDuplicateOfId((cur) => (cur != null && !list.some((c) => c.id === cur) ? null : cur));
+        })
+        .catch(() => setCandidates([]));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [departmentId, taskId, targetDivisionId]);
 
   const handleSelectOperator = (code: string) => {
     setOperatorCode(code);
@@ -102,8 +132,13 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
         fieldId: fieldId.trim() || undefined,
         ataChapterId: ataChapterId ? Number(ataChapterId) : undefined,
         hazardTagIds: selectedTagIds.length ? selectedTagIds : undefined,
+        ...(duplicateOfId != null ? { duplicateOfFindingId: duplicateOfId } : {}),
       });
-      toast.success(`Finding #${finding.id} raised`);
+      toast.success(
+        duplicateOfId != null
+          ? `Finding ${formatFindingRef(finding)} raised and marked as duplicate of #${duplicateOfId}`
+          : `Finding ${formatFindingRef(finding)} raised`
+      );
       onRaised();
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Failed to raise finding'));
@@ -186,6 +221,73 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
             </select>
           </div>
 
+          {/* Raise-time duplicate detection — offer to link instead of duplicate */}
+          {candidates.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700 uppercase tracking-wide">
+                <Layers className="w-3.5 h-3.5" />
+                Possible duplicates
+              </div>
+              <p className="text-xs text-amber-700/80">
+                {candidates.length} active finding{candidates.length > 1 ? 's' : ''} already open in this department. If this is the same issue, mark it as a duplicate instead of opening a new investigation.
+              </p>
+              <div className="space-y-1.5">
+                {candidates.map((c) => {
+                  const selected = duplicateOfId === c.id;
+                  return (
+                    <div
+                      key={c.id}
+                      className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 ${selected ? 'border-amber-400 bg-amber-100/70' : 'border-amber-100 bg-white'}`}
+                    >
+                      <div className="min-w-0 flex items-center gap-2">
+                        <span className="font-mono font-semibold text-amber-700 text-xs flex-shrink-0">#{c.id}</span>
+                        <FindingStatusBadge status={c.status} />
+                        <span className="text-xs text-slate-600 truncate">{c.description}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openFinding(c.id)}
+                          title="Preview finding"
+                          aria-label={`Preview finding #${c.id}`}
+                          className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDuplicateOfId(selected ? null : c.id)}
+                          className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${selected ? 'bg-amber-600 text-white border-amber-600' : 'text-amber-700 border-amber-300 hover:bg-amber-100'}`}
+                        >
+                          {selected ? 'Selected' : 'Mark as duplicate'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {duplicateOfId != null && (
+                <p className="text-xs text-amber-800">
+                  This finding will be recorded against the task and parked as a duplicate of #{duplicateOfId} — managed there.{' '}
+                  <button type="button" onClick={() => setDuplicateOfId(null)} className="underline font-semibold">Clear</button>
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Optional fields collapsed by default to keep the required fields
+              (Event Type, Department, Description) front and centre. */}
+          <button
+            type="button"
+            onClick={() => setShowOptional((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 uppercase tracking-wide"
+          >
+            {showOptional ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            Additional details (optional)
+          </button>
+
+          {showOptional && (
+          <>
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
               ATA Chapter
@@ -276,6 +378,8 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+          </>
+          )}
 
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
@@ -301,7 +405,7 @@ export default function RaiseFindingPanel({ taskId, onClose, onRaised }: Props) 
             disabled={submitting}
             className="inline-flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
           >
-            {submitting ? 'Raising…' : 'Raise Finding'}
+            {submitting ? 'Raising…' : duplicateOfId != null ? `Raise as duplicate of #${duplicateOfId}` : 'Raise Finding'}
           </button>
         </div>
       </div>

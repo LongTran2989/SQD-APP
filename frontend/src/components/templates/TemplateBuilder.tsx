@@ -344,6 +344,7 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                 <button onClick={() => addField('checkbox_single')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Toggle</button>
                 <button onClick={() => addField('rich_text')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Rich Text</button>
                 <button onClick={() => addField('file_upload')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> File Upload</button>
+                <button onClick={() => addField('report_block')} className="py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white font-medium flex items-center justify-center gap-1"><Plus className="w-4 h-4" /> Report Block (text + photos)</button>
               </div>
             </div>
           </div>
@@ -505,6 +506,16 @@ export default function TemplateBuilder({ initialData, onSave, onDiscard }: Temp
                       {f.type === 'file_upload' && (
                         <div className="mt-1 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-sm text-slate-400 flex items-center justify-center gap-2">
                           <Plus className="w-4 h-4" /> File upload (documents / images)
+                        </div>
+                      )}
+                      {f.type === 'report_block' && (
+                        <div className="mt-1 space-y-2">
+                          <div className="pointer-events-none">
+                            <RichTextEditor value="" disabled />
+                          </div>
+                          <div className="w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-sm text-slate-400 flex items-center justify-center gap-2">
+                            <Plus className="w-4 h-4" /> Captioned photo gallery
+                          </div>
                         </div>
                       )}
                     </div>

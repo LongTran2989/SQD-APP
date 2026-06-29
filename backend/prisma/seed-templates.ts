@@ -36,32 +36,32 @@ const prisma = new PrismaClient({ adapter });
 // ──────────────────────────────────────────────────────────────────────────────
 // Config
 // ──────────────────────────────────────────────────────────────────────────────
-const EXCEL_PATH = path.join(__dirname, '..', 'sample_templates.xlsx');
-const DEFAULT_OWNER_EMPLOYEE_ID = 'VAE00071'; // Director Lê Viết Thành
+const EXCEL_PATH = path.join(__dirname, '..', 'seed_data.xlsx');
+const DEFAULT_OWNER_EMPLOYEE_ID = 'VAE02690'; // Manager Trần THanh Long Director Lê Viết Thành
 const DEFAULT_DIVISION_CODE = 'QA'; // Fallback if Division column is empty
 
 // Column name mappings — edit these to match your Excel headers exactly.
 const COL = {
   templates: {
-    templateRef:      'TemplateRef',
-    title:            'Title',
-    description:      'Description',
+    templateRef: 'TemplateRef',
+    title: 'Title',
+    description: 'Description',
     requiresApproval: 'RequiresApproval',
-    allowsFindings:   'AllowsFindings',
-    estimatedHours:   'EstimatedHours',
-    skillLevel:       'SkillLevel',
-    type:             'Type',
-    division:         'Division',
+    allowsFindings: 'AllowsFindings',
+    estimatedHours: 'EstimatedHours',
+    skillLevel: 'SkillLevel',
+    type: 'Type',
+    division: 'Division',
   },
   fields: {
     templateRef: 'TemplateRef',
-    fieldId:     'FieldId',
-    type:        'Type',
-    label:       'Label',
-    required:    'Required',
-    helpText:    'HelpText',
-    dataSource:  'DataSource',
-    options:     'Options',
+    fieldId: 'FieldId',
+    type: 'Type',
+    label: 'Label',
+    required: 'Required',
+    helpText: 'HelpText',
+    dataSource: 'DataSource',
+    options: 'Options',
   },
 };
 
@@ -69,25 +69,25 @@ const COL = {
 // Types
 // ──────────────────────────────────────────────────────────────────────────────
 interface RawTemplateRow {
-  templateRef:      string;
-  title:            string;
-  description:      string | null;
+  templateRef: string;
+  title: string;
+  description: string | null;
   requiresApproval: boolean;
-  allowsFindings:   boolean;
-  estimatedHours:   number | null;
-  skillLevel:       number;
-  type:             string | null;
-  divisionCode:     string; // From Division column, defaults to QA
+  allowsFindings: boolean;
+  estimatedHours: number | null;
+  skillLevel: number;
+  type: string | null;
+  divisionCode: string; // From Division column, defaults to QA
 }
 
 interface FormField {
-  id:          string;
-  label:       string;
-  type:        string;
-  required:    boolean;
-  helpText?:   string;
+  id: string;
+  label: string;
+  type: string;
+  required: boolean;
+  helpText?: string;
   dataSource?: string;
-  options?:    string[];
+  options?: string[];
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -135,12 +135,12 @@ function parseTemplatesSheet(ws: XLSX.WorkSheet): RawTemplateRow[] {
     results.push({
       templateRef,
       title,
-      description:      String(row[COL.templates.description] ?? '').trim() || null,
+      description: String(row[COL.templates.description] ?? '').trim() || null,
       requiresApproval: parseBool(row[COL.templates.requiresApproval], false),
-      allowsFindings:   parseBool(row[COL.templates.allowsFindings], true),
-      estimatedHours:   parseOptionalFloat(row[COL.templates.estimatedHours]),
-      skillLevel:       parseOptionalInt(row[COL.templates.skillLevel], 0),
-      type:             String(row[COL.templates.type] ?? '').trim() || null,
+      allowsFindings: parseBool(row[COL.templates.allowsFindings], true),
+      estimatedHours: parseOptionalFloat(row[COL.templates.estimatedHours]),
+      skillLevel: parseOptionalInt(row[COL.templates.skillLevel], 0),
+      type: String(row[COL.templates.type] ?? '').trim() || null,
       divisionCode,
     });
   }
@@ -170,11 +170,11 @@ function parseFieldsSheet(ws: XLSX.WorkSheet): Map<string, FormField[]> {
     const dataSource = String(row[COL.fields.dataSource] ?? '').trim() || undefined;
 
     const field: FormField = {
-      id:       String(row[COL.fields.fieldId] || crypto.randomUUID()),
+      id: String(row[COL.fields.fieldId] || crypto.randomUUID()),
       label,
-      type:     fieldType,
+      type: fieldType,
       required: parseBool(row[COL.fields.required], false),
-      ...(helpText   && { helpText }),
+      ...(helpText && { helpText }),
       ...(dataSource && { dataSource }),
       ...(options && options.length > 0 && { options }),
     };
@@ -200,7 +200,7 @@ async function main() {
     wb = XLSX.readFile(EXCEL_PATH);
   } catch {
     console.error(`❌ Cannot open Excel file at:\n   ${EXCEL_PATH}`);
-    console.error('   Place your sample_templates.xlsx there and re-run.');
+    console.error('   Place your seed_data.xlsx there and re-run.');
     process.exit(1);
   }
 
@@ -210,7 +210,7 @@ async function main() {
   }
 
   const templateRows = parseTemplatesSheet(wb.Sheets['Templates']!);
-  const fieldMap     = parseFieldsSheet(wb.Sheets['FormFields']!);
+  const fieldMap = parseFieldsSheet(wb.Sheets['FormFields']!);
 
   const totalFields = [...fieldMap.values()].reduce((s, arr) => s + arr.length, 0);
   console.log(`   Parsed ${templateRows.length} template row(s) from Templates sheet`);
@@ -274,17 +274,17 @@ async function main() {
       await prisma.template.update({
         where: { externalRef: row.templateRef },
         data: {
-          title:            row.title,
-          description:      row.description,
+          title: row.title,
+          description: row.description,
           requiresApproval: row.requiresApproval,
-          allowsFindings:   row.allowsFindings,
-          skillLevel:       row.skillLevel,
-          estimatedHours:   row.estimatedHours,
-          type:             row.type,
-          status:           'Published',
-          publishedAt:      existing.publishedAt ?? nowPublished,
-          formSchema:       fields as object[],
-          draftSchema:      Prisma.JsonNull,
+          allowsFindings: row.allowsFindings,
+          skillLevel: row.skillLevel,
+          estimatedHours: row.estimatedHours,
+          type: row.type,
+          status: 'Published',
+          publishedAt: existing.publishedAt ?? nowPublished,
+          formSchema: fields as object[],
+          draftSchema: Prisma.JsonNull,
         },
       });
       updated++;
@@ -298,21 +298,21 @@ async function main() {
 
       await prisma.template.create({
         data: {
-          templateId:       newTemplateId,
-          externalRef:      row.templateRef,
-          title:            row.title,
-          description:      row.description,
-          status:           'Published',
-          publishedAt:      nowPublished,
+          templateId: newTemplateId,
+          externalRef: row.templateRef,
+          title: row.title,
+          description: row.description,
+          status: 'Published',
+          publishedAt: nowPublished,
           requiresApproval: row.requiresApproval,
-          allowsFindings:   row.allowsFindings,
-          skillLevel:       row.skillLevel,
-          estimatedHours:   row.estimatedHours,
-          type:             row.type,
-          divisionId:       division.id,
-          ownerId:          owner.id,
-          formSchema:       fields as object[],
-          draftSchema:      Prisma.JsonNull,
+          allowsFindings: row.allowsFindings,
+          skillLevel: row.skillLevel,
+          estimatedHours: row.estimatedHours,
+          type: row.type,
+          divisionId: division.id,
+          ownerId: owner.id,
+          formSchema: fields as object[],
+          draftSchema: Prisma.JsonNull,
         },
       });
       created++;
