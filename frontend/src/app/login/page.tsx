@@ -4,15 +4,16 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { apiClient } from '../../api/client';
+import { apiClient, AUTH_NOTICE_KEY } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import PasswordInput from '../../components/auth/PasswordInput';
-import { ShieldAlert } from 'lucide-react';
+import { ShieldAlert, Info } from 'lucide-react';
 
 export default function LoginPage() {
   const [employeeId, setEmployeeId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const login = useAuthStore((state) => state.login);
@@ -20,6 +21,18 @@ export default function LoginPage() {
 
   useEffect(() => {
     idRef.current?.focus();
+    // Show (and clear) any "why you were signed out" notice left by the API
+    // client's 401 handler — e.g. another user signed in to this browser, or
+    // the account signed in on another device (audit U8).
+    const stashed = sessionStorage.getItem(AUTH_NOTICE_KEY);
+    if (stashed) {
+      // Read post-mount, not in a lazy initializer: sessionStorage doesn't exist
+      // during SSR, and seeding initial state from it would cause a hydration
+      // mismatch. Setting it in the effect is the correct pattern here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setNotice(stashed);
+      sessionStorage.removeItem(AUTH_NOTICE_KEY);
+    }
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -76,6 +89,18 @@ export default function LoginPage() {
             </h1>
             <p className="text-slate-500 text-sm font-medium mt-1">Aviation QA System</p>
           </div>
+
+          {/* Sign-out notice (e.g. another user signed in to this browser) */}
+          {notice && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3"
+            >
+              <Info className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="text-sm text-amber-800">{notice}</p>
+            </div>
+          )}
 
           {/* Error alert */}
           {error && (
