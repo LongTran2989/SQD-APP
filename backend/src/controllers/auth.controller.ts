@@ -194,14 +194,9 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
       data: { activeSessionId: null }
     });
 
-    await prisma.auditLog.create({
-      data: {
-        actionType: 'LOGOUT',
-        entityType: 'User',
-        entityId: String(userId),
-        performedByUserId: userId
-      }
-    });
+    // Best-effort, like every other auth audit write — an AuditLog failure must
+    // not 500 a logout that has already revoked the session (code-review AR-8).
+    await writeAuthAudit('LOGOUT', userId);
 
     clearAuthCookie(res);
 
