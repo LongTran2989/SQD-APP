@@ -12,9 +12,10 @@ export interface PersonnelWorkload {
 }
 
 export interface PersonnelPerformance {
+  tasksCompleted: number;
   hoursLogged: number;
   taskEfficiency: number | null;
-  rejectionRate: number | null;
+  onTimeRate: number | null;       // closed tasks completed on or before deadline / total closed with deadline
   findingsReported: number;
   proactivityRatio: number | null;
   findingsClosed: number;
@@ -98,6 +99,8 @@ export interface PersonnelDetail {
   deadlineWindowDays: number;
   taskEfficiency: number | null;
   avgRating: number | null;
+  tasksCompleted: number;
+  onTimeRate: number | null;
   hoursLoggedByMonth: MonthlyHours[];
   upcomingDeadlines: UpcomingDeadlineTask[];
   activeTasks: ActiveTaskItem[];

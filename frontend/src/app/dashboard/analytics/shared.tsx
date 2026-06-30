@@ -17,11 +17,11 @@ export function formatPct(ratio: number | null): string {
   return `${Math.round(ratio * 100)}%`;
 }
 
-// Efficiency ratio badge. Colour reinforces the over/under-budget state but is
-// never the sole signal: a directional icon and an aria-label carry the same
-// meaning for colour-blind and screen-reader users (WCAG 1.4.1). Uses the
-// design-system status tiers (emerald-clear / red-finding) at full strength so
-// the label clears 4.5:1 on its surface.
+// Efficiency ratio badge. Formula: est ÷ actual, so ≥1.0 = on/under budget (good = green),
+// <1.0 = over budget (bad = red). Colour reinforces the state but is never the sole signal:
+// a directional icon and an aria-label carry the same meaning for colour-blind and
+// screen-reader users (WCAG 1.4.1). Uses the design-system status tiers (emerald-clear /
+// red-finding) at full strength so the label clears 4.5:1 on its surface.
 export function EfficiencyBadge({ ratio }: { ratio: number | null }) {
   if (ratio === null) {
     return (
@@ -30,16 +30,17 @@ export function EfficiencyBadge({ ratio }: { ratio: number | null }) {
       </span>
     );
   }
-  const over = ratio > 1.0;
-  const Icon = over ? TrendingUp : TrendingDown;
+  // ≥1.0 means on or under budget (efficient). <1.0 means over budget.
+  const efficient = ratio >= 1.0;
+  const Icon = efficient ? TrendingUp : TrendingDown;
   return (
     <span
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${
-        over
-          ? 'bg-red-finding-surface text-red-finding border-red-finding/20'
-          : 'bg-emerald-clear-surface text-emerald-clear border-emerald-clear/20'
+        efficient
+          ? 'bg-emerald-clear-surface text-emerald-clear border-emerald-clear/20'
+          : 'bg-red-finding-surface text-red-finding border-red-finding/20'
       }`}
-      aria-label={`${ratio.toFixed(2)} times estimated effort, ${over ? 'over budget' : 'on or under budget'}`}
+      aria-label={`${ratio.toFixed(2)}× efficiency (est ÷ actual), ${efficient ? 'on or under budget' : 'over budget'}`}
     >
       <Icon className="w-3 h-3" aria-hidden="true" />
       {ratio.toFixed(2)}×

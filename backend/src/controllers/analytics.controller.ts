@@ -169,9 +169,11 @@ export const getTimeBookingAnalytics = async (req: Request, res: Response): Prom
     const templates = Array.from(templateMap.values()).map((agg) => {
       const avgActualHours = agg.actualCount > 0 ? round2(agg.actualSum / agg.actualCount) : null;
       const estimatedHours = agg.estimatedHours;
+      // Formula: est / avgActual so that ≥1.0 = on/under budget (good), <1.0 = over budget (bad).
+      // Higher is always better, consistent with staffEfficiencyAggregation.
       const efficiencyRatio =
-        avgActualHours !== null && estimatedHours !== null && estimatedHours > 0
-          ? round2(avgActualHours / estimatedHours)
+        avgActualHours !== null && avgActualHours > 0 && estimatedHours !== null && estimatedHours > 0
+          ? round2(estimatedHours / avgActualHours)
           : null;
 
       // Most frequent over-budget reason; first-encountered wins on ties (insertion-order Map).

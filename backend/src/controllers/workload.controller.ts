@@ -179,6 +179,21 @@ export const getPersonnelWorkload = async (req: Request, res: Response): Promise
       _count: { _all: true },
     });
 
+
+    // On-Time fetch is done as findMany (not groupBy) because Prisma can't compare
+    // two columns (completedAt <= deadline) in a single WHERE clause.
+    // We pull the raw rows and aggregate in JS.
+    const onTimeClosedRaw = await prisma.task.findMany({
+      where: {
+        deletedAt: null,
+        status: 'Closed',
+        assignedToUserId: { in: userIds },
+        deadline: { not: null },
+        ...(dateRange && { completedAt: dateRange }),
+      },
+      select: { assignedToUserId: true, completedAt: true, deadline: true },
+    });
+
     const findingsReportedRaw = await prisma.finding.groupBy({
       by: ['reportedByUserId'],
       where: { reportedByUserId: { in: userIds }, deletedAt: null, ...(dateRange && { createdAt: dateRange }) },
@@ -243,10 +258,25 @@ export const getPersonnelWorkload = async (req: Request, res: Response): Promise
     const overdueTaskCountMap = new Map(overdueTasksRaw.map((r) => [r.assignedToUserId as number, r._count._all]));
     const overdueWpCountMap = new Map(overdueWpsRaw.map((r) => [r.userId, r._count._all]));
 
+    // Build on-time maps from the findMany result: tally on-time + total closed per user
+    const onTimeCountMap = new Map<number, number>();
+    const closedWithDeadlineMap = new Map<number, number>();
+    for (const t of onTimeClosedRaw) {
+      const uid = t.assignedToUserId as number;
+      closedWithDeadlineMap.set(uid, (closedWithDeadlineMap.get(uid) ?? 0) + 1);
+      if (t.completedAt && t.deadline && t.completedAt <= t.deadline) {
+        onTimeCountMap.set(uid, (onTimeCountMap.get(uid) ?? 0) + 1);
+      }
+    }
+
     const personnel = users.map((u) => {
       const finalTaskCount = finalTaskCountMap.get(u.id) ?? 0;
       const rejectedCount = rejectedTaskCountMap.get(u.id) ?? 0;
       const findingsReported = findingsReportedMap.get(u.id) ?? 0;
+      const tasksCompleted = finalTaskCountMap.get(u.id) ?? 0;
+      const closedWithDeadline = closedWithDeadlineMap.get(u.id) ?? 0;
+      const onTimeCount = onTimeCountMap.get(u.id) ?? 0;
+      const onTimeRate = closedWithDeadline > 0 ? round2(onTimeCount / closedWithDeadline) : null;
 
       return {
         userId: u.id,
@@ -261,9 +291,10 @@ export const getPersonnelWorkload = async (req: Request, res: Response): Promise
           upcomingDeadlines: upcomingDeadlinesMap.get(u.id) ?? 0,
         },
         performance: {
+          tasksCompleted,
           hoursLogged: hoursLoggedMap.get(u.id) ?? 0,
           taskEfficiency: efficiencyByUser.get(u.id) ?? null,
-          rejectionRate: finalTaskCount > 0 ? round2(rejectedCount / finalTaskCount) : null,
+          onTimeRate,
           findingsReported,
           proactivityRatio: finalTaskCount > 0 ? round2(findingsReported / finalTaskCount) : null,
           findingsClosed: findingsClosedMap.get(u.id) ?? 0,
@@ -326,7 +357,7 @@ export const getPersonnelDetail = async (req: Request, res: Response): Promise<v
     const dateRange = parseDateRange(req.query.from, req.query.to);
     const loggedAtFilter = dateRange ?? { gte: new Date(now.getTime() - 365 * MS_PER_DAY) };
 
-    const [upcomingTasks, activeTasks, activeWps, openCapas, activeRcas, timeEntries, finalTasksForEfficiency] = await Promise.all([
+    const [upcomingTasks, activeTasks, activeWps, openCapas, activeRcas, timeEntries, finalTasksForEfficiency, onTimeClosedForDetail] = await Promise.all([
       prisma.task.findMany({
         where: {
           deletedAt: null,
@@ -370,12 +401,29 @@ export const getPersonnelDetail = async (req: Request, res: Response): Promise<v
         select: { sessionHours: true, loggedAt: true },
       }),
       prisma.task.findMany({
-        where: { deletedAt: null, status: { in: FINAL_TASK_STATUSES }, assignedToUserId: userId },
+        where: {
+          deletedAt: null,
+          status: { in: FINAL_TASK_STATUSES },
+          assignedToUserId: userId,
+          // FIX: apply the date range so the detail panel efficiency matches the selected period
+          ...(dateRange && { completedAt: dateRange }),
+        },
         select: {
           rating: true,
           assignedToUser: { select: { id: true, name: true } },
           timeBooking: { select: { totalHours: true, estimatedHours: true } },
         },
+      }),
+      // On-time data for detail: closed tasks with deadline, scoped by date range
+      prisma.task.findMany({
+        where: {
+          deletedAt: null,
+          status: 'Closed',
+          assignedToUserId: userId,
+          deadline: { not: null },
+          ...(dateRange && { completedAt: dateRange }),
+        },
+        select: { completedAt: true, deadline: true },
       }),
     ]);
 
@@ -390,12 +438,26 @@ export const getPersonnelDetail = async (req: Request, res: Response): Promise<v
 
     const efficiency = aggregateStaffEfficiency(finalTasksForEfficiency as RatedTaskInput[])[0] ?? null;
 
+    // On-time rate for detail
+    let onTimeDetailCount = 0;
+    let closedWithDeadlineDetail = 0;
+    for (const t of onTimeClosedForDetail) {
+      if (t.deadline) {
+        closedWithDeadlineDetail += 1;
+        if (t.completedAt && t.completedAt <= t.deadline) onTimeDetailCount += 1;
+      }
+    }
+    const onTimeRate = closedWithDeadlineDetail > 0 ? round2(onTimeDetailCount / closedWithDeadlineDetail) : null;
+    const tasksCompleted = finalTasksForEfficiency.length;
+
     res.status(200).json({
       userId: user.id,
       name: user.name,
       deadlineWindowDays,
       taskEfficiency: efficiency?.avgEfficiencyRatio ?? null,
       avgRating: efficiency?.avgRating ?? null,
+      tasksCompleted,
+      onTimeRate,
       hoursLoggedByMonth,
       upcomingDeadlines: upcomingTasks.map((t) => ({
         id: t.id,
