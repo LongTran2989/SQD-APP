@@ -70,6 +70,12 @@ export interface PreviewItem {
   // For toUpdate — the existing WP's current dates (for the diff display).
   currentTimeframeFrom?: Date;
   currentTimeframeTo?: Date;
+  // For toUpdate — the existing WP's current values (for diff display).
+  currentAcRegistration?: string;
+  currentCustomer?: string;
+  currentStation?: string;
+  // Warning message set when the station changes between sheet and DB.
+  warning?: string;
   // DB id of the matched WP, used to re-query it in executeSync.
   existingWpId?: number;
 }
@@ -170,7 +176,10 @@ export async function fetchAndParseSheet(url: string): Promise<ValidatedRow[]> {
     clearTimeout(timeout);
   }
 
-  const wb = XLSX.read(csvText, { type: 'string' });
+  // raw: true forces every cell to be returned as the literal CSV text string,
+  // preventing xlsx from misinterpreting DD/MM/YYYY dates as US-style MM/DD/YYYY
+  // and converting them to Excel serial numbers before parseDatePart can see them.
+  const wb = XLSX.read(csvText, { type: 'string', raw: true });
   const firstSheetName = wb.SheetNames[0];
   if (!firstSheetName) return [];
   const ws = wb.Sheets[firstSheetName]!;
@@ -188,7 +197,9 @@ export async function fetchAndParseSheet(url: string): Promise<ValidatedRow[]> {
     // Trigger-scope filters (all must hold).
     if (row.Station !== 'HAN' && row.Station !== 'SGN') continue;
     if (!row['WP No.'].includes('CHK')) continue;
-    if (row['WP Status Name'] !== 'In Preparation') continue;
+    // Accept any active-work status; skip terminal/released rows.
+    const ACCEPTED_STATUSES = new Set(['In Preparation', 'Open', 'Issued', 'In Progress']);
+    if (!ACCEPTED_STATUSES.has(row['WP Status Name'])) continue;
 
     const timeframeFrom = parseSheetDatetime(row['Start Date'], row['Start Time']);
     const timeframeTo = parseSheetDatetime(row['End Date'], row['End Time']);
@@ -239,9 +250,23 @@ export async function getPreviewData(rows: ValidatedRow[]): Promise<PreviewData>
   // name is intentionally treated as "not found" → toCreate.
   const existing = await prisma.workPackage.findMany({
     where: { name: { in: wpNos }, deletedAt: null },
-    select: { id: true, name: true, status: true, timeframeFrom: true, timeframeTo: true },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      timeframeFrom: true,
+      timeframeTo: true,
+      acRegistration: true,
+      customer: true,
+      division: { select: { code: true } },
+    },
   });
   const existingMap = new Map(existing.map((wp) => [wp.name, wp]));
+
+  // Reverse lookup: division code → station abbreviation.
+  const divCodeToStation = Object.fromEntries(
+    Object.entries(STATION_TO_DIVISION_CODE).map(([station, code]) => [code, station])
+  );
 
   for (const row of rows) {
     const match = existingMap.get(row.wpNo);
@@ -257,16 +282,26 @@ export async function getPreviewData(rows: ValidatedRow[]): Promise<PreviewData>
       continue;
     }
 
+    const currentStation = divCodeToStation[match.division.code] ?? '';
     const fromChanged = match.timeframeFrom.getTime() !== row.timeframeFrom.getTime();
     const toChanged = match.timeframeTo.getTime() !== row.timeframeTo.getTime();
-    if (fromChanged || toChanged) {
-      result.toUpdate.push(
-        toPreviewItem(row, {
-          existingWpId: match.id,
-          currentTimeframeFrom: match.timeframeFrom,
-          currentTimeframeTo: match.timeframeTo,
-        })
-      );
+    const acChanged = (match.acRegistration ?? '') !== row.acRegistration;
+    const customerChanged = (match.customer ?? '') !== row.customer;
+    const stationChanged = currentStation !== row.station;
+
+    if (fromChanged || toChanged || acChanged || customerChanged || stationChanged) {
+      const extra: Partial<PreviewItem> = {
+        existingWpId: match.id,
+        currentTimeframeFrom: match.timeframeFrom,
+        currentTimeframeTo: match.timeframeTo,
+        currentAcRegistration: match.acRegistration ?? '',
+        currentCustomer: match.customer ?? '',
+        currentStation,
+      };
+      if (stationChanged) {
+        extra.warning = `Station moved from ${currentStation || '?'} to ${row.station}. Manual task reassignment may be required.`;
+      }
+      result.toUpdate.push(toPreviewItem(row, extra));
     } else {
       result.noChange.push(toPreviewItem(row, { existingWpId: match.id }));
     }
@@ -402,7 +437,7 @@ export async function executeSync(
     }
   }
 
-  // ── toUpdate (reschedule) ──
+  // ── toUpdate (reschedule + field sync) ──
   for (const item of previewData.toUpdate ?? []) {
     try {
       if (item.existingWpId == null) {
@@ -420,7 +455,7 @@ export async function executeSync(
       // closed/inactivated/soft-deleted since the preview, skip it.
       const fresh = await prisma.workPackage.findFirst({
         where: { id: item.existingWpId, deletedAt: null },
-        select: { id: true, timeframeFrom: true, timeframeTo: true, status: true },
+        select: { id: true, status: true, timeframeFrom: true, timeframeTo: true, acRegistration: true, customer: true, divisionId: true },
       });
       if (!fresh || fresh.status === 'Closed' || fresh.status === 'Inactive') {
         result.errors.push({ wpNo: item.wpNo, reason: 'WP was closed/inactivated since preview — skipped' });
@@ -428,10 +463,52 @@ export async function executeSync(
         continue;
       }
 
+      // Resolve new divisionId from the sheet station (always; no-op if unchanged).
+      const newDivCode = STATION_TO_DIVISION_CODE[item.station];
+      if (!newDivCode) {
+        result.errors.push({ wpNo: item.wpNo, reason: `Unknown station: "${item.station}"` });
+        continue;
+      }
+      const newDiv = await prisma.division.findFirst({ where: { code: newDivCode }, select: { id: true } });
+      if (!newDiv) {
+        result.errors.push({ wpNo: item.wpNo, reason: `Division not found for station "${item.station}" (code ${newDivCode})` });
+        continue;
+      }
+      const newDivisionId = newDiv.id;
+      const newAcReg = item.acRegistration || null;
+      const newCustomer = item.customer || null;
+
+      // Build a per-field change record for the AuditLog.
+      const changedFields: Record<string, { old: string | number | null; new: string | number | null }> = {};
+      if (fresh.timeframeFrom.getTime() !== newFrom.getTime())
+        changedFields.timeframeFrom = { old: fmtDate(fresh.timeframeFrom), new: fmtDate(newFrom) };
+      if (fresh.timeframeTo.getTime() !== newTo.getTime())
+        changedFields.timeframeTo = { old: fmtDate(fresh.timeframeTo), new: fmtDate(newTo) };
+      if ((fresh.acRegistration ?? null) !== newAcReg)
+        changedFields.acRegistration = { old: fresh.acRegistration, new: newAcReg };
+      if ((fresh.customer ?? null) !== newCustomer)
+        changedFields.customer = { old: fresh.customer, new: newCustomer };
+      if (fresh.divisionId !== newDivisionId)
+        changedFields.divisionId = { old: fresh.divisionId, new: newDivisionId };
+
       await prisma.workPackage.update({
         where: { id: item.existingWpId },
-        data: { timeframeFrom: newFrom, timeframeTo: newTo },
+        data: {
+          timeframeFrom: newFrom,
+          timeframeTo: newTo,
+          acRegistration: newAcReg,
+          customer: newCustomer,
+          divisionId: newDivisionId,
+        },
       });
+
+      // Human-readable label for the feed post.
+      const changedLabels: string[] = [];
+      if (changedFields.timeframeFrom || changedFields.timeframeTo) changedLabels.push('schedule');
+      if (changedFields.acRegistration) changedLabels.push('aircraft');
+      if (changedFields.customer) changedLabels.push('customer');
+      if (changedFields.divisionId) changedLabels.push('station');
+      const changeSummary = changedLabels.length > 0 ? changedLabels.join(', ') : 'fields';
 
       // Rule 3 — dual write: AuditLog + WP SYSTEM_EVENT feed post.
       await prisma.auditLog.create({
@@ -442,9 +519,8 @@ export async function executeSync(
           performedByUserId: actor.userId,
           details: {
             wpNo: item.wpNo,
-            from: { old: fresh.timeframeFrom.toISOString(), new: newFrom.toISOString() },
-            to: { old: fresh.timeframeTo.toISOString(), new: newTo.toISOString() },
             source: 'GoogleSheetSync',
+            changedFields,
           },
         },
       });
@@ -452,7 +528,7 @@ export async function executeSync(
         type: 'SYSTEM_EVENT',
         scope: 'WP',
         scopeId: item.existingWpId,
-        content: `Schedule updated via Google Sheet Sync: ${fmtDate(newFrom)} → ${fmtDate(newTo)}.`,
+        content: `WP updated via Google Sheet Sync (${changeSummary}).`,
         metadata: { performedByUserId: actor.userId, source: 'GoogleSheetSync' },
       });
       result.updated++;

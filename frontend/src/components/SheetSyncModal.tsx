@@ -127,10 +127,41 @@ export default function SheetSyncModal({ onClose }: SheetSyncModalProps) {
               {preview.toUpdate.length > 0 && (
                 <Section title="To Reschedule" count={preview.toUpdate.length} color="amber" icon={<Clock className="w-4 h-4" />}>
                   {preview.toUpdate.map((it) => (
-                    <RowCard key={`u-${it.wpNo}`} item={it}>
-                      <span className="text-xs text-slate-400 line-through">{fmt(it.currentTimeframeFrom)} → {fmt(it.currentTimeframeTo)}</span>
-                      <span className="text-xs font-medium text-amber-700">{fmt(it.timeframeFrom)} → {fmt(it.timeframeTo)}</span>
-                    </RowCard>
+                    <div key={`u-${it.wpNo}`}>
+                      <RowCard item={it}>
+                        {(it.currentTimeframeFrom || it.currentTimeframeTo) && (
+                          <span className="text-xs text-slate-400 line-through">{fmt(it.currentTimeframeFrom)} → {fmt(it.currentTimeframeTo)}</span>
+                        )}
+                        <span className="text-xs font-medium text-amber-700">{fmt(it.timeframeFrom)} → {fmt(it.timeframeTo)}</span>
+                        {it.currentAcRegistration !== undefined && it.currentAcRegistration !== it.acRegistration && (
+                          <span className="text-xs text-slate-500">
+                            AC: <span className="line-through text-slate-400">{it.currentAcRegistration || '—'}</span>
+                            {' → '}
+                            <span className="font-medium text-amber-700">{it.acRegistration || '—'}</span>
+                          </span>
+                        )}
+                        {it.currentCustomer !== undefined && it.currentCustomer !== it.customer && (
+                          <span className="text-xs text-slate-500">
+                            Customer: <span className="line-through text-slate-400">{it.currentCustomer || '—'}</span>
+                            {' → '}
+                            <span className="font-medium text-amber-700">{it.customer || '—'}</span>
+                          </span>
+                        )}
+                        {it.currentStation !== undefined && it.currentStation !== it.station && (
+                          <span className="text-xs text-slate-500">
+                            Station: <span className="line-through text-slate-400">{it.currentStation || '—'}</span>
+                            {' → '}
+                            <span className="font-medium text-amber-700">{it.station}</span>
+                          </span>
+                        )}
+                      </RowCard>
+                      {it.warning && (
+                        <div className="mt-1 mx-1 flex items-start gap-1.5 rounded-md bg-red-50 border border-red-100 px-2.5 py-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-red-700">{it.warning}</p>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </Section>
               )}

@@ -15,6 +15,10 @@ export interface PreviewItem {
   timeframeTo: string;
   currentTimeframeFrom?: string;
   currentTimeframeTo?: string;
+  currentAcRegistration?: string;
+  currentCustomer?: string;
+  currentStation?: string;
+  warning?: string;
   existingWpId?: number;
 }
 

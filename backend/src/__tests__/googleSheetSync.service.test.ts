@@ -95,20 +95,23 @@ describe('Google Sheet WP Sync service', () => {
 
   // ── fetchAndParseSheet ──────────────────────────────────────────────────────
   describe('fetchAndParseSheet', () => {
-    it('keeps only HAN/SGN + CHK + In Preparation rows and skips the rest', async () => {
+    it('accepts In Preparation/Open/Issued/In Progress rows; rejects Released and wrong station/name', async () => {
       const csv = [
         HEADER,
-        'VN-CHK-001,Base check,In Preparation,HAN,5,2026-07-01,08:00,2026-07-05,17:00,VN-A321,VNA', // valid
-        'VN-CHK-002,Done,Released,HAN,5,2026-07-01,08:00,2026-07-05,17:00,VN-A321,VNA',             // wrong status
-        'VN-PC-003,Equip,In Preparation,HAN,1,2026-07-01,08:00,2026-07-02,10:00,,',                  // no CHK
-        'XX-CHK-004,Foreign,In Preparation,DAD,5,2026-07-01,08:00,2026-07-05,17:00,,',               // wrong station
-        'VN-CHK-005,Quick,In Preparation,SGN,1,2026-07-02,09:00,2026-07-03,10:00,,',                 // valid
-        'VN-CHK-006,Bad,In Preparation,HAN,5,2026-07-09,08:00,2026-07-05,17:00,,',                   // from >= to
+        'VN-CHK-001,Base check,In Preparation,HAN,5,2026-07-01,08:00,2026-07-05,17:00,VN-A321,VNA', // valid: In Preparation
+        'VN-CHK-002,Done,Released,HAN,5,2026-07-01,08:00,2026-07-05,17:00,VN-A321,VNA',             // skip: Released
+        'VN-PC-003,Equip,In Preparation,HAN,1,2026-07-01,08:00,2026-07-02,10:00,,',                  // skip: no CHK in name
+        'XX-CHK-004,Foreign,In Preparation,DAD,5,2026-07-01,08:00,2026-07-05,17:00,,',               // skip: wrong station
+        'VN-CHK-005,Quick,In Preparation,SGN,1,2026-07-02,09:00,2026-07-03,10:00,,',                 // valid: In Preparation
+        'VN-CHK-006,Bad,In Preparation,HAN,5,2026-07-09,08:00,2026-07-05,17:00,,',                   // skip: from >= to
+        'VN-CHK-007,Open WP,Open,HAN,5,2026-07-01,08:00,2026-07-05,17:00,,',                         // valid: Open
+        'VN-CHK-008,Issued WP,Issued,SGN,3,2026-07-01,08:00,2026-07-04,17:00,,',                     // valid: Issued
+        'VN-CHK-009,In Progress WP,In Progress,HAN,4,2026-07-01,08:00,2026-07-04,17:00,,',           // valid: In Progress
       ].join('\n');
       mockFetchCsv(csv);
 
       const rows = await fetchAndParseSheet('https://example.test/sheet.csv');
-      expect(rows.map((r) => r.wpNo).sort()).toEqual(['VN-CHK-001', 'VN-CHK-005']);
+      expect(rows.map((r) => r.wpNo).sort()).toEqual(['VN-CHK-001', 'VN-CHK-005', 'VN-CHK-007', 'VN-CHK-008', 'VN-CHK-009']);
       const first = rows.find((r) => r.wpNo === 'VN-CHK-001')!;
       expect(first.station).toBe('HAN');
       expect(first.tatDays).toBe(5);
@@ -126,9 +129,9 @@ describe('Google Sheet WP Sync service', () => {
   // ── getPreviewData ──────────────────────────────────────────────────────────
   describe('getPreviewData', () => {
     it('classifies rows into create / update / collision / noChange using stored status', async () => {
-      // Open WP, same dates → noChange.
+      // Open WP, same dates + matching acRegistration/customer → noChange.
       await prisma.workPackage.create({
-        data: { wpId: 'QCH-WP-000001', name: 'VN-CHK-SAME', type: 'CHECK', divisionId: qchId, timeframeFrom: future(1), timeframeTo: future(5), creatorId: actorId, status: 'Open' },
+        data: { wpId: 'QCH-WP-000001', name: 'VN-CHK-SAME', type: 'CHECK', divisionId: qchId, timeframeFrom: future(1), timeframeTo: future(5), creatorId: actorId, status: 'Open', acRegistration: 'VN-A330', customer: 'Vietnam Airlines' },
       });
       // Open WP, different dates → toUpdate.
       const upd = await prisma.workPackage.create({
