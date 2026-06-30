@@ -146,6 +146,12 @@ const taskNotes = [
   'MEL dispatch authorised by Maintenance Controller. Documentation in order.',
   'Form 1 certificates present for all installed components.',
   'Weight & balance records verified against last C-Check documentation.',
+  'Component removed and routed to shop for overhaul.',
+  'Visual inspection completed; minor surface corrosion noted but within limits.',
+  'Operational test passed successfully. No faults in BITE test.',
+  'Replaced worn seals per AMM procedures. Leak check satisfactory.',
+  'Functional check of system completed. Parameters normal.',
+  'Lubrication applied to all required grease points.',
 ];
 
 // Unique curated finding descriptions
@@ -348,7 +354,10 @@ async function main() {
     const issuer   = pick(dirs);
     const assignee = pick(stfs);
 
-    const status      = pick(weightedStatuses);
+    let status      = pick(weightedStatuses);
+    if (wp && wp.status === 'Closed') {
+      status = 'Closed';
+    }
     const isUnassigned = status === 'Unassigned';
     const isClosed     = status === 'Closed';
     const isRejected   = status === 'Rejected';
@@ -376,6 +385,7 @@ async function main() {
       targetDivisionId:  division.id,
       completedAt,
       rating,
+      estimatedHours:    template.estimatedHours || randBetween(1, 8),
       requiresApproval:  template.requiresApproval,
       rejectionReason:   isRejected ? 'Documentation incomplete — task card missing QA sign-off.' : null,
       inactivationLog:   isInactive ? [{ reason: 'Work deferred pending aircraft availability.', at: new Date().toISOString() }] : null,
@@ -396,26 +406,76 @@ async function main() {
     // Time entries for Closed tasks (1–3 sessions)
     if (isClosed) {
       const numSessions = Math.floor(Math.random() * 3) + 1;
-      const sessions = Array.from({ length: numSessions }, (_, idx) => ({
-        loggedByUserId:     assignee.id,
-        sessionHours:       randBetween(0.5, 4),
-        sessionNotes:       pick(taskNotes),
-        collaboratorEntries: [],
-        loggedAt:           daysAgo(idx + 1),
-      }));
+      let totalAssigneeHours = 0;
+      let totalCollabHours = 0;
+      const allCollabs: any[] = [];
+      const assigneeNotes: string[] = [];
+
+      const sessions = Array.from({ length: numSessions }, (_, idx) => {
+        const hasCollab = Math.random() < 0.3;
+        const collabUserId = pick(stfs).id;
+        const collabHrs = randBetween(0.5, 2);
+        
+        const collabEntries = hasCollab ? [
+          { userId: collabUserId, sessionHours: collabHrs, notes: 'Assisted with inspection' }
+        ] : [];
+
+        if (hasCollab) {
+           allCollabs.push({ userId: collabUserId, hoursLogged: collabHrs, notes: 'Assisted with inspection' });
+           totalCollabHours += collabHrs;
+        }
+
+        const hrs = Math.random() < 0.7 ? randBetween(0.5, 2.0) : randBetween(2.5, 4.0);
+        totalAssigneeHours += hrs;
+        const note = pick(taskNotes);
+        assigneeNotes.push(note);
+
+        return {
+          loggedByUserId:     assignee.id,
+          sessionHours:       hrs,
+          sessionNotes:       note,
+          collaboratorEntries: collabEntries,
+          loggedAt:           daysAgo(idx + 1),
+        };
+      });
       taskPayload.timeEntries = { create: sessions };
+      taskPayload.timeBooking = {
+        create: {
+          assigneeEntry: {
+            userId: assignee.id,
+            hoursLogged: totalAssigneeHours,
+            notes: assigneeNotes.join(' | ')
+          },
+          collaborators: allCollabs,
+          totalHours: totalAssigneeHours + totalCollabHours,
+          estimatedHours: taskPayload.estimatedHours,
+        }
+      };
     }
 
     // Time entry for In Progress / In Review tasks (partial hours logged)
     if (['In Progress', 'In Review'].includes(status)) {
+      const hrs = randBetween(0.5, 3);
       taskPayload.timeEntries = {
         create: [{
           loggedByUserId:     assignee.id,
-          sessionHours:       randBetween(0.5, 3),
+          sessionHours:       hrs,
           sessionNotes:       'Work in progress — partial session logged.',
           collaboratorEntries: [],
           loggedAt:           daysAgo(1),
         }],
+      };
+      taskPayload.timeBooking = {
+        create: {
+          assigneeEntry: {
+            userId: assignee.id,
+            hoursLogged: hrs,
+            notes: 'Work in progress — partial session logged.'
+          },
+          collaborators: [],
+          totalHours: hrs,
+          estimatedHours: taskPayload.estimatedHours,
+        }
       };
     }
 
@@ -679,6 +739,14 @@ async function main() {
           loggedAt:            daysAgo(19),
         }],
       },
+      timeBooking: {
+        create: {
+          assigneeEntry: { userId: heroStaff1.id, hoursLogged: 3.5, notes: 'Full audit of tool room completed. 4 items recalled and sent for re-calibration.' },
+          collaborators: [],
+          totalHours: 3.5,
+          estimatedHours: templates[0]!.estimatedHours || 4.0,
+        }
+      },
     },
   });
 
@@ -778,6 +846,14 @@ async function main() {
           loggedAt:            daysAgo(5),
         }],
       },
+      timeBooking: {
+        create: {
+          assigneeEntry: { userId: heroStaff2.id, hoursLogged: 2.0, notes: 'O-ring seal replaced. Technical Log updated. Panel re-sealed and leak-checked — no further seepage.' },
+          collaborators: [],
+          totalHours: 2.0,
+          estimatedHours: templates[0]!.estimatedHours || 4.0,
+        }
+      },
     },
   });
   void h2Task; // referenced by CAPA link below if needed
@@ -839,6 +915,14 @@ async function main() {
           collaboratorEntries: [],
           loggedAt:            daysAgo(3),
         }],
+      },
+      timeBooking: {
+        create: {
+          assigneeEntry: { userId: heroStaff1.id, hoursLogged: 1.5, notes: 'NCR raised and sent to Engineering. Awaiting DER data package from OEM.' },
+          collaborators: [],
+          totalHours: 1.5,
+          estimatedHours: templates[0]!.estimatedHours || 4.0,
+        }
       },
     },
   });

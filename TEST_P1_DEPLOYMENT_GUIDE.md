@@ -96,6 +96,54 @@ safely) if they do, but you'd rather catch that ahead of time.
 
 ---
 
+## Updating `.env` on the VPS
+
+The VPS `.env` lives at `/app/backend/.env` and is **never committed to git** (it's
+`.gitignore`d). When a new feature introduces new env vars, add them manually via SSH before
+(or immediately after) pulling the new code.
+
+### How to edit `.env` on the VPS
+
+```bash
+ssh root@your-server-ip
+nano /app/backend/.env
+```
+
+Add the new lines at the end (or in the relevant section). Save with **Ctrl-O, Enter,
+Ctrl-X**. Then restart the backend so the new values are picked up:
+
+```bash
+pm2 restart backend
+pm2 logs backend --lines 20    # confirm startup, no "is not configured" errors
+```
+
+### Finding the right values
+
+- **String names that reference DB rows** (e.g. `SHEET_CHK_BLUEPRINT_NAME`) — the value
+  must exactly match an active record's `name` field. If unsure, query the DB:
+  ```bash
+  cd /app/backend
+  npx prisma studio   # browser-based, or use psql below
+  # or via psql:
+  psql $DATABASE_URL -c "SELECT name FROM \"WpBlueprint\" WHERE \"isActive\" = true;"
+  ```
+- **Public URLs** (e.g. `GOOGLE_SHEET_CSV_URL`) — copy from the source directly; test
+  `curl -L "<url>" | head` to confirm the CSV is reachable from the server.
+
+### Checking what's currently set
+
+```bash
+grep -E "GOOGLE_SHEET|SHEET_CHK|SHEET_PC_EQ|ENFORCE_SINGLE" /app/backend/.env
+```
+
+### Reference: `.env.example`
+
+`backend/.env.example` (tracked in git) always lists every var the app reads, with
+placeholder values and inline comments. It's the canonical reference for what a `.env`
+must contain; diff it against the live file whenever deploying a new branch.
+
+---
+
 ## Scenario 1: Standard Update (no data loss)
 
 **Use this when:** updating the server with new code/fixes, keeping existing DB data,

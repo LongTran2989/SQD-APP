@@ -13,6 +13,27 @@ Each entry records: date, branch, scope, findings (severity + status), and any d
 
 ---
 
+## Session: 2026-06-30 — Google Sheet WP Sync `/code-review` (high effort)
+
+**Branch:** `claude/google-sheet-wp-sync-po3zss`
+**Scope:** Google Sheet WP Sync feature + 5 post-ship enhancements — `backend/src/services/googleSheetSync.service.ts`, `backend/src/controllers/googleSheetSync.controller.ts`, `backend/src/routes/googleSheetSync.routes.ts`, `backend/src/__tests__/googleSheetSync.service.test.ts`, `frontend/src/api/sheetSyncTypes.ts`, `frontend/src/components/SheetSyncModal.tsx`.
+**Tests after fixes:** Backend **674/674** (was 660; +14 googleSheetSync service tests). Frontend `tsc --noEmit` clean on touched files.
+**Method:** High-effort recall-biased review (8 angles × up to 6 candidates → verify pass). 9 findings (8 CONFIRMED, 1 PLAUSIBLE), all fixed.
+
+| # | Severity | File | Finding | Status |
+|---|----------|------|---------|--------|
+| B1 | **Critical (security)** | `googleSheetSync.controller.ts` `executeSyncHandler` | `previewData` body echoed to `executeSync` with no schema validation — a crafted body could inject arbitrary `PreviewData` shapes (e.g. a fake `existingWpId` pointing at any WP). | ✅ Fixed — `PreviewDataSchema.safeParse(previewData)` added in `executeSyncHandler`; `PreviewItemSchema` + `PreviewDataSchema` exported from the service |
+| B2 | **Critical (authorization)** | `googleSheetSync.service.ts` `createOne` / `toUpdate` | No actor division-scope check — a Manager could create or update WPs in any division by passing station rows outside their division. | ✅ Fixed — actor role + `divisionId` fetched at `executeSync` start; `isGlobalActor` short-circuit for Director/Admin; `actorDivisionIds` Set guards both `createOne` and the `toUpdate` path |
+| C5 | High (RBAC) | `googleSheetSync.routes.ts` | `POST /execute` gated on `wp:create` only — a `wp:edit`-only holder could not execute updates. | ✅ Fixed — `requireAnyPrivilege('wp:create', 'wp:edit')` |
+| B4 | High (data integrity) | `googleSheetSync.service.ts` `getPreviewData` | Two active WPs with the same name caused `existingMap` to silently overwrite one, producing a wrong diff (duplicate create or wrong update target). | ✅ Fixed — `nameCounts`/`duplicateNames` detection; ambiguous names pushed to a `preflightErrors` array and skipped before diffing; `preflightErrors` surfaced in `PreviewData`, `SheetSyncModal.tsx`, and `sheetSyncTypes.ts` |
+| A5 | High (Rule 3 / data integrity) | `googleSheetSync.service.ts` `toUpdate` block | The three sequential writes (`workPackage.update`, `auditLog.create`, `createFeedPost`) ran outside a transaction — a crash between any two would leave compliance state inconsistent. | ✅ Fixed — all three writes wrapped in `prisma.$transaction`; `createFeedPost` receives `tx as unknown as typeof prisma` |
+| C6 | Medium (correctness) | `googleSheetSync.service.ts` `executeSync` createOne block | `fireAutoGenForWp` threw synchronously on failure, and `result.created++` was positioned after it — a failed autoGen left the WP persisted but not counted in the result. | ✅ Fixed — `result.created++` moved before `fireAutoGenForWp`; `fireAutoGenForWp` wrapped in its own `try/catch` (WP already committed; autoGen retries on the next cron run) |
+| B3 | Medium (data integrity) | `googleSheetSync.service.ts` `SheetRowSchema` | `TAT` validated with `.nonnegative()` — a blank TAT cell coerces to `0` and silently routed the WP to the `PC-EQ` blueprint. | ✅ Fixed — `.nonnegative()` → `.positive()` |
+| A4 | Low (correctness) | `googleSheetSync.service.ts` collision loop | `options.collisionDecisions[item.wpNo]` returned `undefined` for a missing key, which fell through to the skip path but did not increment `result.skipped`. | ✅ Fixed — `?? 'skip'` nullish-coalesce; a missing key is now explicitly `'skip'` and `skipped++` |
+| B5 | Low (race) | `googleSheetSync.service.ts` `findAvailableName` + `createOne` | Name availability check and create are not atomic — a concurrent sync could claim the same `-REVn` slot between the two calls, producing a unique-constraint violation. | ✅ Fixed — catch block comments the race scenario; unique-constraint violations surface as descriptive `errors[]` entries rather than 500s |
+
+---
+
 ## Session: 2026-06-29 — Authentication Audit + Remediation + `/code-review`
 
 **Branch:** `claude/auth-audit-5dm9ju`

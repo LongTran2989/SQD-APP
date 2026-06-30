@@ -75,7 +75,8 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
   }
 
   const gaugeValue = detail.taskEfficiency !== null ? Math.min(detail.taskEfficiency, 2) * 50 : 0;
-  const gaugeOver = detail.taskEfficiency !== null && detail.taskEfficiency > 1.0;
+  // With inverted formula: ≥1.0 = good (green), <1.0 = over budget (red)
+  const gaugeEfficient = detail.taskEfficiency !== null && detail.taskEfficiency >= 1.0;
 
   return (
     <div className="grid lg:grid-cols-3 gap-6 p-5 bg-slate-50">
@@ -88,13 +89,13 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
           <div
             className="relative h-36"
             role="img"
-            aria-label={`Task efficiency ${detail.taskEfficiency.toFixed(2)} times estimated, ${gaugeOver ? 'over budget' : 'on or under budget'}`}
+            aria-label={`Task efficiency ${detail.taskEfficiency.toFixed(2)}× (est ÷ actual), ${gaugeEfficient ? 'on or under budget' : 'over budget'}`}
           >
             <ResponsiveContainer width="100%" height="100%">
               <RadialBarChart
                 innerRadius="70%"
                 outerRadius="100%"
-                data={[{ value: gaugeValue, fill: gaugeOver ? CHART.red : CHART.green }]}
+                data={[{ value: gaugeValue, fill: gaugeEfficient ? CHART.green : CHART.red }]}
                 startAngle={180}
                 endAngle={0}
               >
@@ -103,10 +104,10 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
               </RadialBarChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className={`text-2xl font-bold ${gaugeOver ? 'text-red-finding' : 'text-emerald-clear'}`}>
+              <span className={`text-2xl font-bold ${gaugeEfficient ? 'text-emerald-clear' : 'text-red-finding'}`}>
                 {detail.taskEfficiency.toFixed(2)}×
               </span>
-              <span className="text-xs text-ink-secondary">actual / estimated</span>
+              <span className="text-xs text-ink-secondary">est ÷ actual</span>
             </div>
           </div>
         )}
@@ -238,8 +239,9 @@ type SortKey =
   | 'activeRcas'
   | 'upcomingDeadlines'
   | 'hoursLogged'
+  | 'tasksCompleted'
   | 'taskEfficiency'
-  | 'rejectionRate'
+  | 'onTimeRate'
   | 'overdueRejectedCount'
   | 'findingsReported';
 
@@ -261,10 +263,12 @@ function sortValue(p: PersonnelRow, key: SortKey): number | string {
       return p.workload.upcomingDeadlines;
     case 'hoursLogged':
       return p.performance.hoursLogged;
+    case 'tasksCompleted':
+      return p.performance.tasksCompleted;
     case 'taskEfficiency':
       return p.performance.taskEfficiency ?? -Infinity;
-    case 'rejectionRate':
-      return p.performance.rejectionRate ?? -Infinity;
+    case 'onTimeRate':
+      return p.performance.onTimeRate ?? -Infinity;
     case 'overdueRejectedCount':
       return p.performance.overdueRejectedCount;
     case 'findingsReported':
@@ -380,7 +384,7 @@ export default function PersonnelTab() {
     });
   }, [rows, nameQuery, sortKey, sortDir]);
 
-  const columnCount = SHOW_CAPA_RCA ? 13 : 11;
+  const columnCount = SHOW_CAPA_RCA ? 14 : 12;
   const hasFilters = Boolean(from || to || divisionId || nameQuery);
 
   if (loading) return <LoadingState />;
@@ -493,8 +497,9 @@ export default function PersonnelTab() {
                 )}
                 <SortableTh label="Deadlines" sortKeyName="upcomingDeadlines" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <SortableTh label="Hours Logged" sortKeyName="hoursLogged" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Tasks Done" sortKeyName="tasksCompleted" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <SortableTh label="Efficiency" sortKeyName="taskEfficiency" align="center" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                <SortableTh label="Rejection Rate" sortKeyName="rejectionRate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="On-Time Rate" sortKeyName="onTimeRate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <SortableTh label="Overdue/Rejected" sortKeyName="overdueRejectedCount" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <SortableTh label="Findings Reported" sortKeyName="findingsReported" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
               </tr>
@@ -546,10 +551,11 @@ export default function PersonnelTab() {
                           )}
                         </td>
                         <td className="px-5 py-3 text-right text-ink-primary">{formatHours(p.performance.hoursLogged)}</td>
+                        <td className="px-5 py-3 text-right text-ink-primary">{p.performance.tasksCompleted}</td>
                         <td className="px-5 py-3 text-center">
                           <EfficiencyBadge ratio={p.performance.taskEfficiency} />
                         </td>
-                        <td className="px-5 py-3 text-right text-ink-primary">{formatPct(p.performance.rejectionRate)}</td>
+                        <td className="px-5 py-3 text-right text-ink-primary">{formatPct(p.performance.onTimeRate)}</td>
                         <td className="px-5 py-3 text-right">
                           {p.performance.overdueRejectedCount > 0 ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-finding-surface text-red-finding border border-red-finding/20">
