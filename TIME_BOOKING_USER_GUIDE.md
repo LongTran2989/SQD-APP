@@ -112,11 +112,11 @@ A table showing, for each task template that has been used:
 | **Tasks** | Number of completed tasks (Closed / Rejected / Terminated) |
 | **Avg Actual** | Average actual hours across all tasks with a time booking |
 | **Avg Estimated** | The template's current estimated hours setting |
-| **Efficiency** | Ratio of actual ÷ estimated: `1.00×` means on-budget; below is under; above is over |
+| **Efficiency** | Ratio of estimated ÷ actual: `1.00×` means on-budget; above 1.0 is under budget (good); below 1.0 is over budget (bad) |
 | **Over-Budget** | Count of tasks that exceeded 120% of the estimate |
 | **Top Reason** | Most-cited over-budget reason across those tasks |
 
-The efficiency badge is green when ≤ 1.0× and red when > 1.0×.
+The efficiency badge is green when ≥ 1.0× and red when < 1.0×.
 
 > **Note:** The Avg Estimated column shows the template's **current** estimated hours setting. If the estimate was recently updated, this baseline applies to all historical rows — that is intentional.
 
@@ -129,7 +129,7 @@ A table showing, for each staff member who has had tasks rated:
 | **Name** | Staff member's display name |
 | **Avg Rating** | Average star rating across all their rated tasks |
 | **Tasks Rated** | Number of tasks where a rating was given |
-| **Avg Efficiency** | Average actual÷estimated ratio across their tasks |
+| **Avg Efficiency** | Average estimated÷actual ratio across their tasks |
 
 Staff are sorted by average rating (highest first).
 

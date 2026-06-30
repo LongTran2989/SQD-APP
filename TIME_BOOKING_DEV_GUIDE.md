@@ -149,7 +149,7 @@ The badge colour (green/red) is driven purely by whether `totalHours > estimated
 - Calls `getTimeBookingAnalytics()` from `taskApi.ts` on mount
 - 403 response shows a permission error (non-management roles)
 - Tables sorted client-side: templates by efficiency ratio desc (nulls last); staff by avgRating desc (nulls last)
-- `EfficiencyBadge` component: green ≤ 1.0×, red > 1.0×
+- `EfficiencyBadge` component: green ≥ 1.0×, red < 1.0×
 
 ### `taskApi.ts` types
 
