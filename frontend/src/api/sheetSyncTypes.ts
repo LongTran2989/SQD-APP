@@ -27,6 +27,7 @@ export interface PreviewData {
   toUpdate: PreviewItem[];
   collisions: PreviewItem[];
   noChange: PreviewItem[];
+  preflightErrors?: { wpNo: string; reason: string }[];
 }
 
 export interface SyncResult {

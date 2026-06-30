@@ -35,7 +35,7 @@ const SheetRowSchema = z.object({
   'WP Desc.': z.coerce.string().optional().default(''),
   'WP Status Name': z.coerce.string(),
   'Station': z.coerce.string(),
-  'TAT': z.coerce.number().nonnegative(),
+  'TAT': z.coerce.number().positive(), // B3: .positive() rejects blank (0) TAT cells
   'Start Date': DateTimeCell,
   'Start Time': DateTimeCell,
   'End Date': DateTimeCell,
@@ -85,6 +85,7 @@ export interface PreviewData {
   toUpdate: PreviewItem[];
   collisions: PreviewItem[]; // matched Closed/Inactive WPs
   noChange: PreviewItem[];
+  preflightErrors: { wpNo: string; reason: string }[]; // B4: rows skipped due to duplicate active WP names
 }
 
 export interface SyncResult {
@@ -99,6 +100,34 @@ export interface SyncOptions {
   // a uniquely-suffixed (-REV2..) WP for it.
   collisionDecisions: Record<string, 'skip' | 'create-new'>;
 }
+
+// ─── Zod schemas for PreviewItem / PreviewData ───────────────────────────────
+// Used by the controller to validate the echoed-back request body on POST /execute (B1).
+export const PreviewItemSchema = z.object({
+  wpNo: z.string().min(1),
+  description: z.string(),
+  station: z.string().min(1),
+  tatDays: z.number(),
+  acRegistration: z.string(),
+  customer: z.string(),
+  timeframeFrom: z.union([z.string(), z.date()]),
+  timeframeTo: z.union([z.string(), z.date()]),
+  currentTimeframeFrom: z.union([z.string(), z.date()]).optional(),
+  currentTimeframeTo: z.union([z.string(), z.date()]).optional(),
+  currentAcRegistration: z.string().optional(),
+  currentCustomer: z.string().optional(),
+  currentStation: z.string().optional(),
+  warning: z.string().optional(),
+  existingWpId: z.number().int().optional(),
+});
+
+export const PreviewDataSchema = z.object({
+  toCreate: z.array(PreviewItemSchema),
+  toUpdate: z.array(PreviewItemSchema),
+  collisions: z.array(PreviewItemSchema),
+  noChange: z.array(PreviewItemSchema),
+  preflightErrors: z.array(z.object({ wpNo: z.string(), reason: z.string() })).optional(),
+});
 
 // Station → Division code. HAN is QC Hanoi, SGN is QC Saigon.
 const STATION_TO_DIVISION_CODE: Record<string, string> = { HAN: 'QCH', SGN: 'QCS' };
@@ -242,7 +271,7 @@ function toPreviewItem(row: ValidatedRow, extra: Partial<PreviewItem> = {}): Pre
 }
 
 export async function getPreviewData(rows: ValidatedRow[]): Promise<PreviewData> {
-  const result: PreviewData = { toCreate: [], toUpdate: [], collisions: [], noChange: [] };
+  const result: PreviewData = { toCreate: [], toUpdate: [], collisions: [], noChange: [], preflightErrors: [] };
   if (rows.length === 0) return result;
 
   const wpNos = rows.map((r) => r.wpNo);
@@ -261,6 +290,13 @@ export async function getPreviewData(rows: ValidatedRow[]): Promise<PreviewData>
       division: { select: { code: true } },
     },
   });
+
+  // B4: detect names that appear more than once in active WPs — we cannot
+  // safely determine which record to diff, so we surface them as preflight errors.
+  const nameCounts = new Map<string, number>();
+  for (const wp of existing) nameCounts.set(wp.name, (nameCounts.get(wp.name) ?? 0) + 1);
+  const duplicateNames = new Set([...nameCounts.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+
   const existingMap = new Map(existing.map((wp) => [wp.name, wp]));
 
   // Reverse lookup: division code → station abbreviation.
@@ -269,6 +305,10 @@ export async function getPreviewData(rows: ValidatedRow[]): Promise<PreviewData>
   );
 
   for (const row of rows) {
+    if (duplicateNames.has(row.wpNo)) {
+      result.preflightErrors.push({ wpNo: row.wpNo, reason: 'Multiple active WPs share this name — cannot safely diff' });
+      continue;
+    }
     const match = existingMap.get(row.wpNo);
 
     if (!match) {
@@ -370,12 +410,30 @@ export async function executeSync(
   const chkAutoGen = blueprints[0]!.autoGen!.data;
   const pcEqAutoGen = blueprints[1]!.autoGen!.data;
 
+  // B2: fetch actor role and primary division to enforce division scope.
+  const actorUser = await prisma.user.findFirst({
+    where: { id: actor.userId, deletedAt: null },
+    select: { role: { select: { name: true } }, divisionId: true },
+  });
+  if (!actorUser) throw new Error('Actor user not found');
+  const isGlobalActor = actorUser.role?.name === 'Director' || actorUser.role?.name === 'Admin';
+  // null = global (no restriction); Set = allowed division IDs.
+  const actorDivisionIds: Set<number> | null = isGlobalActor
+    ? null
+    : actorUser.divisionId != null
+      ? new Set([actorUser.divisionId])
+      : new Set();
+
   // Shared create routine for toCreate + accepted collisions.
   const createOne = async (item: PreviewItem, name: string): Promise<void> => {
     const divisionCode = STATION_TO_DIVISION_CODE[item.station];
     if (!divisionCode) throw new Error(`No division mapping for station "${item.station}"`);
     const division = await prisma.division.findFirst({ where: { code: divisionCode }, select: { id: true } });
     if (!division) throw new Error(`Division not found for station "${item.station}" (code ${divisionCode})`);
+    // B2: enforce division scope for non-global actors.
+    if (actorDivisionIds !== null && !actorDivisionIds.has(division.id)) {
+      throw new Error(`Not authorised to create WPs in division "${divisionCode}" (station "${item.station}")`);
+    }
 
     const useBp = item.tatDays <= 2 ? pcEqBp : chkBp;
     const autoGenData = item.tatDays <= 2 ? pcEqAutoGen : chkAutoGen;
@@ -400,14 +458,20 @@ export async function executeSync(
       systemEventContent: `Work Package "${name}" created via Google Sheet Sync.`,
     });
 
+    result.created++; // C6: increment here — WP is persisted regardless of autoGen success.
+
     if (wp.autoGenerate) {
       const today = calendarDateUtc(new Date());
       const from = calendarDateUtc(wp.timeframeFrom);
       if (today >= from) {
-        await fireAutoGenForWp(wp.id);
+        try {
+          await fireAutoGenForWp(wp.id);
+        } catch (autoGenErr) {
+          console.error(`[SheetSync] fireAutoGenForWp failed for WP "${name}":`, autoGenErr);
+          // autoGen failure does not undo the WP creation; it retries on the next scheduled run.
+        }
       }
     }
-    result.created++;
   };
 
   // ── toCreate ──
@@ -421,7 +485,8 @@ export async function executeSync(
 
   // ── collisions accepted as new ──
   for (const item of previewData.collisions ?? []) {
-    if (options.collisionDecisions[item.wpNo] !== 'create-new') {
+    const decision = options.collisionDecisions[item.wpNo] ?? 'skip'; // A4: explicit default so undefined !== 'create-new' is intentional
+    if (decision !== 'create-new') {
       result.skipped++;
       continue;
     }
@@ -433,7 +498,9 @@ export async function executeSync(
       }
       await createOne(item, name);
     } catch (err) {
-      result.errors.push({ wpNo: item.wpNo, reason: err instanceof Error ? err.message : 'Collision create failed' });
+      const msg = err instanceof Error ? err.message : 'Collision create failed';
+      // B5: a concurrent sync may have taken this -REVn slot between findAvailableName and createOne.
+      result.errors.push({ wpNo: item.wpNo, reason: msg });
     }
   }
 
@@ -475,6 +542,11 @@ export async function executeSync(
         continue;
       }
       const newDivisionId = newDiv.id;
+      // B2: enforce division scope for non-global actors on the update path too.
+      if (actorDivisionIds !== null && !actorDivisionIds.has(newDivisionId)) {
+        result.errors.push({ wpNo: item.wpNo, reason: `Not authorised to update WPs in division "${newDivCode}" (station "${item.station}")` });
+        continue;
+      }
       const newAcReg = item.acRegistration || null;
       const newCustomer = item.customer || null;
 
@@ -491,18 +563,7 @@ export async function executeSync(
       if (fresh.divisionId !== newDivisionId)
         changedFields.divisionId = { old: fresh.divisionId, new: newDivisionId };
 
-      await prisma.workPackage.update({
-        where: { id: item.existingWpId },
-        data: {
-          timeframeFrom: newFrom,
-          timeframeTo: newTo,
-          acRegistration: newAcReg,
-          customer: newCustomer,
-          divisionId: newDivisionId,
-        },
-      });
-
-      // Human-readable label for the feed post.
+      // Human-readable label for the feed post (computed from changedFields before the transaction).
       const changedLabels: string[] = [];
       if (changedFields.timeframeFrom || changedFields.timeframeTo) changedLabels.push('schedule');
       if (changedFields.acRegistration) changedLabels.push('aircraft');
@@ -510,26 +571,40 @@ export async function executeSync(
       if (changedFields.divisionId) changedLabels.push('station');
       const changeSummary = changedLabels.length > 0 ? changedLabels.join(', ') : 'fields';
 
-      // Rule 3 — dual write: AuditLog + WP SYSTEM_EVENT feed post.
-      await prisma.auditLog.create({
-        data: {
-          actionType: 'WP_SYNC_RESCHEDULED',
-          entityType: 'WorkPackage',
-          entityId: String(item.existingWpId),
-          performedByUserId: actor.userId,
-          details: {
-            wpNo: item.wpNo,
-            source: 'GoogleSheetSync',
-            changedFields,
+      // Rule 3 + A5: all three writes in a single transaction — update + auditLog + feed
+      // either all commit or all roll back, preventing Rule 3 dual-write violations on crash.
+      const wpIdForTx = item.existingWpId!;
+      await prisma.$transaction(async (tx) => {
+        await tx.workPackage.update({
+          where: { id: wpIdForTx },
+          data: {
+            timeframeFrom: newFrom,
+            timeframeTo: newTo,
+            acRegistration: newAcReg,
+            customer: newCustomer,
+            divisionId: newDivisionId,
           },
-        },
-      });
-      await createFeedPost(prisma, {
-        type: 'SYSTEM_EVENT',
-        scope: 'WP',
-        scopeId: item.existingWpId,
-        content: `WP updated via Google Sheet Sync (${changeSummary}).`,
-        metadata: { performedByUserId: actor.userId, source: 'GoogleSheetSync' },
+        });
+        await tx.auditLog.create({
+          data: {
+            actionType: 'WP_SYNC_RESCHEDULED',
+            entityType: 'WorkPackage',
+            entityId: String(wpIdForTx),
+            performedByUserId: actor.userId,
+            details: {
+              wpNo: item.wpNo,
+              source: 'GoogleSheetSync',
+              changedFields,
+            },
+          },
+        });
+        await createFeedPost(tx as unknown as typeof prisma, {
+          type: 'SYSTEM_EVENT',
+          scope: 'WP',
+          scopeId: wpIdForTx,
+          content: `WP updated via Google Sheet Sync (${changeSummary}).`,
+          metadata: { performedByUserId: actor.userId, source: 'GoogleSheetSync' },
+        });
       });
       result.updated++;
     } catch (err) {

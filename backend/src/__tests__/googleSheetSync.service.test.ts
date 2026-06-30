@@ -44,7 +44,9 @@ describe('Google Sheet WP Sync service', () => {
     process.env.SHEET_CHK_BLUEPRINT_NAME = CHK_BP_NAME;
     process.env.SHEET_PC_EQ_BLUEPRINT_NAME = PC_EQ_BP_NAME;
 
-    const role = await prisma.role.upsert({ where: { name: 'Manager' }, update: {}, create: { name: 'Manager' } });
+    // Director role gives global division access so existing cross-division create tests pass (B2).
+    const directorRole = await prisma.role.upsert({ where: { name: 'Director' }, update: {}, create: { name: 'Director' } });
+    await prisma.role.upsert({ where: { name: 'Manager' }, update: {}, create: { name: 'Manager' } });
     const dept = await prisma.department.upsert({ where: { name: 'QC Dept' }, update: {}, create: { name: 'QC Dept' } });
     const qch = await prisma.division.upsert({ where: { code: 'QCH' }, update: {}, create: { name: 'QC Hanoi', code: 'QCH', departmentId: dept.id } });
     const qcs = await prisma.division.upsert({ where: { code: 'QCS' }, update: {}, create: { name: 'QC Saigon', code: 'QCS', departmentId: dept.id } });
@@ -52,7 +54,7 @@ describe('Google Sheet WP Sync service', () => {
     qcsId = qcs.id;
 
     const actor = await prisma.user.create({
-      data: { name: 'Sync Manager', email: 'syncmgr@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId: qchId, roleId: role.id },
+      data: { name: 'Sync Director', email: 'syncdirector@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId: qchId, roleId: directorRole.id },
     });
     actorId = actor.id;
 
@@ -170,7 +172,7 @@ describe('Google Sheet WP Sync service', () => {
 
   // ── executeSync ─────────────────────────────────────────────────────────────
   describe('executeSync', () => {
-    const emptyPreview = (): PreviewData => ({ toCreate: [], toUpdate: [], collisions: [], noChange: [] });
+    const emptyPreview = (): PreviewData => ({ toCreate: [], toUpdate: [], collisions: [], noChange: [], preflightErrors: [] });
     const item = (over: Partial<PreviewItem>): PreviewItem => ({
       wpNo: 'VN-CHK-001',
       description: '',
@@ -282,6 +284,74 @@ describe('Google Sheet WP Sync service', () => {
       const preview = emptyPreview();
       preview.toCreate = [item({ wpNo: 'VN-CHK-FAIL' })];
       await expect(executeSync(preview, { userId: actorId }, { collisionDecisions: {} })).rejects.toThrow(/CHK Blueprint not found or inactive/);
+    });
+
+    it('blocks a non-global actor from creating WPs outside their division (B2)', async () => {
+      const managerRole = await prisma.role.findFirst({ where: { name: 'Manager' } });
+      const qcsMgr = await prisma.user.create({
+        data: { name: 'QCS Manager', email: `qcsmgr-b2@sqd.com`, passwordHash: 'hash', forcePasswordChange: false, divisionId: qcsId, roleId: managerRole!.id },
+      });
+      const preview = emptyPreview();
+      // HAN maps to QCH — actor is only in QCS, so this must be rejected.
+      preview.toCreate = [item({ wpNo: 'VN-CHK-SCOPE', station: 'HAN', tatDays: 5 })];
+      const res = await executeSync(preview, { userId: qcsMgr.id }, { collisionDecisions: {} });
+      expect(res.created).toBe(0);
+      expect(res.errors).toHaveLength(1);
+      expect(res.errors[0]?.wpNo).toBe('VN-CHK-SCOPE');
+      expect(res.errors[0]?.reason).toMatch(/Not authorised/);
+      expect(await prisma.workPackage.count({ where: { name: 'VN-CHK-SCOPE', deletedAt: null } })).toBe(0);
+    });
+
+    it('counts a collision with no decision key as skipped (A4)', async () => {
+      await prisma.workPackage.create({
+        data: { wpId: 'QCH-WP-000600', name: 'VN-CHK-NODEC', type: 'CHECK', divisionId: qchId, timeframeFrom: future(1), timeframeTo: future(5), creatorId: actorId, status: 'Closed' },
+      });
+      const preview = emptyPreview();
+      preview.collisions = [item({ wpNo: 'VN-CHK-NODEC' })];
+      // No key for 'VN-CHK-NODEC' in collisionDecisions — must default to skip.
+      const res = await executeSync(preview, { userId: actorId }, { collisionDecisions: {} });
+      expect(res.created).toBe(0);
+      expect(res.skipped).toBe(1);
+      expect(res.errors).toHaveLength(0);
+    });
+  });
+
+  // ── fetchAndParseSheet — B3 ─────────────────────────────────────────────────
+  describe('fetchAndParseSheet — B3', () => {
+    it('excludes rows where TAT=0 (blank TAT coerces to 0, now rejected by .positive())', async () => {
+      const csv = [
+        HEADER,
+        'VN-CHK-TAT0,Zero TAT,Open,HAN,0,2026-07-01,08:00,2026-07-05,17:00,,',
+        'VN-CHK-TAT5,Normal,Open,HAN,5,2026-07-01,08:00,2026-07-05,17:00,,',
+      ].join('\n');
+      mockFetchCsv(csv);
+      const rows = await fetchAndParseSheet('https://example.test/sheet.csv');
+      expect(rows.map((r) => r.wpNo)).toEqual(['VN-CHK-TAT5']);
+    });
+  });
+
+  // ── getPreviewData — B4 ─────────────────────────────────────────────────────
+  describe('getPreviewData — B4', () => {
+    beforeEach(async () => {
+      await prisma.feedPost.deleteMany({});
+      await prisma.auditLog.deleteMany({});
+      await prisma.workPackage.deleteMany({});
+    });
+
+    it('adds rows to preflightErrors when multiple active WPs share the same name', async () => {
+      await prisma.workPackage.create({
+        data: { wpId: 'QCH-WP-000501', name: 'VN-CHK-DUP', type: 'CHECK', divisionId: qchId, timeframeFrom: future(1), timeframeTo: future(5), creatorId: actorId, status: 'Open' },
+      });
+      await prisma.workPackage.create({
+        data: { wpId: 'QCH-WP-000502', name: 'VN-CHK-DUP', type: 'CHECK', divisionId: qchId, timeframeFrom: future(1), timeframeTo: future(5), creatorId: actorId, status: 'Open' },
+      });
+      const preview = await getPreviewData([row({ wpNo: 'VN-CHK-DUP' })]);
+      expect(preview.toCreate).toHaveLength(0);
+      expect(preview.toUpdate).toHaveLength(0);
+      expect(preview.collisions).toHaveLength(0);
+      expect(preview.preflightErrors).toHaveLength(1);
+      expect(preview.preflightErrors[0]?.wpNo).toBe('VN-CHK-DUP');
+      expect(preview.preflightErrors[0]?.reason).toMatch(/Multiple active WPs/);
     });
   });
 });

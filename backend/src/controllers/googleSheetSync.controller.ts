@@ -4,6 +4,7 @@ import {
   getPreviewData,
   executeSync,
   PreviewData,
+  PreviewDataSchema,
   SyncOptions,
 } from '../services/googleSheetSync.service';
 
@@ -41,8 +42,14 @@ export const executeSyncHandler = async (req: Request, res: Response): Promise<v
       res.status(400).json({ message: 'previewData is required' });
       return;
     }
+    // B1: validate the echoed-back body to prevent forged payloads bypassing fetchAndParseSheet filters.
+    const bodyResult = PreviewDataSchema.safeParse(previewData);
+    if (!bodyResult.success) {
+      res.status(400).json({ message: 'Invalid previewData structure', errors: bodyResult.error.issues });
+      return;
+    }
     const options: SyncOptions = { collisionDecisions: collisionDecisions ?? {} };
-    const result = await executeSync(previewData, { userId }, options);
+    const result = await executeSync(bodyResult.data as PreviewData, { userId }, options);
     res.json(result);
   } catch (error) {
     console.error('[SheetSync] Execute error:', error);

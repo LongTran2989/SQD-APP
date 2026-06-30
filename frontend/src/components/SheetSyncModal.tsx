@@ -104,6 +104,18 @@ export default function SheetSyncModal({ onClose }: SheetSyncModalProps) {
 
           {phase === 'preview' && preview && (
             <div className="space-y-5">
+              {/* Preflight errors — rows skipped before diffing (e.g. duplicate active WP names) */}
+              {(preview.preflightErrors?.length ?? 0) > 0 && (
+                <div className="rounded-lg border border-red-100 bg-red-50/50 p-3">
+                  <p className="text-xs font-semibold text-red-700 mb-2">{preview.preflightErrors!.length} row(s) could not be processed:</p>
+                  <ul className="space-y-1">
+                    {preview.preflightErrors!.map((e) => (
+                      <li key={e.wpNo} className="text-xs text-red-600"><span className="font-semibold">{e.wpNo}:</span> {e.reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {nothingToDo && (
                 <div className="text-center py-10 text-slate-500">
                   <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
