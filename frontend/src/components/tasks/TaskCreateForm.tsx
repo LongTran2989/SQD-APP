@@ -19,6 +19,15 @@ export interface TaskCreateFormProps {
   onCancel?: () => void;
 }
 
+function formatRelativeDraftTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.round(mins / 60);
+  return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+}
+
 export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: TaskCreateFormProps) {
   const router = useRouter();
   const { user } = useAuthStore();
@@ -39,6 +48,9 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [prefilledWp, setPrefilledWp] = useState<WorkPackageDetail | null>(null);
   const [readOnlyDivisionLabel, setReadOnlyDivisionLabel] = useState<string>('—');
 
+  const DRAFT_KEY = 'taskCreateForm.issuanceNoteDraft';
+  const [draftBanner, setDraftBanner] = useState<{ text: string; savedAt: string } | null>(null);
+
   const templateId = selectedTemplate?.id;
 
   // Seed per-task overrides from the chosen template; the user can still override.
@@ -57,6 +69,48 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
       getWorkPackageById(prefilledWpId).then(setPrefilledWp).catch(() => {});
     }
   }, [prefilledWpId]);
+
+  // Check for an existing Task Instruction draft on mount — never silently
+  // pre-fill; only surface it via the restore/discard banner below.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { text: string; savedAt: string };
+        if (parsed.text?.trim()) setDraftBanner(parsed);
+      }
+    } catch {
+      // corrupt/unavailable storage — ignore, no draft to offer
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist the Task Instruction draft as it changes, debounced to avoid
+  // writing on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        if (issuanceNote.trim()) {
+          localStorage.setItem(DRAFT_KEY, JSON.stringify({ text: issuanceNote, savedAt: new Date().toISOString() }));
+        } else {
+          localStorage.removeItem(DRAFT_KEY);
+        }
+      } catch {
+        // storage unavailable (private browsing, quota) — non-fatal, drafts are a convenience only
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [issuanceNote]);
+
+  const handleRestoreDraft = () => {
+    if (draftBanner) setIssuanceNote(draftBanner.text);
+    setDraftBanner(null);
+  };
+
+  const handleDiscardDraft = () => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* non-fatal */ }
+    setDraftBanner(null);
+  };
 
   const ELEVATED_ROLES = ['Manager', 'Director', 'Admin'];
   const isElevated = ELEVATED_ROLES.includes(user?.role ?? '');
@@ -121,6 +175,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
         estimatedHours: estimatedHours === '' ? undefined : Number(estimatedHours),
       });
       toast.success(`Task ${task.taskId} created`);
+      try { localStorage.removeItem(DRAFT_KEY); } catch { /* non-fatal */ }
       if (onSaved) {
         onSaved(task.id);
       } else {
@@ -354,6 +409,21 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             />
           )}
         </div>
+
+        {/* Draft restore banner */}
+        {draftBanner && (
+          <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+            <span>You have an unsaved instruction draft from {formatRelativeDraftTime(draftBanner.savedAt)}.</span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button type="button" onClick={handleRestoreDraft} className="px-3 py-1 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition-colors">
+                Restore
+              </button>
+              <button type="button" onClick={handleDiscardDraft} className="px-3 py-1 text-amber-700 hover:bg-amber-100 rounded-lg font-semibold transition-colors">
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Task Instruction */}
         <div>
