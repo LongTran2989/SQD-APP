@@ -32,6 +32,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [issuanceNote, setIssuanceNote] = useState('');
   const [requiresApproval, setRequiresApproval] = useState(true);
   const [skillLevel, setSkillLevel] = useState<number>(0);
+  const [title, setTitle] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const [prefilledWp, setPrefilledWp] = useState<WorkPackageDetail | null>(null);
@@ -44,6 +45,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
     if (selectedTemplate) {
       setRequiresApproval(selectedTemplate.requiresApproval);
       setSkillLevel(selectedTemplate.skillLevel ?? 0);
+      setTitle((prev) => prev || selectedTemplate.title);
     }
   }, [selectedTemplate]);
 
@@ -113,6 +115,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
         issuanceNote: issuanceNote.trim() || undefined,
         requiresApproval,
         skillLevel,
+        title: title.trim() || undefined,
       });
       toast.success(`Task ${task.taskId} created`);
       if (onSaved) {
@@ -191,6 +194,20 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             </button>
           )}
         </div>
+      </div>
+
+      {/* Task Title */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 space-y-4">
+        <h2 className="text-base font-bold text-slate-800">Task Title</h2>
+        <input
+          id="task-title-input"
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={300}
+          placeholder="Defaults to the template title — edit to customize"
+          className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+        />
       </div>
 
       {/* Task details */}

@@ -102,6 +102,7 @@ export interface CreateTaskPayload {
   requiresApproval?: boolean;
   wpId?: number;
   issuanceNote?: string;
+  title?: string;
 }
 
 export const createTask = (payload: CreateTaskPayload): Promise<TaskEnriched> =>
