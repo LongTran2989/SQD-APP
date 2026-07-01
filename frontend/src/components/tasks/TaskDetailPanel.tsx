@@ -1,10 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
+import toast from 'react-hot-toast';
 import { TaskEnriched, User } from '../../types';
+import { relinkTaskWp } from '../../api/taskApi';
+import { FINAL_TASK_STATUSES } from '../../constants/taskStatus';
 import TaskStatusBadge from './TaskStatusBadge';
 import StarRating from './StarRating';
-import { AlertTriangle, Calendar, Clock, User as UserIcon, Link as LinkIcon, Briefcase, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Calendar, Clock, User as UserIcon, Link as LinkIcon, Briefcase, ShieldCheck, X } from 'lucide-react';
 import { ResponseActionBadge } from '../findings/FindingBadges';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -32,12 +36,35 @@ function formatDate(iso: string | null): string {
 interface TaskDetailPanelProps {
   task: TaskEnriched;
   currentUser: User;
+  onWpUnlinked?: () => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function TaskDetailPanel({ task, currentUser }: TaskDetailPanelProps) {
+export default function TaskDetailPanel({ task, currentUser, onWpUnlinked }: TaskDetailPanelProps) {
   const isOverdue = task.isOverdue;
+  const [unlinking, setUnlinking] = useState(false);
+
+  // Client-side approximation of the backend's issuer-or-privilege guard
+  // (task.controller.ts updateTaskWp) — the backend remains the sole
+  // authority; this only avoids showing a button that will always 403.
+  const canUnlinkWp =
+    !FINAL_TASK_STATUSES.includes(task.status) &&
+    task.status !== 'Inactive' &&
+    (currentUser.id === task.issuerId || currentUser.role === 'Admin');
+
+  const handleUnlinkWp = async () => {
+    setUnlinking(true);
+    try {
+      await relinkTaskWp(task.id, null);
+      toast.success('Work package unlinked');
+      onWpUnlinked?.();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to unlink work package');
+    } finally {
+      setUnlinking(false);
+    }
+  };
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -129,6 +156,18 @@ export default function TaskDetailPanel({ task, currentUser }: TaskDetailPanelPr
             <span className="flex items-center gap-1.5">
               <Briefcase className="w-3.5 h-3.5 text-slate-400" />
               {task.wp.wpId} — {task.wp.name}
+              {canUnlinkWp && (
+                <button
+                  type="button"
+                  onClick={handleUnlinkWp}
+                  disabled={unlinking}
+                  title="Unlink work package"
+                  aria-label="Unlink work package"
+                  className="p-0.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 disabled:opacity-50 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </span>
           </DetailRow>
         )}
