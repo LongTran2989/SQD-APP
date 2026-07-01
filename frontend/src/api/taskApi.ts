@@ -116,6 +116,7 @@ export interface QuickTaskPayload {
   estimatedHours?: number;
   skillLevel?: number;
   requiresApproval?: boolean;
+  targetDivisionId?: number;
 }
 
 export const createQuickTask = (payload: QuickTaskPayload): Promise<TaskEnriched> =>
