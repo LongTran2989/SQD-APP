@@ -32,6 +32,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [issuanceNote, setIssuanceNote] = useState('');
   const [requiresApproval, setRequiresApproval] = useState(true);
   const [skillLevel, setSkillLevel] = useState<number>(0);
+  const [estimatedHours, setEstimatedHours] = useState<number | ''>('');
   const [title, setTitle] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -46,6 +47,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
       setRequiresApproval(selectedTemplate.requiresApproval);
       setSkillLevel(selectedTemplate.skillLevel ?? 0);
       setTitle((prev) => prev || selectedTemplate.title);
+      setEstimatedHours((prev) => (prev === '' ? (selectedTemplate.estimatedHours ?? '') : prev));
     }
   }, [selectedTemplate]);
 
@@ -116,6 +118,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
         requiresApproval,
         skillLevel,
         title: title.trim() || undefined,
+        estimatedHours: estimatedHours === '' ? undefined : Number(estimatedHours),
       });
       toast.success(`Task ${task.taskId} created`);
       if (onSaved) {
@@ -275,8 +278,8 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
           />
         </div>
 
-        {/* Skill Level + Requires Approval */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Skill Level + Estimated Hours + Requires Approval */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="skill-level-select">
               Skill Level <span className="font-normal text-slate-400">(seeded from template)</span>
@@ -291,6 +294,21 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
                 <option key={lvl} value={lvl}>Level {lvl}</option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="estimated-hours-input">
+              Estimated Hours <span className="font-normal text-slate-400">(seeded from template)</span>
+            </label>
+            <input
+              id="estimated-hours-input"
+              type="number"
+              min="0"
+              step="0.5"
+              value={estimatedHours}
+              onChange={(e) => setEstimatedHours(e.target.value === '' ? '' : Number(e.target.value))}
+              placeholder="Optional"
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+            />
           </div>
           <div className="flex items-end">
             <label className="flex items-center gap-2 cursor-pointer group pb-2.5">
