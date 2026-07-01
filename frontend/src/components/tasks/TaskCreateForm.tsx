@@ -63,7 +63,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
     if (selectedTemplate) {
       setRequiresApproval(selectedTemplate.requiresApproval);
       setSkillLevel(selectedTemplate.skillLevel ?? 0);
-      setTitle((prev) => prev || selectedTemplate.title);
+      setTitle((prev) => prev || selectedTemplate.description || selectedTemplate.title);
       setEstimatedHours((prev) => (prev === '' ? (selectedTemplate.estimatedHours ?? '') : prev));
     }
   }, [selectedTemplate]);
@@ -272,7 +272,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           maxLength={300}
-          placeholder="Defaults to the template title — edit to customize"
+          placeholder="Defaults to the template description (or title, if no description) — edit to customize"
           className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
         />
       </div>
