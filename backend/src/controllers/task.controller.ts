@@ -290,7 +290,7 @@ function taskInclude() {
     targetDivision: { select: { id: true, name: true, code: true } },
     wp: { select: { id: true, wpId: true, name: true } },
     timeBooking: true,
-    parentFinding: { select: { id: true } }
+    parentFinding: { select: { id: true, findingId: true } }
   };
 }
 

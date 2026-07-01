@@ -2733,5 +2733,42 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.body.wpId).toBe(wp.id);
       await prisma.workPackage.delete({ where: { id: wp.id } });
     });
+
+    it('includes findingId on parentFinding in task responses', async () => {
+      const dept = await prisma.department.upsert({
+        where: { name: 'Task Test Dept (findingId case)' },
+        update: {},
+        create: { name: 'Task Test Dept (findingId case)' }
+      });
+      const finding = await prisma.finding.create({
+        data: {
+          findingId: 'DSK-000001',
+          description: 'Test finding for parentFinding.findingId assertion',
+          eventType: 'Other',
+          status: 'Open',
+          reportedByUserId: directorId,
+          departmentId: dept.id
+        }
+      });
+      const followUp = await prisma.task.create({
+        data: {
+          taskId: 'TSK-900001',
+          templateId: publishedTemplateId,
+          issuerId: directorId,
+          targetDivisionId: divisionId,
+          status: 'Unassigned',
+          schemaSnapshot: [],
+          parentFindingId: finding.id
+        }
+      });
+      const res = await request(app)
+        .get(`/api/tasks/${followUp.id}`)
+        .set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.parentFinding).toEqual({ id: finding.id, findingId: 'DSK-000001' });
+      // Cleanup
+      await prisma.task.delete({ where: { id: followUp.id } });
+      await prisma.finding.delete({ where: { id: finding.id } });
+    });
   });
 });
