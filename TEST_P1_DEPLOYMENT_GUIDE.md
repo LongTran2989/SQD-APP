@@ -381,6 +381,56 @@ yourself, and share the output.
 
 ---
 
+## Quick reference: Nuke and rebuild for a demo
+
+**Use this when:** you don't care about anything currently on the VPS and just want a clean
+slate with demo mock-up data, fastest path, no diagnostics. This is the exact sequence to
+run — copy/paste as one block.
+
+```bash
+ssh root@your-server-ip
+
+cd /app
+git fetch origin
+git checkout TEST_P1              # or the feature branch, if vps-ops.sh isn't on TEST_P1 yet
+git pull origin TEST_P1
+chmod +x scripts/vps-ops.sh
+
+bash scripts/vps-ops.sh \
+  --install \
+  --reset-db --yes-i-am-sure \
+  --seed-mockup \
+  --build-frontend \
+  --restart-all \
+  --status
+```
+
+What this does, in order: installs deps + regenerates the Prisma client, drops and recreates
+the DB and replays every migration (`prisma migrate reset --force`, which also runs the base
+`seed.ts` automatically), seeds demo mock-up data (`seed-mass-mockup-v2.ts`), rebuilds the
+frontend, restarts both PM2 services, then prints `pm2 status` + `migrate status` so you can
+confirm it's healthy.
+
+If you also need to point WP Auto sync at a specific sheet as part of the same reset, add:
+```bash
+  --set-sheet-url="https://docs.google.com/spreadsheets/d/YOUR_ID/export?format=csv&gid=0"
+```
+
+**Watch the output for:**
+- `prisma migrate reset --force` must complete without errors before the seed step runs — if
+  it fails, stop and fix the migration issue rather than continuing to seed.
+- The final `--status` block: `pm2 status` should show both `backend` and `frontend` as
+  `online`, and `migrate status` should say "Database schema is up to date!".
+- If `seed-mass-mockup-v2.ts` throws a Prisma `P2022` (column not found) error even right
+  after a fresh `--reset-db`, that means the checked-out code's `schema.prisma` doesn't match
+  what just got migrated — usually a `git pull` that didn't actually update, or the wrong
+  branch checked out. Re-run `git log -1 --oneline -- prisma/schema.prisma` and confirm it's
+  the commit you expect before retrying.
+
+Login afterward: `VAE00071` / `Abc@12345` (forces a password change on first login).
+
+---
+
 ## Troubleshooting (on VPS)
 
 - `pm2 status` — check if backend/frontend are running
