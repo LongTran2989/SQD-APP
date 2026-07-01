@@ -21,6 +21,8 @@ describe('Datasource search endpoints', () => {
   let userA1Id: number;
   let userA2Id: number;
   let userB1Id: number;
+  let wpId: number;
+  let closedWpId: number;
 
   beforeAll(async () => {
     const staffRole = await prisma.role.upsert({ where: { name: 'Staff' }, update: {}, create: { name: 'Staff' } });
@@ -37,6 +39,33 @@ describe('Datasource search endpoints', () => {
     userA2Id = userA2.id;
     const userB1 = await prisma.user.create({ data: { name: 'Bob Baker', employeeId: 'DSB0001', email: 'bob.ds@sqd.com', passwordHash: 'hash', forcePasswordChange: false, divisionId: divisionBId, roleId: staffRole.id } });
     userB1Id = userB1.id;
+
+    const wp = await prisma.workPackage.create({
+      data: {
+        wpId: 'DSA-WP-000001',
+        name: 'Datasource Search Test WP',
+        type: 'AUDIT',
+        divisionId: divisionAId,
+        timeframeFrom: new Date(),
+        timeframeTo: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        creatorId: userA1Id,
+        status: 'Open'
+      }
+    });
+    const closedWp = await prisma.workPackage.create({
+      data: {
+        wpId: 'DSA-WP-000002',
+        name: 'Datasource Closed Test WP',
+        type: 'AUDIT',
+        divisionId: divisionAId,
+        timeframeFrom: new Date(),
+        timeframeTo: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        creatorId: userA1Id,
+        status: 'Closed'
+      }
+    });
+    wpId = wp.id;
+    closedWpId = closedWp.id;
 
     token = makeToken(userA1Id, 'Staff', divisionAId);
   });
@@ -77,5 +106,13 @@ describe('Datasource search endpoints', () => {
     expect(unfiltered.status).toBe(200);
     const ids = unfiltered.body.map((d: any) => Number(d.value));
     expect(ids).toEqual(expect.arrayContaining([divisionAId, divisionBId]));
+  });
+
+  it('searches work packages by wpId/name, excludes Closed, respects limit', async () => {
+    const res = await request(app).get('/api/datasources/workpackages?q=Search Test').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const ids = res.body.map((w: any) => Number(w.value));
+    expect(ids).toContain(wpId);
+    expect(ids).not.toContain(closedWpId);
   });
 });

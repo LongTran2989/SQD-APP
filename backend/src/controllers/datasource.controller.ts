@@ -93,6 +93,23 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
         })));
         return;
       }
+      case 'workpackages': {
+        const workPackages = await prisma.workPackage.findMany({
+          select: { id: true, wpId: true, name: true },
+          where: {
+            deletedAt: null,
+            status: { notIn: ['Closed', 'Inactive'] },
+            ...(q ? { OR: [
+              { wpId: { contains: q, mode: 'insensitive' } },
+              { name: { contains: q, mode: 'insensitive' } }
+            ] } : {})
+          },
+          orderBy: { wpId: 'asc' },
+          take: limit
+        });
+        res.json(workPackages.map(w => ({ value: String(w.id), label: `${w.wpId} — ${w.name}` })));
+        return;
+      }
       default:
         res.status(400).json({ message: `Unknown data source: ${source}` });
     }
