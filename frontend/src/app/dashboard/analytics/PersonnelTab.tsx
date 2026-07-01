@@ -21,19 +21,21 @@ import {
 } from '../../../api/workloadApi';
 import { getDivisions } from '../../../api/taskApi';
 import { useAuthStore } from '../../../store/authStore';
-import { EfficiencyBadge, ErrorState, LoadingState, analyticsErrorMessage, formatHours, formatPct } from './shared';
+import { EfficiencyBadge, ErrorState, InfoTooltip, LoadingState, analyticsErrorMessage, formatHours, formatPct } from './shared';
+import { useQuickView } from '../../../components/quickview/QuickViewProvider';
 
 // Open CAPAs / Active RCAs columns and detail panels are hidden for now but
 // kept fully wired so they can be re-enabled by flipping this flag.
 const SHOW_CAPA_RCA = false;
 
-// Chart colours sourced from the design-system tokens (red-finding / emerald-
-// clear / signal-blue) so recharts stays on-palette with the rest of the app.
+// Chart colours mirror design-system tokens: red-finding / emerald-clear / signal-blue.
+// Recharts doesn't consume CSS variables, so these are kept in sync manually.
 const CHART = { red: '#dc2626', green: '#059669', blue: '#2563eb' } as const;
 
 // ─── Detail panel (expanded row) ───────────────────────────────────────────
 
 function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: string; to: string }) {
+  const { openTask, openWp } = useQuickView();
   const [detail, setDetail] = useState<PersonnelDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +58,7 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-8 bg-slate-50" role="status">
+      <div className="flex items-center justify-center py-8 bg-surface-base" role="status">
         <span
           className="animate-spin motion-reduce:animate-none rounded-full h-6 w-6 border-t-2 border-b-2 border-signal-blue"
           aria-hidden="true"
@@ -68,9 +70,16 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
 
   if (error || !detail) {
     return (
-      <p className="text-sm text-red-finding py-4 px-5 bg-slate-50" role="alert">
-        {error ?? 'No data.'}
-      </p>
+      <div className="flex items-center gap-3 py-4 px-5 bg-surface-base" role="alert">
+        <p className="text-sm text-red-finding">{error ?? 'No data.'}</p>
+        <button
+          type="button"
+          onClick={fetchDetail}
+          className="text-sm font-medium text-signal-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue rounded"
+        >
+          Try again
+        </button>
+      </div>
     );
   }
 
@@ -79,9 +88,9 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
   const gaugeEfficient = detail.taskEfficiency !== null && detail.taskEfficiency >= 1.0;
 
   return (
-    <div className="grid lg:grid-cols-3 gap-6 p-5 bg-slate-50">
+    <div className="grid lg:grid-cols-3 gap-6 p-5 bg-surface-base">
       {/* Efficiency gauge */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="bg-surface-card rounded-xl border border-border-default p-4">
         <h3 className="text-sm font-semibold text-ink-secondary mb-2">Task Efficiency</h3>
         {detail.taskEfficiency === null ? (
           <p className="text-sm text-ink-secondary py-8 text-center">No rated tasks yet.</p>
@@ -114,26 +123,54 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
       </div>
 
       {/* Hours logged trend */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 lg:col-span-2">
+      <div className="bg-surface-card rounded-xl border border-border-default p-4 lg:col-span-2">
         <h3 className="text-sm font-semibold text-ink-secondary mb-2">
           Hours Logged {from || to ? '(selected range)' : '(last 12 months)'}
         </h3>
         {detail.hoursLoggedByMonth.length === 0 ? (
           <p className="text-sm text-ink-secondary py-8 text-center">No time entries yet.</p>
         ) : (
-          <ResponsiveContainer width="100%" height={140}>
-            <BarChart data={detail.hoursLoggedByMonth}>
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} tickFormatter={(m: string) => m.slice(2)} />
-              <YAxis tick={{ fontSize: 11 }} width={30} />
-              <Tooltip formatter={(v) => [`${v}h`, 'Hours']} />
-              <Bar dataKey="hours" fill={CHART.blue} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <>
+            <div
+              role="img"
+              aria-label={`Hours logged by month: ${detail.hoursLoggedByMonth.map((m) => `${m.month} ${m.hours}h`).join(', ')}`}
+            >
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={detail.hoursLoggedByMonth}>
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} tickFormatter={(m: string) => m.slice(2)} />
+                  <YAxis tick={{ fontSize: 11 }} width={30} />
+                  <Tooltip formatter={(v) => [`${v}h`, 'Hours']} />
+                  <Bar dataKey="hours" fill={CHART.blue} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <details className="mt-2">
+              <summary className="text-xs text-ink-muted cursor-pointer hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue rounded w-fit">
+                View data table
+              </summary>
+              <table className="mt-2 w-full text-xs border-collapse">
+                <thead>
+                  <tr className="text-left text-ink-secondary">
+                    <th scope="col" className="pb-1 font-semibold w-20">Month</th>
+                    <th scope="col" className="pb-1 font-semibold text-right">Hours</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-subtle">
+                  {detail.hoursLoggedByMonth.map((m) => (
+                    <tr key={m.month}>
+                      <td className="py-0.5 text-ink-secondary">{m.month}</td>
+                      <td className="py-0.5 text-right text-ink-primary tabular-nums">{m.hours}h</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          </>
         )}
       </div>
 
       {/* Upcoming deadlines */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="bg-surface-card rounded-xl border border-border-default p-4">
         <h3 className="text-sm font-semibold text-ink-secondary mb-2">
           Upcoming Deadlines ({detail.deadlineWindowDays}d)
         </h3>
@@ -154,7 +191,7 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
       </div>
 
       {/* Active tasks */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="bg-surface-card rounded-xl border border-border-default p-4">
         <h3 className="text-sm font-semibold text-ink-secondary mb-2">Active Tasks ({detail.activeTasks.length})</h3>
         {detail.activeTasks.length === 0 ? (
           <p className="text-sm text-ink-secondary">None.</p>
@@ -162,7 +199,13 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
           <ul className="space-y-2 text-sm max-h-40 overflow-y-auto">
             {detail.activeTasks.map((t) => (
               <li key={t.id} className="flex justify-between gap-2">
-                <span className="text-ink-primary truncate">{t.title}</span>
+                <button
+                  type="button"
+                  onClick={() => openTask(t.id)}
+                  className="text-ink-primary truncate text-left hover:text-signal-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue rounded"
+                >
+                  {t.title}
+                </button>
                 <span className="text-ink-secondary whitespace-nowrap">
                   {t.deadline ? new Date(t.deadline).toLocaleDateString() : '—'}
                 </span>
@@ -173,7 +216,7 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
       </div>
 
       {/* Work packages assigned */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="bg-surface-card rounded-xl border border-border-default p-4">
         <h3 className="text-sm font-semibold text-ink-secondary mb-2">Work Packages Assigned ({detail.activeWps.length})</h3>
         {detail.activeWps.length === 0 ? (
           <p className="text-sm text-ink-secondary">None.</p>
@@ -181,7 +224,13 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
           <ul className="space-y-2 text-sm max-h-40 overflow-y-auto">
             {detail.activeWps.map((w) => (
               <li key={w.id} className="flex justify-between gap-2">
-                <span className="text-ink-primary truncate">{w.name}</span>
+                <button
+                  type="button"
+                  onClick={() => openWp(w.id)}
+                  className="text-ink-primary truncate text-left hover:text-signal-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue rounded"
+                >
+                  {w.name}
+                </button>
                 <span className="text-ink-secondary whitespace-nowrap">{w.status}</span>
               </li>
             ))}
@@ -191,7 +240,7 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
 
       {/* Open CAPAs */}
       {SHOW_CAPA_RCA && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="bg-surface-card rounded-xl border border-border-default p-4">
           <h3 className="text-sm font-semibold text-ink-secondary mb-2">Open CAPAs</h3>
           {detail.openCapas.length === 0 ? (
             <p className="text-sm text-ink-secondary">None.</p>
@@ -209,7 +258,7 @@ function PersonnelDetailPanel({ userId, from, to }: { userId: number; from: stri
 
       {/* Active RCAs */}
       {SHOW_CAPA_RCA && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="bg-surface-card rounded-xl border border-border-default p-4">
           <h3 className="text-sm font-semibold text-ink-secondary mb-2">Active RCAs</h3>
           {detail.activeRcas.length === 0 ? (
             <p className="text-sm text-ink-secondary">None.</p>
@@ -242,7 +291,8 @@ type SortKey =
   | 'tasksCompleted'
   | 'taskEfficiency'
   | 'onTimeRate'
-  | 'overdueRejectedCount'
+  | 'overdueCount'
+  | 'rejectedCount'
   | 'findingsReported';
 
 function sortValue(p: PersonnelRow, key: SortKey): number | string {
@@ -269,8 +319,10 @@ function sortValue(p: PersonnelRow, key: SortKey): number | string {
       return p.performance.taskEfficiency ?? -Infinity;
     case 'onTimeRate':
       return p.performance.onTimeRate ?? -Infinity;
-    case 'overdueRejectedCount':
-      return p.performance.overdueRejectedCount;
+    case 'overdueCount':
+      return p.performance.overdueCount;
+    case 'rejectedCount':
+      return p.performance.rejectedCount;
     case 'findingsReported':
       return p.performance.findingsReported;
   }
@@ -283,6 +335,7 @@ function SortableTh({
   activeSortKey,
   sortDir,
   onSort,
+  tooltip,
 }: {
   label: string;
   sortKeyName: SortKey;
@@ -290,6 +343,7 @@ function SortableTh({
   activeSortKey: SortKey;
   sortDir: 'asc' | 'desc';
   onSort: (key: SortKey) => void;
+  tooltip?: string;
 }) {
   const active = activeSortKey === sortKeyName;
   return (
@@ -301,7 +355,7 @@ function SortableTh({
       <button
         type="button"
         onClick={() => onSort(sortKeyName)}
-        className={`inline-flex items-center gap-1 rounded hover:text-ink-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue ${
+        className={`inline-flex items-center gap-1 rounded p-1 hover:text-ink-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue ${
           align === 'right' ? 'flex-row-reverse' : ''
         } ${active ? 'text-ink-primary' : ''}`}
       >
@@ -313,13 +367,14 @@ function SortableTh({
             <ChevronDown className="w-3 h-3" aria-hidden="true" />
           ))}
       </button>
+      {tooltip && <InfoTooltip definition={tooltip} />}
     </th>
   );
 }
 
 // ─── Tab ────────────────────────────────────────────────────────────────────
 
-export default function PersonnelTab() {
+export default function PersonnelTab({ from, to, dateRangeError }: { from: string; to: string; dateRangeError: string | null }) {
   const role = useAuthStore((s) => s.user?.role);
   const canFilterDivision = role === 'Director' || role === 'Admin';
   const fieldId = useId();
@@ -329,8 +384,6 @@ export default function PersonnelTab() {
   const [error, setError] = useState<string | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<number | null>(null);
 
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const [divisionId, setDivisionId] = useState<string>('');
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
   const [nameQuery, setNameQuery] = useState('');
@@ -353,6 +406,7 @@ export default function PersonnelTab() {
   }, [canFilterDivision]);
 
   const fetchPersonnel = useCallback(async () => {
+    if (dateRangeError) return; // invalid range — wait for correction
     setLoading(true);
     try {
       const d = await getPersonnelWorkload({
@@ -366,7 +420,7 @@ export default function PersonnelTab() {
     } finally {
       setLoading(false);
     }
-  }, [from, to, divisionId]);
+  }, [from, to, divisionId, dateRangeError]);
 
   useEffect(() => {
     fetchPersonnel();
@@ -384,16 +438,16 @@ export default function PersonnelTab() {
     });
   }, [rows, nameQuery, sortKey, sortDir]);
 
-  const columnCount = SHOW_CAPA_RCA ? 14 : 12;
-  const hasFilters = Boolean(from || to || divisionId || nameQuery);
+  const columnCount = SHOW_CAPA_RCA ? 15 : 13;
+  const hasFilters = Boolean(divisionId || nameQuery);
 
   if (loading) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  if (error) return <ErrorState message={error} onRetry={fetchPersonnel} />;
 
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-wrap items-end gap-4">
+      <div className="bg-surface-card rounded-xl border border-border-default p-5 flex flex-wrap items-end gap-4">
         <div>
           <label htmlFor={`${fieldId}-name`} className="block text-xs font-semibold text-ink-secondary uppercase tracking-wider mb-1">
             Personnel
@@ -404,31 +458,7 @@ export default function PersonnelTab() {
             value={nameQuery}
             onChange={(e) => setNameQuery(e.target.value)}
             placeholder="Search by name…"
-            className="border border-slate-200 rounded-lg px-3 py-2.5 text-sm w-48 text-ink-primary placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-signal-blue focus:border-transparent"
-          />
-        </div>
-        <div>
-          <label htmlFor={`${fieldId}-from`} className="block text-xs font-semibold text-ink-secondary uppercase tracking-wider mb-1">
-            From
-          </label>
-          <input
-            id={`${fieldId}-from`}
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-ink-primary focus:outline-none focus:ring-2 focus:ring-signal-blue focus:border-transparent"
-          />
-        </div>
-        <div>
-          <label htmlFor={`${fieldId}-to`} className="block text-xs font-semibold text-ink-secondary uppercase tracking-wider mb-1">
-            To
-          </label>
-          <input
-            id={`${fieldId}-to`}
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-ink-primary focus:outline-none focus:ring-2 focus:ring-signal-blue focus:border-transparent"
+            className="border border-border-default rounded-lg px-3 py-3 text-sm w-48 text-ink-primary placeholder:text-ink-secondary focus:outline-none focus:ring-2 focus:ring-signal-blue focus:border-transparent"
           />
         </div>
         {canFilterDivision && (
@@ -440,7 +470,7 @@ export default function PersonnelTab() {
               id={`${fieldId}-division`}
               value={divisionId}
               onChange={(e) => setDivisionId(e.target.value)}
-              className="border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-ink-primary focus:outline-none focus:ring-2 focus:ring-signal-blue focus:border-transparent"
+              className="border border-border-default rounded-lg px-3 py-3 text-sm text-ink-primary focus:outline-none focus:ring-2 focus:ring-signal-blue focus:border-transparent"
             >
               <option value="">All divisions</option>
               {divisions.map((d) => (
@@ -455,12 +485,10 @@ export default function PersonnelTab() {
           <button
             type="button"
             onClick={() => {
-              setFrom('');
-              setTo('');
               setDivisionId('');
               setNameQuery('');
             }}
-            className="text-sm font-medium text-signal-blue hover:underline rounded px-2 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue"
+            className="text-sm font-medium text-signal-blue hover:underline rounded px-2 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue"
           >
             Clear filters
           </button>
@@ -468,8 +496,8 @@ export default function PersonnelTab() {
       </div>
 
       {/* Personnel table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="p-5 border-b border-slate-100 flex items-center gap-2">
+      <div className="bg-surface-card rounded-xl border border-border-default overflow-hidden">
+        <div className="p-5 border-b border-border-subtle flex items-center gap-2">
           <Users className="w-5 h-5 text-ink-secondary" aria-hidden="true" />
           <h2 className="text-lg font-semibold text-ink-primary">Personnel</h2>
           <span className="text-sm text-ink-secondary tabular-nums">· {sorted.length}</span>
@@ -483,28 +511,29 @@ export default function PersonnelTab() {
               Personnel workload and performance. Use the expand button on a row to open its detail panel.
             </caption>
             <thead>
-              <tr className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider bg-slate-50">
+              <tr className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider bg-surface-base">
                 <th scope="col" className="px-5 py-3 w-8"><span className="sr-only">Expand</span></th>
                 <SortableTh label="Name" sortKeyName="name" align="left" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                <SortableTh label="Active Tasks" sortKeyName="activeTasks" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                <SortableTh label="Est. Hours" sortKeyName="estimatedHours" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                <SortableTh label="WPs" sortKeyName="wpsManaged" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Active Tasks" sortKeyName="activeTasks" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} tooltip="Current snapshot — reflects today's state, not affected by the date range." />
+                <SortableTh label="Est. Hours" sortKeyName="estimatedHours" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} tooltip="Current snapshot — reflects today's state, not affected by the date range." />
+                <SortableTh label="WPs" sortKeyName="wpsManaged" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} tooltip="Current snapshot — reflects today's state, not affected by the date range." />
                 {SHOW_CAPA_RCA && (
                   <SortableTh label="Open CAPAs" sortKeyName="openCapas" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 )}
                 {SHOW_CAPA_RCA && (
                   <SortableTh label="Active RCAs" sortKeyName="activeRcas" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 )}
-                <SortableTh label="Deadlines" sortKeyName="upcomingDeadlines" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Deadlines" sortKeyName="upcomingDeadlines" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} tooltip="Current snapshot — reflects today's state, not affected by the date range." />
                 <SortableTh label="Hours Logged" sortKeyName="hoursLogged" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <SortableTh label="Tasks Done" sortKeyName="tasksCompleted" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                <SortableTh label="Efficiency" sortKeyName="taskEfficiency" align="center" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                <SortableTh label="On-Time Rate" sortKeyName="onTimeRate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                <SortableTh label="Overdue/Rejected" sortKeyName="overdueRejectedCount" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Efficiency" sortKeyName="taskEfficiency" align="center" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} tooltip="Estimated hours ÷ Actual hours. ≥ 1.0 = on or under budget (green). < 1.0 = over budget (red)." />
+                <SortableTh label="On-Time Rate" sortKeyName="onTimeRate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} tooltip="% of closed tasks completed on or before their deadline." />
+                <SortableTh label="Overdue" sortKeyName="overdueCount" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} tooltip="Tasks whose deadline has already passed and are still open, plus work packages past their timeframe." />
+                <SortableTh label="Rejected" sortKeyName="rejectedCount" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} tooltip="Tasks returned by a reviewer during the In Review stage." />
                 <SortableTh label="Findings Reported" sortKeyName="findingsReported" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border-subtle">
               {sorted.length === 0 ? (
                 <tr>
                   <td colSpan={columnCount} className="px-5 py-8 text-center text-ink-secondary">
@@ -518,7 +547,7 @@ export default function PersonnelTab() {
                   const toggle = () => setExpandedUserId(expanded ? null : p.userId);
                   return (
                     <Fragment key={p.userId}>
-                      <tr className="hover:bg-slate-50 transition-colors">
+                      <tr className="hover:bg-surface-base transition-colors">
                         <td className="px-2 py-1">
                           <button
                             type="button"
@@ -526,7 +555,7 @@ export default function PersonnelTab() {
                             aria-expanded={expanded}
                             aria-controls={panelId}
                             aria-label={`${expanded ? 'Collapse' : 'Expand'} details for ${p.name}`}
-                            className="flex items-center justify-center w-9 h-9 rounded-lg text-ink-muted hover:bg-slate-100 hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue"
+                            className="flex items-center justify-center w-11 h-11 rounded-lg text-ink-muted hover:bg-border-subtle hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue"
                           >
                             {expanded ? <ChevronDown className="w-4 h-4" aria-hidden="true" /> : <ChevronRight className="w-4 h-4" aria-hidden="true" />}
                           </button>
@@ -557,9 +586,18 @@ export default function PersonnelTab() {
                         </td>
                         <td className="px-5 py-3 text-right text-ink-primary">{formatPct(p.performance.onTimeRate)}</td>
                         <td className="px-5 py-3 text-right">
-                          {p.performance.overdueRejectedCount > 0 ? (
+                          {p.performance.overdueCount > 0 ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-caution-surface text-amber-caution border border-amber-caution/20">
+                              {p.performance.overdueCount}
+                            </span>
+                          ) : (
+                            <span className="text-ink-muted">0</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          {p.performance.rejectedCount > 0 ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-finding-surface text-red-finding border border-red-finding/20">
-                              {p.performance.overdueRejectedCount}
+                              {p.performance.rejectedCount}
                             </span>
                           ) : (
                             <span className="text-ink-muted">0</span>

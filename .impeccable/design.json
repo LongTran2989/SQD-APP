@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-06-19T00:00:00Z",
+  "generatedAt": "2026-06-30T00:00:00Z",
   "title": "Design System: SQD-APP",
   "extensions": {
     "colorMeta": {
@@ -105,7 +105,7 @@
       "refersTo": "input-default",
       "description": "Standard text field. Used on forms for task data, filters, search.",
       "html": "<div class=\"ds-field\"><label class=\"ds-field-label\">Staff ID</label><input class=\"ds-input\" type=\"text\" placeholder=\"e.g. VAE00071\" /></div>",
-      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; } .ds-field-label { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 600; color: #1e293b; } .ds-input { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 400; color: #1e293b; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 16px; width: 100%; outline: none; transition: box-shadow 120ms cubic-bezier(0.4,0,0.2,1), border-color 120ms cubic-bezier(0.4,0,0.2,1); } .ds-input::placeholder { color: #94a3b8; } .ds-input:focus { border-color: transparent; box-shadow: 0 0 0 2px #2563eb; } @media (prefers-reduced-motion: reduce) { .ds-input { transition: none; } }"
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; } .ds-field-label { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 600; color: #1e293b; } .ds-input { font-family: 'Geist Sans', system-ui, sans-serif; font-size: 0.875rem; font-weight: 400; color: #1e293b; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 16px; width: 100%; outline: none; transition: box-shadow 120ms cubic-bezier(0.4,0,0.2,1), border-color 120ms cubic-bezier(0.4,0,0.2,1); } .ds-input::placeholder { color: #475569; } .ds-input:focus { border-color: transparent; box-shadow: 0 0 0 2px #2563eb; } @media (prefers-reduced-motion: reduce) { .ds-input { transition: none; } }"
     },
     {
       "name": "Sidebar Navigation Item",
@@ -161,7 +161,8 @@
       "Don't use uppercase tracked letters above 12px or on more than one element per component.",
       "Don't introduce a second accent colour without a specific, documented status role.",
       "Don't nest cards. Use internal dividers and section headings within a single card instead.",
-      "Don't rely on colour alone to communicate status. Every status badge carries a text label alongside its colour."
+      "Don't rely on colour alone to communicate status. Every status badge carries a text label alongside its colour.",
+      "Don't use Ink Muted (#94a3b8) for placeholder text — it's ~2.4:1 on white, failing WCAG 1.4.3 AA. Use Ink Secondary (#475569) instead."
     ]
   }
 }

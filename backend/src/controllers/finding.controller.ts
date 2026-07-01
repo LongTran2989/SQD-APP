@@ -577,7 +577,7 @@ export const getDuplicateCandidates = async (req: Request, res: Response): Promi
 export const listFindings = async (req: Request, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const { status, divisionId, severity, reportedBy, taskId } = req.query;
+    const { status, divisionId, severity, reportedBy, taskId, eventType, departmentId, ataChapterId } = req.query;
     const page = Math.max(1, parseInt((req.query.page as string) ?? '1', 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt((req.query.pageSize as string) ?? '20', 10) || 20));
 
@@ -585,9 +585,13 @@ export const listFindings = async (req: Request, res: Response): Promise<void> =
 
     if (typeof status === 'string' && FINDING_STATUSES.includes(status)) filters.push({ status });
     if (typeof severity === 'string' && SEVERITIES.includes(severity)) filters.push({ severity });
-    if (divisionId) filters.push({ targetDivisionId: parseInt(divisionId as string, 10) });
-    if (reportedBy) filters.push({ reportedByUserId: parseInt(reportedBy as string, 10) });
-    if (taskId) filters.push({ sourceTaskId: parseInt(taskId as string, 10) });
+    if (divisionId) { const d = parseInt(divisionId as string, 10); if (!Number.isNaN(d)) filters.push({ targetDivisionId: d }); }
+    if (reportedBy) { const d = parseInt(reportedBy as string, 10); if (!Number.isNaN(d)) filters.push({ reportedByUserId: d }); }
+    if (taskId) { const d = parseInt(taskId as string, 10); if (!Number.isNaN(d)) filters.push({ sourceTaskId: d }); }
+    // eventType is a free-form String field (not a Prisma enum), so no allow-list — any value is valid.
+    if (typeof eventType === 'string' && eventType) filters.push({ eventType });
+    if (departmentId) { const d = parseInt(departmentId as string, 10); if (!Number.isNaN(d)) filters.push({ departmentId: d }); }
+    if (ataChapterId) { const a = parseInt(ataChapterId as string, 10); if (!Number.isNaN(a)) filters.push({ ataChapterId: a }); }
 
     const where: Prisma.FindingWhereInput = { AND: filters };
 

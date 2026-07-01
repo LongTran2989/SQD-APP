@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
 import { FindingListItem, FindingStatus, FindingSeverity } from '../../../types';
@@ -32,18 +33,39 @@ function formatDate(d: string | null): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function FindingsListPage() {
+function FindingsListPageInner() {
   const { user } = useAuthStore();
   const canFilterAdvanced = !!user && MANAGER_ROLES.includes(user.role);
+  const searchParams = useSearchParams();
 
   const [showRaisePanel, setShowRaisePanel] = useState(false);
   const [findings, setFindings] = useState<FindingListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [statusFilter, setStatusFilter] = useState<FindingStatus | 'all'>('all');
-  const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>('all');
+  // Initialize filters from URL params so analytics drill-through links land pre-filtered.
+  const [statusFilter, setStatusFilter] = useState<FindingStatus | 'all'>(() => {
+    const s = searchParams.get('status');
+    return (ALL_STATUSES as string[]).includes(s ?? '') ? (s as FindingStatus) : 'all';
+  });
+  const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>(() => {
+    const s = searchParams.get('severity');
+    return (ALL_SEVERITIES as string[]).includes(s ?? '') ? (s as FindingSeverity) : 'all';
+  });
   const [divisionFilter, setDivisionFilter] = useState<string>('all');
   const [reporterFilter, setReporterFilter] = useState<string>('all');
+  // Drill-through-only filters — derived directly from searchParams so they stay
+  // reactive to client-side navigation without needing useState initialisers.
+  const eventTypeFilter = searchParams.get('eventType');
+  const departmentIdFilter = (() => {
+    const v = searchParams.get('departmentId');
+    const n = v ? parseInt(v, 10) : NaN;
+    return Number.isNaN(n) ? null : n;
+  })();
+  const ataChapterIdFilter = (() => {
+    const v = searchParams.get('ataChapterId');
+    const n = v ? parseInt(v, 10) : NaN;
+    return Number.isNaN(n) ? null : n;
+  })();
 
   const [divisions, setDivisions] = useState<{ value: string; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: string; label: string }[]>([]);
@@ -63,6 +85,9 @@ export default function FindingsListPage() {
         severity: severityFilter === 'all' ? undefined : severityFilter,
         divisionId: divisionFilter === 'all' ? undefined : Number(divisionFilter),
         reportedBy: reporterFilter === 'all' ? undefined : Number(reporterFilter),
+        eventType: eventTypeFilter ?? undefined,
+        departmentId: departmentIdFilter ?? undefined,
+        ataChapterId: ataChapterIdFilter ?? undefined,
         pageSize: 100,
       });
       setFindings(res.findings);
@@ -71,7 +96,7 @@ export default function FindingsListPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, severityFilter, divisionFilter, reporterFilter]);
+  }, [statusFilter, severityFilter, divisionFilter, reporterFilter, eventTypeFilter, departmentIdFilter, ataChapterIdFilter]);
 
   useEffect(() => {
     fetchFindings();
@@ -93,6 +118,24 @@ export default function FindingsListPage() {
           Raise Finding
         </button>
       </div>
+
+      {/* Drill-through banner — shown when arriving from the analytics page */}
+      {(eventTypeFilter || departmentIdFilter || ataChapterIdFilter) && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-signal-blue/5 border border-signal-blue/20 rounded-xl text-sm text-ink-secondary">
+          <span>
+            Filtered from Analytics
+            {eventTypeFilter && <> · <strong className="text-ink-primary">{eventTypeFilter}</strong></>}
+            {departmentIdFilter && <> · <strong className="text-ink-primary">Department #{departmentIdFilter}</strong></>}
+            {ataChapterIdFilter && <> · <strong className="text-ink-primary">ATA Chapter #{ataChapterIdFilter}</strong></>}
+          </span>
+          <Link
+            href="/dashboard/findings"
+            className="ml-auto text-signal-blue font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue rounded"
+          >
+            Clear
+          </Link>
+        </div>
+      )}
 
       {/* Table card */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -279,5 +322,13 @@ export default function FindingsListPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function FindingsListPage() {
+  return (
+    <Suspense>
+      <FindingsListPageInner />
+    </Suspense>
   );
 }

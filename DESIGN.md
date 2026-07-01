@@ -240,7 +240,7 @@ The most critical component in the system. Read in under one second.
 ### Inputs / Fields
 - **Style:** White background, 1px slate-200 border, 12px radius, 12px × 16px padding
 - **Focus:** 2px Signal Blue ring (`#2563eb`), border becomes transparent. Transition: `box-shadow 120ms ease-out`.
-- **Placeholder:** Ink Muted (`#94a3b8`). Contrast verified at 4.5:1 against white.
+- **Placeholder:** Ink Secondary (`#475569`, ~6.6:1 on white). Ink Muted (`#94a3b8`) is ~2.4:1 and fails WCAG 1.4.3 AA — do not use for placeholder text.
 - **Error:** Red Finding border (`#dc2626`), Red Finding Surface background, error message below in Red Finding text at Label size.
 - **Disabled:** 60% opacity, cursor: not-allowed.
 

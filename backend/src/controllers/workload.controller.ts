@@ -299,8 +299,9 @@ export const getPersonnelWorkload = async (req: Request, res: Response): Promise
           proactivityRatio: finalTaskCount > 0 ? round2(findingsReported / finalTaskCount) : null,
           findingsClosed: findingsClosedMap.get(u.id) ?? 0,
           capasVerified: capasVerifiedMap.get(u.id) ?? 0,
-          overdueRejectedCount:
-            rejectedCount + (overdueTaskCountMap.get(u.id) ?? 0) + (overdueWpCountMap.get(u.id) ?? 0),
+          rejectedCount,
+          rejectionRate: finalTaskCount > 0 ? round2(rejectedCount / finalTaskCount) : null,
+          overdueCount: (overdueTaskCountMap.get(u.id) ?? 0) + (overdueWpCountMap.get(u.id) ?? 0),
         },
       };
     });

@@ -20,7 +20,9 @@ export interface PersonnelPerformance {
   proactivityRatio: number | null;
   findingsClosed: number;
   capasVerified: number;
-  overdueRejectedCount: number;
+  rejectedCount: number;
+  rejectionRate: number | null;
+  overdueCount: number;
 }
 
 export interface PersonnelRow {
