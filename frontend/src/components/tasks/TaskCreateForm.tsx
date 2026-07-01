@@ -50,7 +50,11 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
 
   const DRAFT_KEY = 'taskCreateForm.issuanceNoteDraft';
   const [draftBanner, setDraftBanner] = useState<{ text: string; savedAt: string } | null>(null);
-  const isFirstRender = useRef(true);
+  // Tracks genuine user interaction (typing, Restore) rather than effect
+  // invocation count — immune to React Strict Mode's dev-only double-invoke
+  // of effect setup functions, since this ref is only ever set inside real
+  // event handlers, never inside the persist effect itself.
+  const userInteractedRef = useRef(false);
 
   const templateId = selectedTemplate?.id;
 
@@ -89,10 +93,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   // Persist the Task Instruction draft as it changes, debounced to avoid
   // writing on every keystroke.
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
+    if (!userInteractedRef.current) return; // nothing user-driven has happened yet — don't touch storage (avoids wiping an existing draft before Restore/Discard, and is immune to Strict Mode's double-invoke since this ref is only ever set inside real event handlers, never inside this effect itself)
     const t = setTimeout(() => {
       try {
         if (issuanceNote.trim()) {
@@ -108,7 +109,10 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   }, [issuanceNote]);
 
   const handleRestoreDraft = () => {
-    if (draftBanner) setIssuanceNote(draftBanner.text);
+    if (draftBanner) {
+      userInteractedRef.current = true;
+      setIssuanceNote(draftBanner.text);
+    }
     setDraftBanner(null);
   };
 
@@ -439,7 +443,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             id="instruction-input"
             rows={3}
             value={issuanceNote}
-            onChange={(e) => setIssuanceNote(e.target.value)}
+            onChange={(e) => { userInteractedRef.current = true; setIssuanceNote(e.target.value); }}
             placeholder="Add context or specific guidance for this task instance…"
             className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm resize-none"
           />
