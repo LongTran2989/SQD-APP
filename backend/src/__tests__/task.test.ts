@@ -373,6 +373,32 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.body.estimatedHours).toBe(2.0);
     });
 
+    it('generates unique taskIds under concurrent creation (TaskSequence atomicity)', async () => {
+      const concurrency = 8;
+      const requests = Array.from({ length: concurrency }, () =>
+        request(app)
+          .post('/api/tasks')
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ templateId: publishedTemplateId, targetDivisionId: divisionId })
+      );
+      const responses = await Promise.all(requests);
+      responses.forEach((r) => expect(r.status).toBe(201));
+      const taskIds = responses.map((r) => r.body.taskId as string);
+      expect(new Set(taskIds).size).toBe(concurrency);
+      taskIds.forEach((id) => expect(id).toMatch(/^TSK-\d{6}$/));
+    });
+
+    it('persists TaskSequence.sequence matching the highest issued taskId per division', async () => {
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId });
+      expect(res.status).toBe(201);
+      const issuedSeq = Number((res.body.taskId as string).split('-')[1]);
+      const seqRow = await prisma.taskSequence.findUnique({ where: { divisionCode: 'TSK' } });
+      expect(seqRow?.sequence).toBe(issuedSeq);
+    });
+
     it('T11: SYSTEM_EVENT logged in TaskActivity on task creation', async () => {
       const res = await request(app)
         .post('/api/tasks')

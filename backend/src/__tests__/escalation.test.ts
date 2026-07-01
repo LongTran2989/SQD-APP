@@ -123,6 +123,16 @@ describe('Escalation core (Phase 3)', () => {
       data: { taskId: 'ESCA-000004', templateId: noFindingTemplate.id, issuerId: director.id, status: 'Assigned', targetDivisionId: divAId, assignedToUserId: staff.id, wpId: wpAId, schemaSnapshot: { fields: [] } },
     });
     taskNoFindingWpId = taskNoFinding.id;
+
+    // The four ESCA-* tasks above are inserted directly (bypassing generateTaskId),
+    // so the TaskSequence counter for this division code has no row yet. Seed it to
+    // match the highest manually-assigned taskId, mirroring the production backfill,
+    // so CREATE_TASK escalation actions later in this suite don't collide with ESCA-000001.
+    await prisma.taskSequence.upsert({
+      where: { divisionCode: 'ESCA' },
+      update: { sequence: 4 },
+      create: { divisionCode: 'ESCA', sequence: 4 },
+    });
   });
 
   // Tear down this suite's own fixtures in FK-safe order so a global cleanup in
