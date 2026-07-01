@@ -1,6 +1,7 @@
 import React from 'react';
 import { Activity, MessageSquare, AlertCircle, Info } from 'lucide-react';
 import { FeedPost } from '../../api/dashboardApi';
+import { useQuickView } from '../quickview/QuickViewProvider';
 
 interface ActivityFeedWidgetProps {
   posts: FeedPost[];
@@ -8,6 +9,15 @@ interface ActivityFeedWidgetProps {
 }
 
 export function ActivityFeedWidget({ posts, isLoading }: ActivityFeedWidgetProps) {
+  const { openTask, openWp, openFinding } = useQuickView();
+
+  const openScope = (post: FeedPost) => {
+    if (post.scopeId == null) return;
+    if (post.scope === 'TASK') openTask(post.scopeId);
+    else if (post.scope === 'WP') openWp(post.scopeId);
+    else if (post.scope === 'FINDING') openFinding(post.scopeId);
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
       <div className="p-5 border-b border-slate-100 flex items-center gap-3">
@@ -63,9 +73,19 @@ export function ActivityFeedWidget({ posts, isLoading }: ActivityFeedWidgetProps
                   </div>
                   <div className="text-xs text-slate-400 mt-1 font-medium flex items-center gap-2">
                     {new Date(post.createdAt).toLocaleDateString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] tracking-wide">
-                      {post.scopeName ?? `${post.scope.toLowerCase()}${post.scopeId ? ` #${post.scopeId}` : ''}`}
-                    </span>
+                    {['TASK', 'WP', 'FINDING'].includes(post.scope) && post.scopeId != null ? (
+                      <button
+                        type="button"
+                        onClick={() => openScope(post)}
+                        className="px-1.5 py-0.5 rounded-full bg-slate-100 text-signal-blue text-[10px] tracking-wide hover:bg-signal-blue-surface hover:underline"
+                      >
+                        {post.scopeName ?? `${post.scope.toLowerCase()} #${post.scopeId}`}
+                      </button>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] tracking-wide">
+                        {post.scopeName ?? `${post.scope.toLowerCase()}${post.scopeId ? ` #${post.scopeId}` : ''}`}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

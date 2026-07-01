@@ -173,6 +173,38 @@ export const getWorkPackages = async (req: Request, res: Response): Promise<void
   }
 };
 
+export const getTasks = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId } = req.user!;
+
+    // "Active" mirrors the myPendingTasks summary count (notIn ['Closed']) so
+    // the list and that stat never disagree for the same user.
+    const tasks = await prisma.task.findMany({
+      where: { assignedToUserId: userId, status: { notIn: ['Closed'] }, deletedAt: null },
+      orderBy: { deadline: 'asc' },
+      include: {
+        template: { select: { title: true, type: true } },
+        wp: { select: { wpId: true } }
+      }
+    });
+
+    const formattedTasks = tasks.map(t => ({
+      id: t.id,
+      taskId: t.taskId,
+      title: t.title || t.template?.title || 'Task',
+      itemType: t.template?.type ?? 'Task',
+      status: t.status,
+      deadline: t.deadline,
+      wpId: t.wp?.wpId ?? null,
+    }));
+
+    res.json(formattedTasks);
+  } catch (error) {
+    console.error('Error fetching dashboard tasks:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 export const getFeed = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId, role, divisionId } = req.user!;
