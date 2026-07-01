@@ -692,20 +692,24 @@ export default function TaskListPage() {
                     </td>
                     )}
 
-                    {/* Title — the row's primary link to the detail page (Eye icon removed) */}
+                    {/* Title — the row's primary link to the detail page. Custom
+                        Task.title overrides the template title when set. */}
                     <td className="p-4 align-middle max-w-xs">
                       <Link
                         href={`/dashboard/tasks/${task.id}`}
                         id={`view-task-${task.id}`}
-                        title={task.template?.title ?? undefined}
                         aria-label={`View task ${task.taskId}`}
-                        className="font-medium text-slate-800 hover:text-signal-blue truncate block focus:outline-none focus:underline"
+                        className="font-medium text-slate-800 hover:text-signal-blue block focus:outline-none focus:underline whitespace-normal break-words"
                       >
-                        {task.template?.title ?? '—'}
+                        {task.title ?? task.template?.title ?? '—'}
                       </Link>
-                      {task.wp && (
+                      {(task.wp || task.parentFinding?.findingId || task.template?.title) && (
                         <div className="text-xs text-slate-400 mt-0.5 truncate">
-                          WP: {task.wp.wpId}
+                          {[
+                            task.wp ? `WP: ${task.wp.wpId}` : null,
+                            task.parentFinding?.findingId ? `Finding: ${task.parentFinding.findingId}` : null,
+                            task.template?.title ? `Template: ${task.template.title}` : null,
+                          ].filter(Boolean).join(' | ')}
                         </div>
                       )}
                     </td>

@@ -373,6 +373,32 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.body.estimatedHours).toBe(2.0);
     });
 
+    it('generates unique taskIds under concurrent creation (TaskSequence atomicity)', async () => {
+      const concurrency = 8;
+      const requests = Array.from({ length: concurrency }, () =>
+        request(app)
+          .post('/api/tasks')
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ templateId: publishedTemplateId, targetDivisionId: divisionId })
+      );
+      const responses = await Promise.all(requests);
+      responses.forEach((r) => expect(r.status).toBe(201));
+      const taskIds = responses.map((r) => r.body.taskId as string);
+      expect(new Set(taskIds).size).toBe(concurrency);
+      taskIds.forEach((id) => expect(id).toMatch(/^TSK-\d{6}$/));
+    });
+
+    it('persists TaskSequence.sequence matching the highest issued taskId per division', async () => {
+      const res = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ templateId: publishedTemplateId, targetDivisionId: divisionId });
+      expect(res.status).toBe(201);
+      const issuedSeq = Number((res.body.taskId as string).split('-')[1]);
+      const seqRow = await prisma.taskSequence.findUnique({ where: { divisionCode: 'TSK' } });
+      expect(seqRow?.sequence).toBe(issuedSeq);
+    });
+
     it('T11: SYSTEM_EVENT logged in TaskActivity on task creation', async () => {
       const res = await request(app)
         .post('/api/tasks')
@@ -2706,6 +2732,43 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.status).toBe(200);
       expect(res.body.wpId).toBe(wp.id);
       await prisma.workPackage.delete({ where: { id: wp.id } });
+    });
+
+    it('includes findingId on parentFinding in task responses', async () => {
+      const dept = await prisma.department.upsert({
+        where: { name: 'Task Test Dept (findingId case)' },
+        update: {},
+        create: { name: 'Task Test Dept (findingId case)' }
+      });
+      const finding = await prisma.finding.create({
+        data: {
+          findingId: 'DSK-000001',
+          description: 'Test finding for parentFinding.findingId assertion',
+          eventType: 'Other',
+          status: 'Open',
+          reportedByUserId: directorId,
+          departmentId: dept.id
+        }
+      });
+      const followUp = await prisma.task.create({
+        data: {
+          taskId: 'TSK-900001',
+          templateId: publishedTemplateId,
+          issuerId: directorId,
+          targetDivisionId: divisionId,
+          status: 'Unassigned',
+          schemaSnapshot: [],
+          parentFindingId: finding.id
+        }
+      });
+      const res = await request(app)
+        .get(`/api/tasks/${followUp.id}`)
+        .set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.parentFinding).toEqual({ id: finding.id, findingId: 'DSK-000001' });
+      // Cleanup
+      await prisma.task.delete({ where: { id: followUp.id } });
+      await prisma.finding.delete({ where: { id: finding.id } });
     });
   });
 });

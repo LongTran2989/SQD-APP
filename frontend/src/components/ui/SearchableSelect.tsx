@@ -22,6 +22,14 @@ interface SearchableSelectProps {
    *  (e.g. for lists too large to load up front). Internal client-side filtering
    *  of `options` still applies on top. */
   onQueryChange?: (query: string) => void;
+  /** External loading state (e.g. an in-flight async search) — shows a spinner
+   *  in the dropdown instead of the options list. */
+  loading?: boolean;
+  /** Overrides the "No results" text shown when the option list is empty. */
+  noResultsLabel?: string;
+  /** When true, skip the internal client-side substring filter — the caller
+   *  (e.g. AsyncSearchableSelect) has already filtered `options` server-side. */
+  serverFiltered?: boolean;
 }
 
 export default function SearchableSelect({
@@ -34,6 +42,9 @@ export default function SearchableSelect({
   disabled = false,
   id,
   onQueryChange,
+  loading = false,
+  noResultsLabel,
+  serverFiltered = false,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -50,9 +61,11 @@ export default function SearchableSelect({
   const selected = options.find((o) => o.value === value);
 
   // Build the flat list of selectable items (clear entry first when applicable)
-  const filteredOptions = query.trim()
-    ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
-    : options;
+  const filteredOptions = serverFiltered
+    ? options
+    : query.trim()
+      ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
+      : options;
 
   // Items rendered in the listbox: optional clear item + filtered options
   const listItems: Array<{ value: string; label: string; italic?: boolean }> = [
@@ -196,9 +209,14 @@ export default function SearchableSelect({
             aria-label="Options"
             className="max-h-56 overflow-y-auto"
           >
-            {listItems.length === 0 ? (
+            {loading ? (
+              <p className="px-4 py-3 text-sm text-slate-400 text-center flex items-center justify-center gap-2" role="status">
+                <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
+                Searching…
+              </p>
+            ) : listItems.length === 0 ? (
               <p className="px-4 py-3 text-sm text-slate-400 text-center" role="status">
-                No results
+                {noResultsLabel ?? 'No results'}
               </p>
             ) : (
               listItems.map((item, index) => {

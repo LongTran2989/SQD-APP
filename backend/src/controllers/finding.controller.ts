@@ -21,23 +21,17 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Generates the next sequential human-readable taskId for a division code.
- * Mirrors task.controller.generateTaskId — replicated to avoid a controller
- * import cycle. Must run inside a $transaction (division row locked by caller).
+ * Generates the next sequential human-readable taskId for a division code,
+ * via the same atomic TaskSequence upsert used by task.controller.generateTaskId
+ * (replicated here to avoid a controller import cycle).
  */
 async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
-  const lastTask = await tx.task.findFirst({
-    where: { taskId: { startsWith: `${divisionCode}-` }, deletedAt: null },
-    orderBy: { id: 'desc' },
-    select: { taskId: true }
+  const seq = await tx.taskSequence.upsert({
+    where: { divisionCode },
+    create: { divisionCode, sequence: 1 },
+    update: { sequence: { increment: 1 } }
   });
-  let nextSeq = 1;
-  if (lastTask?.taskId) {
-    const parts = lastTask.taskId.split('-');
-    const seqPart = parts[parts.length - 1];
-    if (seqPart) nextSeq = parseInt(seqPart, 10) + 1;
-  }
-  return `${divisionCode}-${String(nextSeq).padStart(6, '0')}`;
+  return `${divisionCode}-${String(seq.sequence).padStart(6, '0')}`;
 }
 
 /** Generates the next sequential wpId for a division code. */
@@ -1070,7 +1064,10 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
     const actorName = await getUserName(userId);
 
     const createdTasks = await prisma.$transaction(async (tx) => {
-      // Lock the division row so taskId / wpId sequences are race-free.
+      // Lock the division row so the wpId sequence (still table-scan based via
+      // generateWpId) is race-free. No longer needed for taskId — generateTaskId
+      // now uses the atomic TaskSequence upsert — but generateWpId below still
+      // requires it.
       await tx.$queryRaw`SELECT id FROM "Division" WHERE id = ${division.id} FOR UPDATE`;
 
       const results: { id: number; taskId: string }[] = [];

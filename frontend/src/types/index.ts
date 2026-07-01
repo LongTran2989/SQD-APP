@@ -179,7 +179,7 @@ export interface TaskEnriched extends Task {
   wp: { id: number; wpId: string; name: string } | null;
   taskData?: { data: Record<string, unknown> } | null;
   timeBooking?: TimeBooking | null;
-  parentFinding?: { id: number } | null;
+  parentFinding?: { id: number; findingId: string | null } | null;
 }
 
 export type WpStatus = 'Open' | 'In Progress' | 'Overdue' | 'Closed' | 'Inactive';

@@ -102,6 +102,7 @@ export interface CreateTaskPayload {
   requiresApproval?: boolean;
   wpId?: number;
   issuanceNote?: string;
+  title?: string;
 }
 
 export const createTask = (payload: CreateTaskPayload): Promise<TaskEnriched> =>
@@ -115,6 +116,7 @@ export interface QuickTaskPayload {
   estimatedHours?: number;
   skillLevel?: number;
   requiresApproval?: boolean;
+  targetDivisionId?: number;
 }
 
 export const createQuickTask = (payload: QuickTaskPayload): Promise<TaskEnriched> =>
@@ -364,6 +366,7 @@ export const getUsers = (): Promise<{ value: string; label: string; divisionId: 
   apiClient.get('/datasources/users').then((r) => r.data);
 
 export const getDatasource = (
-  source: string
-): Promise<{ value: string; label: string }[]> =>
-  apiClient.get(`/datasources/${source}`).then((r) => r.data);
+  source: string,
+  params?: { q?: string; limit?: number; divisionId?: number }
+): Promise<{ value: string; label: string; divisionId?: number | null }[]> =>
+  apiClient.get(`/datasources/${source}`, { params }).then((r) => r.data);

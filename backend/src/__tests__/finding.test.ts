@@ -566,6 +566,26 @@ describe('Findings Backend (Phase 6)', () => {
       const count = await prisma.task.count({ where: { parentFindingId: findingId } });
       expect(count).toBe(0);
     });
+
+    it('F47: generates unique taskIds under concurrent follow-up-task generation (TaskSequence atomicity)', async () => {
+      const concurrency = 5;
+      const requests = Array.from({ length: concurrency }, () =>
+        request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'Concurrent CAR' }] })
+      );
+      const responses = await Promise.all(requests);
+      responses.forEach((r) => expect(r.status).toBe(201));
+      const taskIds = responses.map((r) => r.body.createdTasks[0].taskId as string);
+      expect(new Set(taskIds).size).toBe(concurrency);
+      taskIds.forEach((id) => expect(id).toMatch(/^FND-\d{6}$/));
+    });
+
+    it('F48: persists TaskSequence.sequence matching the highest issued taskId for the division', async () => {
+      const res = await request(app).post(`/api/findings/${findingId}/tasks`).set('Authorization', `Bearer ${managerToken}`).send({ tasks: [{ templateId: allowsFindingsTemplateId, title: 'CAR' }] });
+      expect(res.status).toBe(201);
+      const issuedSeq = Number((res.body.createdTasks[0].taskId as string).split('-')[1]);
+      const seqRow = await prisma.taskSequence.findUnique({ where: { divisionCode: 'FND' } });
+      expect(seqRow?.sequence).toBe(issuedSeq);
+    });
   });
 
   // ────────────────────────────────────────────────────────────────────────
