@@ -327,6 +327,110 @@ path.
 
 ---
 
+## Reusable ops script: `scripts/vps-ops.sh`
+
+For repeat operations (wipe + reseed, updating the sheet URL, restarting services), use
+`scripts/vps-ops.sh` instead of typing the manual steps each time. It lives in the repo and
+is deployed to the VPS at `/app/scripts/vps-ops.sh` the same way any other file is — via
+`git pull`. It is flag-driven: pass only the steps you want, and it runs them in a fixed safe
+order (pull → install → stop backend → reset-db → seed-mockup → env edits → build → restart →
+status).
+
+**First-time setup on the VPS** (once `scripts/vps-ops.sh` has been pulled down):
+```bash
+chmod +x /app/scripts/vps-ops.sh
+```
+
+**Invoke it over SSH** (this is what "ask Claude to run it" means in practice — Claude runs
+this exact `ssh` command with the flags matching your instruction):
+```bash
+ssh root@your-server-ip 'bash /app/scripts/vps-ops.sh --pull --status'
+```
+
+**Full wipe + reseed + sheet URL update (the Scenario 2b/2c + env-update flow from above, as
+one command):**
+```bash
+ssh root@your-server-ip 'bash /app/scripts/vps-ops.sh \
+  --pull --install \
+  --reset-db --yes-i-am-sure \
+  --seed-mockup \
+  --set-sheet-url="https://docs.google.com/spreadsheets/d/YOUR_ID/export?format=csv&gid=0" \
+  --restart-all --status'
+```
+
+**Just re-point the WP Auto sync sheet, no data changes:**
+```bash
+ssh root@your-server-ip 'bash /app/scripts/vps-ops.sh --set-sheet-url="https://..." --restart-backend'
+```
+
+**Just reseed mock-up data without wiping anything (only valid if the base seed already
+exists):**
+```bash
+ssh root@your-server-ip 'bash /app/scripts/vps-ops.sh --seed-mockup --restart-backend'
+```
+
+`--reset-db` always requires `--yes-i-am-sure` in the same call — the script refuses to run
+without it, since it drops and recreates the database. Run `bash vps-ops.sh --help` on the VPS
+for the full flag list.
+
+**On authentication:** this session has no persistent SSH key to your VPS between
+conversations. Provide SSH access (host, user, key or password) each time you want Claude to
+run this remotely — nothing is stored. If you'd rather Claude never need credentials, you can
+instead paste the same flag combination back to Claude, run the `ssh ... vps-ops.sh ...` line
+yourself, and share the output.
+
+---
+
+## Quick reference: Nuke and rebuild for a demo
+
+**Use this when:** you don't care about anything currently on the VPS and just want a clean
+slate with demo mock-up data, fastest path, no diagnostics. This is the exact sequence to
+run — copy/paste as one block.
+
+```bash
+ssh root@your-server-ip
+
+cd /app
+git fetch origin
+git checkout TEST_P1              # or the feature branch, if vps-ops.sh isn't on TEST_P1 yet
+git pull origin TEST_P1
+chmod +x scripts/vps-ops.sh
+
+bash scripts/vps-ops.sh \
+  --install \
+  --reset-db --yes-i-am-sure \
+  --seed-mockup \
+  --build-frontend \
+  --restart-all \
+  --status
+```
+
+What this does, in order: installs deps + regenerates the Prisma client, drops and recreates
+the DB and replays every migration (`prisma migrate reset --force`, which also runs the base
+`seed.ts` automatically), seeds demo mock-up data (`seed-mass-mockup-v2.ts`), rebuilds the
+frontend, restarts both PM2 services, then prints `pm2 status` + `migrate status` so you can
+confirm it's healthy.
+
+If you also need to point WP Auto sync at a specific sheet as part of the same reset, add:
+```bash
+  --set-sheet-url="https://docs.google.com/spreadsheets/d/YOUR_ID/export?format=csv&gid=0"
+```
+
+**Watch the output for:**
+- `prisma migrate reset --force` must complete without errors before the seed step runs — if
+  it fails, stop and fix the migration issue rather than continuing to seed.
+- The final `--status` block: `pm2 status` should show both `backend` and `frontend` as
+  `online`, and `migrate status` should say "Database schema is up to date!".
+- If `seed-mass-mockup-v2.ts` throws a Prisma `P2022` (column not found) error even right
+  after a fresh `--reset-db`, that means the checked-out code's `schema.prisma` doesn't match
+  what just got migrated — usually a `git pull` that didn't actually update, or the wrong
+  branch checked out. Re-run `git log -1 --oneline -- prisma/schema.prisma` and confirm it's
+  the commit you expect before retrying.
+
+Login afterward: `VAE00071` / `Abc@12345` (forces a password change on first login).
+
+---
+
 ## Troubleshooting (on VPS)
 
 - `pm2 status` — check if backend/frontend are running
