@@ -3,23 +3,15 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
-import { Template, WorkPackageEnriched } from '../../types';
-import { createTask, getDivisions, getUsers } from '../../api/taskApi';
-import { getWorkPackages } from '../../api/wpApi';
-import SearchableSelect from '../ui/SearchableSelect';
+import { Template, WorkPackageDetail } from '../../types';
+import { createTask, getDatasource } from '../../api/taskApi';
+import { getWorkPackageById } from '../../api/wpApi';
+import AsyncSearchableSelect from '../ui/AsyncSearchableSelect';
+import { SearchableSelectOption } from '../ui/SearchableSelect';
 import TemplatePickerModal from '../templates/TemplatePickerModal';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { FileCheck2, Clock, Info, FolderOpen, LayoutTemplate, X } from 'lucide-react';
-
-interface SelectOption {
-  value: string;
-  label: string;
-}
-
-interface UserOption extends SelectOption {
-  divisionId: number | null;
-}
 
 export interface TaskCreateFormProps {
   prefilledWpId?: number | null;
@@ -42,10 +34,8 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [skillLevel, setSkillLevel] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
 
-  const [divisions, setDivisions] = useState<SelectOption[]>([]);
-  const [allUsers, setAllUsers] = useState<UserOption[]>([]);
-  const [workPackages, setWorkPackages] = useState<WorkPackageEnriched[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
+  const [prefilledWp, setPrefilledWp] = useState<WorkPackageDetail | null>(null);
+  const [readOnlyDivisionLabel, setReadOnlyDivisionLabel] = useState<string>('—');
 
   const templateId = selectedTemplate?.id;
 
@@ -57,39 +47,41 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
     }
   }, [selectedTemplate]);
 
+  // Resolve the display name for a pre-selected work package (from the WP page).
   useEffect(() => {
-    const fetchAll = async () => {
-      try {
-        const [divRes, usersRes, wpsRes] = await Promise.all([
-          getDivisions(),
-          getUsers(),
-          getWorkPackages(),
-        ]);
-        setDivisions(divRes);
-        setAllUsers(usersRes);
-        setWorkPackages(wpsRes.filter((w) => w.computedStatus !== 'Closed' && w.computedStatus !== 'Inactive'));
-      } catch {
-        toast.error('Failed to load form data');
-      } finally {
-        setLoadingData(false);
-      }
-    };
-    fetchAll();
-  }, []);
+    if (prefilledWpId) {
+      getWorkPackageById(prefilledWpId).then(setPrefilledWp).catch(() => {});
+    }
+  }, [prefilledWpId]);
 
-  const assigneeOptions = targetDivisionId
-    ? allUsers.filter((u) => u.divisionId === targetDivisionId)
-    : allUsers;
+  const ELEVATED_ROLES = ['Manager', 'Director', 'Admin'];
+  const isElevated = ELEVATED_ROLES.includes(user?.role ?? '');
+
+  // Non-elevated users have a fixed target division (their own) with no
+  // picker — resolve just that one division's label for the read-only display.
+  useEffect(() => {
+    if (!isElevated && targetDivisionId) {
+      getDatasource('divisions', { limit: 20 }).then((divs) => {
+        const match = divs.find((d) => d.value === String(targetDivisionId));
+        if (match) setReadOnlyDivisionLabel(match.label);
+      }).catch(() => {});
+    }
+  }, [isElevated, targetDivisionId]);
+
+  const fetchDivisionOptions = (q: string): Promise<SearchableSelectOption[]> =>
+    getDatasource('divisions', { q, limit: 20 });
+
+  const fetchAssigneeOptions = (q: string): Promise<SearchableSelectOption[]> =>
+    getDatasource('users', { q, limit: 20, divisionId: targetDivisionId || undefined });
+
+  const fetchWpOptions = (q: string): Promise<SearchableSelectOption[]> =>
+    getDatasource('workpackages', { q, limit: 20 });
 
   const handleDivisionChange = (val: string) => {
-    const newDivId = val ? Number(val) : '';
-    setTargetDivisionId(newDivId);
-    if (assignedToUserId) {
-      const still = allUsers.find(
-        (u) => u.value === String(assignedToUserId) && u.divisionId === newDivId
-      );
-      if (!still) setAssignedToUserId('');
-    }
+    setTargetDivisionId(val ? Number(val) : '');
+    // Division-scoped assignee search means a previously-picked assignee may
+    // no longer be valid for the new division — always clear it on change.
+    setAssignedToUserId('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -137,17 +129,6 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
       setSubmitting(false);
     }
   };
-
-  const ELEVATED_ROLES = ['Manager', 'Director', 'Admin'];
-  const isElevated = ELEVATED_ROLES.includes(user?.role ?? '');
-
-  if (loadingData) {
-    return (
-      <div className="flex items-center justify-center h-48">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-      </div>
-    );
-  }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -222,16 +203,16 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             Target Division *
           </label>
           {isElevated ? (
-            <SearchableSelect
+            <AsyncSearchableSelect
               id="division-select"
-              options={divisions}
               value={targetDivisionId ? String(targetDivisionId) : ''}
               onChange={handleDivisionChange}
-              placeholder="Select division…"
+              fetchOptions={fetchDivisionOptions}
+              placeholder="Search for division…"
             />
           ) : (
             <div className="w-full px-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-sm text-slate-500">
-              {divisions.find((d) => d.value === String(targetDivisionId))?.label ?? '—'}
+              {readOnlyDivisionLabel}
             </div>
           )}
         </div>
@@ -244,24 +225,19 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
               (optional — leave blank to create as Unassigned)
             </span>
           </label>
-          <SearchableSelect
+          <AsyncSearchableSelect
             id="assignee-select"
-            options={assigneeOptions}
             value={assignedToUserId ? String(assignedToUserId) : ''}
             onChange={(val) => setAssignedToUserId(val ? Number(val) : '')}
-            placeholder={
-              targetDivisionId
-                ? assigneeOptions.length === 0
-                  ? 'No users in this division'
-                  : 'Search for assignee…'
-                : 'Select a division first'
-            }
+            fetchOptions={fetchAssigneeOptions}
+            placeholder={targetDivisionId ? 'Search for assignee…' : 'Select a division first'}
+            disabled={!targetDivisionId}
             clearable
             clearLabel="No assignee (Unassigned)"
           />
-          {targetDivisionId && assigneeOptions.length === 0 && (
+          {!targetDivisionId && (
             <p className="mt-1.5 text-xs text-amber-600 flex items-center gap-1">
-              <Info className="w-3.5 h-3.5" /> No users found in the selected division.
+              <Info className="w-3.5 h-3.5" /> Select a target division before searching for an assignee.
             </p>
           )}
         </div>
@@ -325,21 +301,19 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
           {prefilledWpId ? (
             <>
               <div className="w-full px-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-sm text-slate-500">
-                {workPackages.find((w) => w.id === prefilledWpId)
-                  ? `${workPackages.find((w) => w.id === prefilledWpId)!.wpId} — ${workPackages.find((w) => w.id === prefilledWpId)!.name}`
-                  : `WP #${prefilledWpId}`}
+                {prefilledWp ? `${prefilledWp.wpId} — ${prefilledWp.name}` : `WP #${prefilledWpId}`}
               </div>
               <p className="mt-1.5 text-xs text-blue-600 flex items-center gap-1">
                 <Info className="w-3.5 h-3.5" /> Work package pre-selected from the work package page.
               </p>
             </>
           ) : (
-            <SearchableSelect
+            <AsyncSearchableSelect
               id="wp-select"
-              options={workPackages.map((w) => ({ value: String(w.id), label: `${w.wpId} — ${w.name}` }))}
               value={wpId ? String(wpId) : ''}
               onChange={(val) => setWpId(val ? Number(val) : '')}
-              placeholder="No work package"
+              fetchOptions={fetchWpOptions}
+              placeholder="Search for work package…"
               clearable
               clearLabel="No work package"
             />
