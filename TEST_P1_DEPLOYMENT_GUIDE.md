@@ -327,6 +327,60 @@ path.
 
 ---
 
+## Reusable ops script: `scripts/vps-ops.sh`
+
+For repeat operations (wipe + reseed, updating the sheet URL, restarting services), use
+`scripts/vps-ops.sh` instead of typing the manual steps each time. It lives in the repo and
+is deployed to the VPS at `/app/scripts/vps-ops.sh` the same way any other file is — via
+`git pull`. It is flag-driven: pass only the steps you want, and it runs them in a fixed safe
+order (pull → install → stop backend → reset-db → seed-mockup → env edits → build → restart →
+status).
+
+**First-time setup on the VPS** (once `scripts/vps-ops.sh` has been pulled down):
+```bash
+chmod +x /app/scripts/vps-ops.sh
+```
+
+**Invoke it over SSH** (this is what "ask Claude to run it" means in practice — Claude runs
+this exact `ssh` command with the flags matching your instruction):
+```bash
+ssh root@your-server-ip 'bash /app/scripts/vps-ops.sh --pull --status'
+```
+
+**Full wipe + reseed + sheet URL update (the Scenario 2b/2c + env-update flow from above, as
+one command):**
+```bash
+ssh root@your-server-ip 'bash /app/scripts/vps-ops.sh \
+  --pull --install \
+  --reset-db --yes-i-am-sure \
+  --seed-mockup \
+  --set-sheet-url="https://docs.google.com/spreadsheets/d/YOUR_ID/export?format=csv&gid=0" \
+  --restart-all --status'
+```
+
+**Just re-point the WP Auto sync sheet, no data changes:**
+```bash
+ssh root@your-server-ip 'bash /app/scripts/vps-ops.sh --set-sheet-url="https://..." --restart-backend'
+```
+
+**Just reseed mock-up data without wiping anything (only valid if the base seed already
+exists):**
+```bash
+ssh root@your-server-ip 'bash /app/scripts/vps-ops.sh --seed-mockup --restart-backend'
+```
+
+`--reset-db` always requires `--yes-i-am-sure` in the same call — the script refuses to run
+without it, since it drops and recreates the database. Run `bash vps-ops.sh --help` on the VPS
+for the full flag list.
+
+**On authentication:** this session has no persistent SSH key to your VPS between
+conversations. Provide SSH access (host, user, key or password) each time you want Claude to
+run this remotely — nothing is stored. If you'd rather Claude never need credentials, you can
+instead paste the same flag combination back to Claude, run the `ssh ... vps-ops.sh ...` line
+yourself, and share the output.
+
+---
+
 ## Troubleshooting (on VPS)
 
 - `pm2 status` — check if backend/frontend are running
