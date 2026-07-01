@@ -13,7 +13,7 @@ export function QuickActionBar({ onRefresh, isRefreshing }: QuickActionBarProps)
   const isManagerOrDirector = user?.role === 'Manager' || user?.role === 'Director' || user?.role === 'Admin';
 
   return (
-    <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4 sticky top-4 z-[var(--z-sticky,10)]">
+    <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
       <div className="flex items-center gap-3">
         <button
           onClick={onRefresh}

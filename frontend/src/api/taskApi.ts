@@ -16,6 +16,7 @@ export interface TaskListParams {
   endDate?: string;
   overdueOnly?: boolean;
   dueFilter?: 'today' | 'week';
+  pendingRatingOnly?: boolean;
   search?: string;
   sortColumn?: string;
   sortDir?: 'asc' | 'desc';
@@ -45,6 +46,7 @@ export const getTaskList = (p: TaskListParams): Promise<TaskListResponse> => {
   if (p.endDate) params.set('endDate', p.endDate);
   if (p.overdueOnly) params.set('overdueOnly', 'true');
   if (p.dueFilter) params.set('dueFilter', p.dueFilter);
+  if (p.pendingRatingOnly) params.set('pendingRatingOnly', 'true');
   if (p.search) params.set('search', p.search);
   if (p.sortColumn) params.set('sortColumn', p.sortColumn);
   if (p.sortDir) params.set('sortDir', p.sortDir);

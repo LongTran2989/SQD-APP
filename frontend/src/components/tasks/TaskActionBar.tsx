@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { TaskEnriched, User } from '../../types';
 import { FINAL_TASK_STATUSES } from '../../constants/taskStatus';
 import StarRating from './StarRating';
+import AsyncSearchableSelect from '../ui/AsyncSearchableSelect';
 import {
   reviewTask,
   postRejectionAction,
@@ -18,7 +19,7 @@ import {
   transferIssuerRights,
   setDeadline,
   reopenTask,
-  getUsers,
+  getDatasource,
 } from '../../api/taskApi';
 import toast from 'react-hot-toast';
 import {
@@ -38,13 +39,6 @@ import {
   RefreshCw,
   Clock,
 } from 'lucide-react';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface UserOption {
-  value: string;
-  label: string;
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -118,30 +112,28 @@ function UserSelect({
   label,
   value,
   onChange,
-  users,
-  placeholder = 'Select user…',
+  placeholder = 'Search user…',
+  excludeUserId,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  users: UserOption[];
   placeholder?: string;
+  /** Omit this user from the results (e.g. can't transfer issuer rights to yourself). */
+  excludeUserId?: number;
 }) {
+  const fetchOptions = useCallback(
+    (q: string) =>
+      getDatasource('users', { q, limit: 20 }).then((opts) =>
+        excludeUserId != null ? opts.filter((o) => o.value !== String(excludeUserId)) : opts
+      ),
+    [excludeUserId]
+  );
+
   return (
     <div className="space-y-1">
       <label className="text-xs font-semibold text-slate-500">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-      >
-        <option value="">{placeholder}</option>
-        {users.map((u) => (
-          <option key={u.value} value={u.value}>
-            {u.label}
-          </option>
-        ))}
-      </select>
+      <AsyncSearchableSelect value={value} onChange={onChange} fetchOptions={fetchOptions} placeholder={placeholder} />
     </div>
   );
 }
@@ -201,7 +193,6 @@ export default function TaskActionBar({
   onSubmitTask,
 }: TaskActionBarProps) {
   const [loading, setLoading] = useState<string | null>(null);
-  const [allUsers, setAllUsers] = useState<UserOption[]>([]);
 
   // Self-assign confirmation: first click arms a 3s window, second click
   // commits. Claiming the wrong task creates an audit trail under the user's
@@ -259,18 +250,6 @@ export default function TaskActionBar({
     setRatingSyncedFor(task.rating);
     setRatingValue(task.rating);
   }
-
-  // Fetch the user list only for states where a user-picker action can appear
-  // (assign / reassign / transfer-issuer). Closed and Terminated tasks never
-  // show one, so the request is skipped there. Surface failures instead of
-  // swallowing them — an empty picker with no message looks like "no users".
-  const needsUserList = task.status !== 'Closed' && task.status !== 'Terminated';
-  useEffect(() => {
-    if (!needsUserList) return;
-    getUsers()
-      .then(setAllUsers)
-      .catch(() => toast.error('Failed to load the user list. Please refresh to assign or reassign.'));
-  }, [needsUserList]);
 
   // ── Computed permissions ──
   const isAssignee = currentUser.id === task.assignedToUserId;
@@ -587,7 +566,6 @@ export default function TaskActionBar({
                   label="Assign to *"
                   value={assignUserId}
                   onChange={setAssignUserId}
-                  users={allUsers}
                 />
                 <div className="flex gap-2">
                   <ActionButton
@@ -850,7 +828,6 @@ export default function TaskActionBar({
                   label="New assignee *"
                   value={postRejectAssigneeId}
                   onChange={setPostRejectAssigneeId}
-                  users={allUsers}
                 />
                 <InlineInput label="Reason for reassignment *" value={postRejectReason} onChange={setPostRejectReason} placeholder="Why is this task being reassigned?" multiline />
                 <div className="flex gap-2">
@@ -882,7 +859,6 @@ export default function TaskActionBar({
                   label="New assignee *"
                   value={generalReassignUserId}
                   onChange={setGeneralReassignUserId}
-                  users={allUsers}
                 />
                 <InlineInput label="Reason for reassignment *" value={generalReassignReason} onChange={setGeneralReassignReason} placeholder="Why is this task being reassigned?" multiline />
                 <div className="flex gap-2">
@@ -914,7 +890,7 @@ export default function TaskActionBar({
                   label="Transfer issuer rights to *"
                   value={transferToUserId}
                   onChange={setTransferToUserId}
-                  users={allUsers.filter((u) => Number(u.value) !== currentUser.id)}
+                  excludeUserId={currentUser.id}
                 />
                 <div className="flex gap-2">
                   <ActionButton id="btn-confirm-transfer-issuer" onClick={handleTransferIssuer} disabled={loading === 'transfer-issuer'} variant="primary" icon={UserCheck}>

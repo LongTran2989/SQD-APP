@@ -465,6 +465,12 @@ function buildTaskFilters(req: Request): Prisma.TaskWhereInput[] {
   // attentionOnly — used by stat parity; deadline-or-followup needing attention.
   if (String(req.query.attentionOnly) === 'true') filters.push(attentionFilter());
 
+  // pendingRatingOnly mirrors the dashboard summary's Pending Rating figure:
+  // Closed but not yet rated.
+  if (String(req.query.pendingRatingOnly) === 'true') {
+    filters.push({ status: 'Closed', rating: null });
+  }
+
   // search across taskId + template title (case-insensitive).
   const search = req.query.search ? String(req.query.search).trim() : '';
   if (search) {
