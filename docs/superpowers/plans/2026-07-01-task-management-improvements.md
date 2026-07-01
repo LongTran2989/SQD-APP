@@ -231,6 +231,96 @@ git commit -m "refactor: replace row-locked task ID generation with atomic TaskS
 
 ---
 
+### Task 2b: Migrate `finding.controller.ts`'s duplicate `generateTaskId` to `TaskSequence`
+
+**Why this task exists:** discovered during Task 2's review — `finding.controller.ts:23-41` has its own independent copy of the old scan-based `generateTaskId` (comment there: "Mirrors task.controller.generateTaskId — replicated to avoid a controller import cycle"), used when generating follow-up tasks from a finding (`finding.controller.ts:1103`, inside `generateFollowUpTasks`, `POST /api/findings/:id/tasks`). Task 2 migrated only `task.controller.ts`'s copy to the atomic `TaskSequence` upsert. Leaving this second copy on the old scan-based approach means the two Task-creation paths now derive `taskId`s from two different sources of truth (a live table scan vs. the `TaskSequence` counter), which can race and produce a duplicate `taskId` (hard `P2002` unique-constraint violation) if a follow-up-task generation and a regular task creation land in the same division around the same time.
+
+**Files:**
+- Modify: `backend/src/controllers/finding.controller.ts:23-41` (the duplicate `generateTaskId`)
+- Test: `backend/src/__tests__/finding.test.ts` or `backend/src/__tests__/findingExpansion.test.ts` (both already exercise `POST /api/findings/:id/tasks` — check both files' existing fixtures for `generateFollowUpTasks`/follow-up-task-creation coverage and add the new test alongside the existing pattern in whichever file already sets up a Finding + Published template + division fixture closest to what's needed; do not duplicate fixture setup across both files)
+
+**Interfaces:**
+- Consumes: `TaskSequence` model (Task 1), same `prisma.taskSequence.upsert` pattern as Task 2's fix to `task.controller.ts`.
+- Produces: no signature change — `generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string>` stays the same in `finding.controller.ts`, only its internal implementation changes.
+
+- [ ] **Step 1: Write the failing test**
+
+Add a test to whichever of `finding.test.ts` / `findingExpansion.test.ts` already has fixtures for calling `POST /api/findings/:id/tasks` (`generateFollowUpTasks`). Mirror Task 2's concurrency-and-uniqueness assertion style: create a Finding, then fire several follow-up-task-generation requests (or one request generating multiple rows, if the existing fixture pattern for this endpoint's request body supports a multi-row payload — check the existing tests in that file for the exact request shape `generateFollowUpTasks` expects, since this brief does not have that shape memorized) and assert the resulting `taskId`s are unique. Also assert `TaskSequence.sequence` for that division was actually incremented (proving the new path writes through `TaskSequence`, not just that IDs happen to be unique by luck).
+
+- [ ] **Step 2: Run to verify it fails or passes coincidentally**
+
+```
+cd backend && npm test -- <the test file you chose> -t "<your new test name>"
+```
+Expected: passes coincidentally under the pre-fix scan-based implementation (like Task 2's concurrency test did) — the real regression only shows up as a cross-path collision under concurrent load with `task.controller.ts`'s path, which is hard to reproduce deterministically in a single test. The important assertion is the `TaskSequence.sequence` one — that MUST fail before the fix (no code currently writes to `TaskSequence` from this file) and pass after.
+
+- [ ] **Step 3: Replace `finding.controller.ts`'s `generateTaskId`**
+
+Replace lines 23-41 of `backend/src/controllers/finding.controller.ts`:
+```ts
+/**
+ * Generates the next sequential human-readable taskId for a division code.
+ * Mirrors task.controller.generateTaskId — replicated to avoid a controller
+ * import cycle. Must run inside a $transaction (division row locked by caller).
+ */
+async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
+  const lastTask = await tx.task.findFirst({
+    where: { taskId: { startsWith: `${divisionCode}-` }, deletedAt: null },
+    orderBy: { id: 'desc' },
+    select: { taskId: true }
+  });
+  let nextSeq = 1;
+  if (lastTask?.taskId) {
+    const parts = lastTask.taskId.split('-');
+    const seqPart = parts[parts.length - 1];
+    if (seqPart) nextSeq = parseInt(seqPart, 10) + 1;
+  }
+  return `${divisionCode}-${String(nextSeq).padStart(6, '0')}`;
+}
+```
+with:
+```ts
+/**
+ * Generates the next sequential human-readable taskId for a division code,
+ * via the same atomic TaskSequence upsert used by task.controller.generateTaskId
+ * (replicated here to avoid a controller import cycle).
+ */
+async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
+  const seq = await tx.taskSequence.upsert({
+    where: { divisionCode },
+    create: { divisionCode, sequence: 1 },
+    update: { sequence: { increment: 1 } }
+  });
+  return `${divisionCode}-${String(seq.sequence).padStart(6, '0')}`;
+}
+```
+
+- [ ] **Step 4: Check for a now-redundant Division row lock in this file's call path**
+
+Search `finding.controller.ts` for a `FOR UPDATE` raw query or similar explicit lock guarding the call to `generateTaskId` at line 1103 (the doc-comment says "Division row locked by caller" — find that caller). If one exists and its only purpose is taskId-collision prevention (same as the one Task 2 removed from `task.controller.ts`), remove it for the same reason: the `TaskSequence` upsert is now atomic on its own. If the lock also guards something else in the same transaction (e.g. the `generateWpId` call a few lines above, which still uses table-scan generation and still needs it), leave it in place and note in your report why.
+
+- [ ] **Step 5: Run to verify pass**
+
+```
+cd backend && npm test -- <the test file you chose>
+```
+
+- [ ] **Step 6: Full suite regression check**
+
+```
+cd backend && npm test
+```
+Expected: same pass count as after Task 2 (676) plus your new test(s) — no regressions in either `finding.test.ts` or `findingExpansion.test.ts`, and no new collisions introduced in other fixtures that create tasks in the same division as this endpoint's test fixtures (check for hardcoded `taskId` fixtures in the same division code used by your new test, same class of issue Task 2 hit in `escalation.test.ts` — if you find one, fix it the same way: seed a matching `TaskSequence` row in that file's `beforeAll`, mirroring Task 1's backfill pattern).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/src/controllers/finding.controller.ts backend/src/__tests__/<the test file you changed>
+git commit -m "fix: migrate finding.controller.ts's duplicate generateTaskId to atomic TaskSequence upsert"
+```
+
+---
+
 ### Task 3: Datasource search — extend `users` and `divisions`
 
 **Files:**
