@@ -48,10 +48,11 @@ export default function TaskDetailPanel({ task, currentUser, onWpUnlinked }: Tas
   // Client-side approximation of the backend's issuer-or-privilege guard
   // (task.controller.ts updateTaskWp) — the backend remains the sole
   // authority; this only avoids showing a button that will always 403.
+  // Matches the DEFAULT_PRIVILEGES grant set for task:relink_any (Director, Admin, Manager).
   const canUnlinkWp =
     !FINAL_TASK_STATUSES.includes(task.status) &&
     task.status !== 'Inactive' &&
-    (currentUser.id === task.issuerId || currentUser.role === 'Admin');
+    (currentUser.id === task.issuerId || ['Director', 'Admin', 'Manager'].includes(currentUser.role));
 
   const handleUnlinkWp = async () => {
     setUnlinking(true);
