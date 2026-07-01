@@ -11,6 +11,13 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
   try {
     const source = req.params.source as string;
 
+    // Parameter parsing for search/filter functionality
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const limitParam = Number(req.query.limit);
+    // undefined = no cap, preserving today's unlimited behavior for every
+    // existing caller that doesn't pass `limit` (see Global Constraints).
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 20) : undefined;
+
     switch (source) {
       case 'departments': {
         const departments = await prisma.department.findMany({
@@ -23,8 +30,10 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
       }
       case 'divisions': {
         const divisions = await prisma.division.findMany({
+          where: q ? { name: { contains: q, mode: 'insensitive' } } : undefined,
           select: { id: true, name: true, department: { select: { name: true } } },
-          orderBy: { name: 'asc' }
+          orderBy: { name: 'asc' },
+          take: limit
         });
         res.json(divisions.map(d => ({
           value: String(d.id),
@@ -33,10 +42,21 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
         return;
       }
       case 'users': {
+        const divisionIdParam = Number(req.query.divisionId);
+        const divisionId = Number.isFinite(divisionIdParam) && divisionIdParam > 0 ? divisionIdParam : undefined;
         const users = await prisma.user.findMany({
           select: { id: true, name: true, employeeId: true, divisionId: true },
-          where: { deletedAt: null, role: { name: { notIn: ['Admin', 'Senior Advisor'] } } },
-          orderBy: { name: 'asc' }
+          where: {
+            deletedAt: null,
+            role: { name: { notIn: ['Admin', 'Senior Advisor'] } },
+            ...(divisionId ? { divisionId } : {}),
+            ...(q ? { OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { employeeId: { contains: q, mode: 'insensitive' } }
+            ] } : {})
+          },
+          orderBy: { name: 'asc' },
+          take: limit
         });
         res.json(users.map(u => ({ value: String(u.id), label: `${u.name} (${u.employeeId ?? ''})`, divisionId: u.divisionId })));
         return;
