@@ -30,10 +30,10 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
       }
       case 'divisions': {
         const divisions = await prisma.division.findMany({
-          where: q ? { name: { contains: q, mode: 'insensitive' } } : undefined,
+          ...(q ? { where: { name: { contains: q, mode: 'insensitive' } } } : {}),
           select: { id: true, name: true, department: { select: { name: true } } },
           orderBy: { name: 'asc' },
-          take: limit
+          ...(limit !== undefined ? { take: limit } : {})
         });
         res.json(divisions.map(d => ({
           value: String(d.id),
@@ -56,7 +56,7 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
             ] } : {})
           },
           orderBy: { name: 'asc' },
-          take: limit
+          ...(limit !== undefined ? { take: limit } : {})
         });
         res.json(users.map(u => ({ value: String(u.id), label: `${u.name} (${u.employeeId ?? ''})`, divisionId: u.divisionId })));
         return;
@@ -105,7 +105,7 @@ export const getDataSource = async (req: Request, res: Response): Promise<void> 
             ] } : {})
           },
           orderBy: { wpId: 'asc' },
-          take: limit
+          ...(limit !== undefined ? { take: limit } : {})
         });
         res.json(workPackages.map(w => ({ value: String(w.id), label: `${w.wpId} — ${w.name}` })));
         return;
