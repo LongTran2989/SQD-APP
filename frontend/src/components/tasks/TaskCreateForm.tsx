@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
 import { Template, WorkPackageDetail } from '../../types';
@@ -50,6 +50,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
 
   const DRAFT_KEY = 'taskCreateForm.issuanceNoteDraft';
   const [draftBanner, setDraftBanner] = useState<{ text: string; savedAt: string } | null>(null);
+  const isFirstRender = useRef(true);
 
   const templateId = selectedTemplate?.id;
 
@@ -88,6 +89,10 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   // Persist the Task Instruction draft as it changes, debounced to avoid
   // writing on every keystroke.
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
     const t = setTimeout(() => {
       try {
         if (issuanceNote.trim()) {
