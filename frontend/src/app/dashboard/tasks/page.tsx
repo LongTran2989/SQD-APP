@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
 import { TaskEnriched, TaskStatus, DeadlineStatus } from '../../../types';
@@ -83,8 +83,9 @@ function startOfDay(d: Date): Date {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function TaskListPage() {
+function TaskListPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, setPreferences } = useAuthStore();
 
   // ── Column visibility (persisted to User.preferences) ──
@@ -134,14 +135,23 @@ export default function TaskListPage() {
   };
 
   // ── Tab & filter state (persists within session via component state) ──
+  // Seeded from the URL first (dashboard drill-through links land pre-filtered),
+  // falling back to the sessionStorage-persisted view below when no URL filter is present.
   const [activeTab, setActiveTab] = useState<ActiveTab>('all');
-  const [statusFilters, setStatusFilters] = useState<TaskStatus[]>([]);
+  const [statusFilters, setStatusFilters] = useState<TaskStatus[]>(() => {
+    const s = searchParams.get('status');
+    return s && (ALL_STATUSES as string[]).includes(s) ? [s as TaskStatus] : [];
+  });
   const [assigneeFilter, setAssigneeFilter] = useState<number | ''>('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [overdueOnly, setOverdueOnly] = useState(false);
-  const [dueFilter, setDueFilter] = useState<DueFilter>(null);
+  const [overdueOnly, setOverdueOnly] = useState(() => searchParams.get('overdueOnly') === 'true');
+  const [dueFilter, setDueFilter] = useState<DueFilter>(() => {
+    const d = searchParams.get('dueFilter');
+    return d === 'today' || d === 'week' ? d : null;
+  });
+  const [pendingRatingOnly, setPendingRatingOnly] = useState(() => searchParams.get('pendingRatingOnly') === 'true');
 
   // ── Sorting ──
   const [sortColumn, setSortColumn] = useState<SortColumn>('deadline');
@@ -195,7 +205,10 @@ export default function TaskListPage() {
   const serverSortColumn = sortColumn === 'lastActivity' ? undefined : sortColumn;
 
   // ── Persisted filters: hydrate once on mount ──
+  // Skipped entirely when the URL carries a drill-through filter — otherwise a
+  // stale saved view would immediately clobber the state a dashboard link just seeded.
   useEffect(() => {
+    if (searchParams.toString()) return;
     try {
       const raw = sessionStorage.getItem(FILTERS_STORAGE_KEY);
       if (!raw) return;
@@ -207,21 +220,23 @@ export default function TaskListPage() {
       if (saved.endDate) setEndDate(saved.endDate);
       if (saved.overdueOnly) setOverdueOnly(saved.overdueOnly);
       if (saved.dueFilter) setDueFilter(saved.dueFilter);
+      if (saved.pendingRatingOnly) setPendingRatingOnly(saved.pendingRatingOnly);
     } catch {
       // Corrupt or unavailable storage — fall back to defaults silently.
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Persisted filters: save on every change (search query excluded — it's a one-off lookup, not a saved view) ──
   useEffect(() => {
     try {
       sessionStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify({
-        activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter,
+        activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, pendingRatingOnly,
       }));
     } catch {
       // sessionStorage unavailable (private browsing, etc.) — filters just won't persist.
     }
-  }, [activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter]);
+  }, [activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, pendingRatingOnly]);
 
   // Clear any pending self-assign confirmation timeout on unmount.
   useEffect(() => () => {
@@ -243,6 +258,7 @@ export default function TaskListPage() {
         endDate: endDate || undefined,
         overdueOnly: overdueOnly || undefined,
         dueFilter: dueFilter ?? undefined,
+        pendingRatingOnly: pendingRatingOnly || undefined,
         search: debouncedSearch || undefined,
         sortColumn: serverSortColumn,
         sortDir: sortDirection,
@@ -254,7 +270,7 @@ export default function TaskListPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, page, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, debouncedSearch, serverSortColumn, sortDirection]);
+  }, [activeTab, page, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, pendingRatingOnly, debouncedSearch, serverSortColumn, sortDirection]);
 
   useEffect(() => {
     fetchTasks();
@@ -265,7 +281,7 @@ export default function TaskListPage() {
   // against the previous filters key held in state), so the reset lands BEFORE the
   // fetch effect runs. This avoids firing a wasted request for a now-out-of-range
   // page (and the empty-table flash) that a separate reset effect would cause.
-  const filtersKey = JSON.stringify([activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, debouncedSearch, serverSortColumn, sortDirection]);
+  const filtersKey = JSON.stringify([activeTab, statusFilters, assigneeFilter, startDate, endDate, overdueOnly, dueFilter, pendingRatingOnly, debouncedSearch, serverSortColumn, sortDirection]);
   const [prevFiltersKey, setPrevFiltersKey] = useState(filtersKey);
   if (filtersKey !== prevFiltersKey) {
     setPrevFiltersKey(filtersKey);
@@ -296,7 +312,7 @@ export default function TaskListPage() {
   // for the empty-state copy (server-side filtering means an empty page can be either).
   const hasActiveFilters =
     statusFilters.length > 0 || assigneeFilter !== '' || !!startDate || !!endDate ||
-    overdueOnly || !!dueFilter || !!debouncedSearch;
+    overdueOnly || !!dueFilter || pendingRatingOnly || !!debouncedSearch;
 
   // The server already applied scope + filters; keep the name for the render. Only
   // the lastActivity sort is resolved client-side (no sortable column server-side).
@@ -692,20 +708,24 @@ export default function TaskListPage() {
                     </td>
                     )}
 
-                    {/* Title — the row's primary link to the detail page (Eye icon removed) */}
+                    {/* Title — the row's primary link to the detail page. Custom
+                        Task.title overrides the template title when set. */}
                     <td className="p-4 align-middle max-w-xs">
                       <Link
                         href={`/dashboard/tasks/${task.id}`}
                         id={`view-task-${task.id}`}
-                        title={task.template?.title ?? undefined}
                         aria-label={`View task ${task.taskId}`}
-                        className="font-medium text-slate-800 hover:text-signal-blue truncate block focus:outline-none focus:underline"
+                        className="font-medium text-slate-800 hover:text-signal-blue block focus:outline-none focus:underline whitespace-normal break-words"
                       >
-                        {task.template?.title ?? '—'}
+                        {task.title ?? task.template?.title ?? '—'}
                       </Link>
-                      {task.wp && (
+                      {(task.wp || task.parentFinding?.findingId || task.template?.title) && (
                         <div className="text-xs text-slate-400 mt-0.5 truncate">
-                          WP: {task.wp.wpId}
+                          {[
+                            task.wp ? `WP: ${task.wp.wpId}` : null,
+                            task.parentFinding?.findingId ? `Finding: ${task.parentFinding.findingId}` : null,
+                            task.template?.title ? `Template: ${task.template.title}` : null,
+                          ].filter(Boolean).join(' | ')}
                         </div>
                       )}
                     </td>
@@ -849,5 +869,13 @@ export default function TaskListPage() {
       </div>
 
     </div>
+  );
+}
+
+export default function TaskListPage() {
+  return (
+    <Suspense>
+      <TaskListPageInner />
+    </Suspense>
   );
 }

@@ -6,9 +6,13 @@ import Link from 'next/link';
 import { useAuthStore } from '../../../store/authStore';
 import { getOngoingWorks, OngoingWork } from '../../../api/dashboardApi';
 import toast from 'react-hot-toast';
-import { CalendarClock, Building2, Layers, Briefcase, ClipboardList, Filter, ChevronDown, ChevronUp, AlertTriangle, User, History, ArrowUpDown } from 'lucide-react';
+import { CalendarClock, Building2, Layers, Briefcase, ClipboardList, Filter, ChevronDown, ChevronUp, AlertTriangle, User, History, ArrowUpDown, RefreshCw } from 'lucide-react';
+import SheetSyncModal from '../../../components/SheetSyncModal';
 
 const MANAGER_ROLES = ['Manager', 'Director', 'Admin', 'Staff'];
+// The Google Sheet sync mutates Work Packages, so it is restricted to the
+// management roles (a narrower set than who may VIEW this calendar).
+const SYNC_ROLES = ['Manager', 'Director', 'Admin'];
 
 const STATUS_OPTIONS = ['All', 'Active', 'Scheduled', 'Awaiting Completion', 'Overdue'];
 const ENTITY_OPTIONS = ['All', 'Work Packages', 'Tasks', 'Scheduled Blueprints'];
@@ -27,6 +31,7 @@ export default function MasterCalendarPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -119,6 +124,15 @@ export default function MasterCalendarPage() {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          {SYNC_ROLES.includes(user.role) && (
+            <button
+              onClick={() => setSyncModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" />
+              SYNC CHECK SCHEDULE
+            </button>
+          )}
           <div className="relative">
             <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
               <Layers className="w-4 h-4 text-slate-400" />
@@ -323,6 +337,8 @@ export default function MasterCalendarPage() {
           </div>
         </div>
       )}
+
+      {syncModalOpen && <SheetSyncModal onClose={() => setSyncModalOpen(false)} />}
     </div>
   );
 }

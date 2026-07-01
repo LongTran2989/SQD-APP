@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuthStore } from '../../store/authStore';
 import { WorkPackageDetail } from '../../types';
 import { assignUserToWp, removeUserFromWp } from '../../api/wpApi';
-import { getUsers } from '../../api/taskApi';
+import { getDatasource } from '../../api/taskApi';
+import AsyncSearchableSelect from '../ui/AsyncSearchableSelect';
 import toast from 'react-hot-toast';
 import { UserPlus, X, Users } from 'lucide-react';
 
@@ -19,23 +20,17 @@ export default function WorkPackageAssignmentPanel({ wp, onUpdated }: Props) {
   const { user } = useAuthStore();
 
   const [showModal, setShowModal] = useState(false);
-  const [allUsers, setAllUsers] = useState<{ value: string; label: string }[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<number | ''>('');
+  const [selectedUserId, setSelectedUserId] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
 
   const canManage = user && CAN_ASSIGN_ROLES.includes(user.role) && wp.computedStatus !== 'Closed';
 
-  useEffect(() => {
-    if (showModal && allUsers.length === 0) {
-      getUsers()
-        .then(setAllUsers)
-        .catch(() => toast.error('Failed to load users'));
-    }
-  }, [showModal, allUsers.length]);
-
   const assignedUserIds = new Set(wp.assignments.map((a) => a.userId));
-  const availableUsers = allUsers.filter((u) => !assignedUserIds.has(Number(u.value)));
+  const fetchAvailableUsers = (q: string) =>
+    getDatasource('users', { q, limit: 20 }).then((opts) =>
+      opts.filter((o) => !assignedUserIds.has(Number(o.value)))
+    );
 
   const handleAssign = async () => {
     if (!selectedUserId) return;
@@ -123,20 +118,12 @@ export default function WorkPackageAssignmentPanel({ wp, onUpdated }: Props) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
             <h2 className="text-lg font-bold text-slate-800">Assign User</h2>
 
-            <select
+            <AsyncSearchableSelect
               value={selectedUserId}
-              onChange={(e) => setSelectedUserId(e.target.value ? Number(e.target.value) : '')}
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Select a user...</option>
-              {availableUsers.map((u) => (
-                <option key={u.value} value={u.value}>{u.label}</option>
-              ))}
-            </select>
-
-            {availableUsers.length === 0 && allUsers.length > 0 && (
-              <p className="text-sm text-slate-500">All users are already assigned.</p>
-            )}
+              onChange={setSelectedUserId}
+              fetchOptions={fetchAvailableUsers}
+              placeholder="Search for a user…"
+            />
 
             <div className="flex justify-end gap-3 pt-1">
               <button

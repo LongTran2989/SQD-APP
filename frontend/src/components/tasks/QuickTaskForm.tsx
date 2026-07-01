@@ -4,16 +4,34 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Zap, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { createQuickTask } from '../../api/taskApi';
+import { createQuickTask, getDatasource } from '../../api/taskApi';
+import { useAuthStore } from '../../store/authStore';
+import AsyncSearchableSelect from '../ui/AsyncSearchableSelect';
+import { SearchableSelectOption } from '../ui/SearchableSelect';
 
 export default function QuickTaskForm() {
   const router = useRouter();
+  const { user } = useAuthStore();
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   const [deadline, setDeadline] = useState('');
   const [skillLevel, setSkillLevel] = useState(0);
   const [requiresApproval, setRequiresApproval] = useState(true);
+  const [estimatedHours, setEstimatedHours] = useState<number | ''>('');
+  const [targetDivisionId, setTargetDivisionId] = useState<number | ''>(user?.divisionId ?? '');
+  const [assignedToUserId, setAssignedToUserId] = useState<number | ''>('');
   const [submitting, setSubmitting] = useState(false);
+
+  const fetchDivisionOptions = (q: string): Promise<SearchableSelectOption[]> =>
+    getDatasource('divisions', { q, limit: 20 });
+
+  const fetchAssigneeOptions = (q: string): Promise<SearchableSelectOption[]> =>
+    getDatasource('users', { q, limit: 20, divisionId: targetDivisionId || undefined });
+
+  const handleDivisionChange = (val: string) => {
+    setTargetDivisionId(val ? Number(val) : '');
+    setAssignedToUserId('');
+  };
 
   const handleSubmit = async () => {
     if (!title.trim()) { toast.error('Title is required'); return; }
@@ -25,6 +43,9 @@ export default function QuickTaskForm() {
         deadline: deadline || undefined,
         skillLevel,
         requiresApproval,
+        estimatedHours: estimatedHours === '' ? undefined : Number(estimatedHours),
+        targetDivisionId: targetDivisionId ? Number(targetDivisionId) : undefined,
+        assignedToUserId: assignedToUserId ? Number(assignedToUserId) : undefined,
       });
       toast.success(`Quick task ${task.taskId} created`);
       router.push(`/dashboard/tasks/${task.id}`);
@@ -68,6 +89,35 @@ export default function QuickTaskForm() {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-division">
+              Target Division
+            </label>
+            <AsyncSearchableSelect
+              id="qt-division"
+              value={targetDivisionId ? String(targetDivisionId) : ''}
+              onChange={handleDivisionChange}
+              fetchOptions={fetchDivisionOptions}
+              placeholder="Search for division…"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-assignee">
+              Assignee
+            </label>
+            <AsyncSearchableSelect
+              id="qt-assignee"
+              value={assignedToUserId ? String(assignedToUserId) : ''}
+              onChange={(val) => setAssignedToUserId(val ? Number(val) : '')}
+              fetchOptions={fetchAssigneeOptions}
+              placeholder={targetDivisionId ? 'Search for assignee…' : 'Select a division first'}
+              disabled={!targetDivisionId}
+              clearable
+              clearLabel="No assignee (Unassigned)"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-deadline">
               Deadline
             </label>
@@ -95,6 +145,21 @@ export default function QuickTaskForm() {
               ))}
             </select>
           </div>
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="qt-hours">
+            Estimated Hours
+          </label>
+          <input
+            id="qt-hours"
+            type="number"
+            min="0"
+            step="0.5"
+            value={estimatedHours}
+            onChange={(e) => setEstimatedHours(e.target.value === '' ? '' : Number(e.target.value))}
+            placeholder="Optional"
+            className={inputCls}
+          />
         </div>
         <label className="flex items-center gap-2 cursor-pointer">
           <input

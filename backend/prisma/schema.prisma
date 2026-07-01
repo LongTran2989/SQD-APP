@@ -312,6 +312,11 @@ model Task {
   @@index([completedAt])
 }
 
+model TaskSequence {
+  divisionCode String @id
+  sequence     Int    @default(0)
+}
+
 model TaskData {
   id     Int  @id @default(autoincrement())
   taskId Int  @unique

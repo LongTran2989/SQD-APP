@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import type { TaskStatus } from '../constants/taskStatus';
 
 export interface TaskBreakdown {
   unassigned: number;
@@ -36,6 +37,16 @@ export interface DashboardWorkPackage {
   timeframeTo: string;
 }
 
+export interface DashboardTask {
+  id: number;
+  taskId: string;
+  title: string;
+  itemType: string;
+  status: TaskStatus;
+  deadline: string | null;
+  wpId: string | null;
+}
+
 export interface FeedPost {
   id: number;
   type: string;
@@ -55,6 +66,11 @@ export const getDashboardSummary = async (): Promise<DashboardSummary> => {
 
 export const getDashboardWorkPackages = async (): Promise<DashboardWorkPackage[]> => {
   const { data } = await apiClient.get('/dashboard/work-packages');
+  return data;
+};
+
+export const getDashboardTasks = async (): Promise<DashboardTask[]> => {
+  const { data } = await apiClient.get('/dashboard/tasks');
   return data;
 };
 

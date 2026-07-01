@@ -332,7 +332,7 @@ export default function TaskDetailPage() {
         {/* ── Left panel (3/5 width): Detail + Actions + Form ── */}
         <div className="lg:col-span-3 space-y-4">
           {/* Task metadata */}
-          <TaskDetailPanel task={task} currentUser={user} />
+          <TaskDetailPanel task={task} currentUser={user} onWpUnlinked={refreshTaskMeta} />
 
           {/* Action bar */}
           <TaskActionBar

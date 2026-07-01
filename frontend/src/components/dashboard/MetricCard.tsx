@@ -12,23 +12,23 @@ interface MetricCardProps {
 
 export function MetricCard({ title, value, subtitle, icon, iconBgColor, iconTextColor, isLoading }: MetricCardProps) {
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col">
-      <div className="flex items-center space-x-3 mb-4">
-        <div className={`p-2 rounded-lg ${iconBgColor}`}>
-          <div className={`${iconTextColor}`}>{icon}</div>
+    <div className="p-5 sm:p-6 flex flex-col h-full">
+      <div className="flex items-center space-x-3 mb-3">
+        <div className={`p-1.5 rounded-md ${iconBgColor}`}>
+          <div className={`${iconTextColor} [&>svg]:w-4 [&>svg]:h-4`}>{icon}</div>
         </div>
-        <h2 className="text-lg font-semibold text-slate-700">{title}</h2>
+        <h2 className="text-sm font-semibold text-slate-600">{title}</h2>
       </div>
-      
+
       {isLoading ? (
         <div className="animate-pulse flex flex-col gap-2 mt-1">
-          <div className="h-10 bg-slate-200 rounded w-16"></div>
+          <div className="h-9 bg-slate-200 rounded w-16"></div>
           {subtitle && <div className="h-4 bg-slate-200 rounded w-32 mt-1"></div>}
         </div>
       ) : (
         <>
-          <span className="text-4xl font-bold text-slate-800 tracking-tight">{value}</span>
-          {subtitle && <span className="text-sm text-slate-500 mt-2 font-medium">{subtitle}</span>}
+          <span className="text-3xl font-bold text-slate-800 tracking-tight">{value}</span>
+          {subtitle && <span className="text-xs text-slate-500 mt-1.5 font-medium">{subtitle}</span>}
         </>
       )}
     </div>

@@ -1,30 +1,31 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
-import { Template, WorkPackageEnriched } from '../../types';
-import { createTask, getDivisions, getUsers } from '../../api/taskApi';
-import { getWorkPackages } from '../../api/wpApi';
-import SearchableSelect from '../ui/SearchableSelect';
+import { Template, WorkPackageDetail } from '../../types';
+import { createTask, getDatasource } from '../../api/taskApi';
+import { getWorkPackageById } from '../../api/wpApi';
+import AsyncSearchableSelect from '../ui/AsyncSearchableSelect';
+import { SearchableSelectOption } from '../ui/SearchableSelect';
 import TemplatePickerModal from '../templates/TemplatePickerModal';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { FileCheck2, Clock, Info, FolderOpen, LayoutTemplate, X } from 'lucide-react';
 
-interface SelectOption {
-  value: string;
-  label: string;
-}
-
-interface UserOption extends SelectOption {
-  divisionId: number | null;
-}
-
 export interface TaskCreateFormProps {
   prefilledWpId?: number | null;
   onSaved?: (taskId: number) => void;
   onCancel?: () => void;
+}
+
+function formatRelativeDraftTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.round(mins / 60);
+  return `${hours} hour${hours === 1 ? '' : 's'} ago`;
 }
 
 export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: TaskCreateFormProps) {
@@ -40,12 +41,20 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
   const [issuanceNote, setIssuanceNote] = useState('');
   const [requiresApproval, setRequiresApproval] = useState(true);
   const [skillLevel, setSkillLevel] = useState<number>(0);
+  const [estimatedHours, setEstimatedHours] = useState<number | ''>('');
+  const [title, setTitle] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const [divisions, setDivisions] = useState<SelectOption[]>([]);
-  const [allUsers, setAllUsers] = useState<UserOption[]>([]);
-  const [workPackages, setWorkPackages] = useState<WorkPackageEnriched[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
+  const [prefilledWp, setPrefilledWp] = useState<WorkPackageDetail | null>(null);
+  const [readOnlyDivisionLabel, setReadOnlyDivisionLabel] = useState<string>('—');
+
+  const DRAFT_KEY = 'taskCreateForm.issuanceNoteDraft';
+  const [draftBanner, setDraftBanner] = useState<{ text: string; savedAt: string } | null>(null);
+  // Tracks genuine user interaction (typing, Restore) rather than effect
+  // invocation count — immune to React Strict Mode's dev-only double-invoke
+  // of effect setup functions, since this ref is only ever set inside real
+  // event handlers, never inside the persist effect itself.
+  const userInteractedRef = useRef(false);
 
   const templateId = selectedTemplate?.id;
 
@@ -54,42 +63,92 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
     if (selectedTemplate) {
       setRequiresApproval(selectedTemplate.requiresApproval);
       setSkillLevel(selectedTemplate.skillLevel ?? 0);
+      setTitle((prev) => prev || selectedTemplate.title);
+      setEstimatedHours((prev) => (prev === '' ? (selectedTemplate.estimatedHours ?? '') : prev));
     }
   }, [selectedTemplate]);
 
+  // Resolve the display name for a pre-selected work package (from the WP page).
   useEffect(() => {
-    const fetchAll = async () => {
-      try {
-        const [divRes, usersRes, wpsRes] = await Promise.all([
-          getDivisions(),
-          getUsers(),
-          getWorkPackages(),
-        ]);
-        setDivisions(divRes);
-        setAllUsers(usersRes);
-        setWorkPackages(wpsRes.filter((w) => w.computedStatus !== 'Closed' && w.computedStatus !== 'Inactive'));
-      } catch {
-        toast.error('Failed to load form data');
-      } finally {
-        setLoadingData(false);
+    if (prefilledWpId) {
+      getWorkPackageById(prefilledWpId).then(setPrefilledWp).catch(() => {});
+    }
+  }, [prefilledWpId]);
+
+  // Check for an existing Task Instruction draft on mount — never silently
+  // pre-fill; only surface it via the restore/discard banner below.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { text: string; savedAt: string };
+        if (parsed.text?.trim()) setDraftBanner(parsed);
       }
-    };
-    fetchAll();
+    } catch {
+      // corrupt/unavailable storage — ignore, no draft to offer
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const assigneeOptions = targetDivisionId
-    ? allUsers.filter((u) => u.divisionId === targetDivisionId)
-    : allUsers;
+  // Persist the Task Instruction draft as it changes, debounced to avoid
+  // writing on every keystroke.
+  useEffect(() => {
+    if (!userInteractedRef.current) return; // nothing user-driven has happened yet — don't touch storage (avoids wiping an existing draft before Restore/Discard, and is immune to Strict Mode's double-invoke since this ref is only ever set inside real event handlers, never inside this effect itself)
+    const t = setTimeout(() => {
+      try {
+        if (issuanceNote.trim()) {
+          localStorage.setItem(DRAFT_KEY, JSON.stringify({ text: issuanceNote, savedAt: new Date().toISOString() }));
+        } else {
+          localStorage.removeItem(DRAFT_KEY);
+        }
+      } catch {
+        // storage unavailable (private browsing, quota) — non-fatal, drafts are a convenience only
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [issuanceNote]);
+
+  const handleRestoreDraft = () => {
+    if (draftBanner) {
+      userInteractedRef.current = true;
+      setIssuanceNote(draftBanner.text);
+    }
+    setDraftBanner(null);
+  };
+
+  const handleDiscardDraft = () => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* non-fatal */ }
+    setDraftBanner(null);
+  };
+
+  const ELEVATED_ROLES = ['Manager', 'Director', 'Admin'];
+  const isElevated = ELEVATED_ROLES.includes(user?.role ?? '');
+
+  // Non-elevated users have a fixed target division (their own) with no
+  // picker — resolve just that one division's label for the read-only display.
+  useEffect(() => {
+    if (!isElevated && targetDivisionId) {
+      getDatasource('divisions', { limit: 20 }).then((divs) => {
+        const match = divs.find((d) => d.value === String(targetDivisionId));
+        if (match) setReadOnlyDivisionLabel(match.label);
+      }).catch(() => {});
+    }
+  }, [isElevated, targetDivisionId]);
+
+  const fetchDivisionOptions = (q: string): Promise<SearchableSelectOption[]> =>
+    getDatasource('divisions', { q, limit: 20 });
+
+  const fetchAssigneeOptions = (q: string): Promise<SearchableSelectOption[]> =>
+    getDatasource('users', { q, limit: 20, divisionId: targetDivisionId || undefined });
+
+  const fetchWpOptions = (q: string): Promise<SearchableSelectOption[]> =>
+    getDatasource('workpackages', { q, limit: 20 });
 
   const handleDivisionChange = (val: string) => {
-    const newDivId = val ? Number(val) : '';
-    setTargetDivisionId(newDivId);
-    if (assignedToUserId) {
-      const still = allUsers.find(
-        (u) => u.value === String(assignedToUserId) && u.divisionId === newDivId
-      );
-      if (!still) setAssignedToUserId('');
-    }
+    setTargetDivisionId(val ? Number(val) : '');
+    // Division-scoped assignee search means a previously-picked assignee may
+    // no longer be valid for the new division — always clear it on change.
+    setAssignedToUserId('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -121,8 +180,11 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
         issuanceNote: issuanceNote.trim() || undefined,
         requiresApproval,
         skillLevel,
+        title: title.trim() || undefined,
+        estimatedHours: estimatedHours === '' ? undefined : Number(estimatedHours),
       });
       toast.success(`Task ${task.taskId} created`);
+      try { localStorage.removeItem(DRAFT_KEY); } catch { /* non-fatal */ }
       if (onSaved) {
         onSaved(task.id);
       } else {
@@ -137,17 +199,6 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
       setSubmitting(false);
     }
   };
-
-  const ELEVATED_ROLES = ['Manager', 'Director', 'Admin'];
-  const isElevated = ELEVATED_ROLES.includes(user?.role ?? '');
-
-  if (loadingData) {
-    return (
-      <div className="flex items-center justify-center h-48">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-      </div>
-    );
-  }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -212,6 +263,20 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
         </div>
       </div>
 
+      {/* Task Title */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 space-y-4">
+        <h2 className="text-base font-bold text-slate-800">Task Title</h2>
+        <input
+          id="task-title-input"
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={300}
+          placeholder="Defaults to the template title — edit to customize"
+          className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+        />
+      </div>
+
       {/* Task details */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 space-y-4">
         <h2 className="text-base font-bold text-slate-800">Task Details</h2>
@@ -222,16 +287,16 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             Target Division *
           </label>
           {isElevated ? (
-            <SearchableSelect
+            <AsyncSearchableSelect
               id="division-select"
-              options={divisions}
               value={targetDivisionId ? String(targetDivisionId) : ''}
               onChange={handleDivisionChange}
-              placeholder="Select division…"
+              fetchOptions={fetchDivisionOptions}
+              placeholder="Search for division…"
             />
           ) : (
             <div className="w-full px-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-sm text-slate-500">
-              {divisions.find((d) => d.value === String(targetDivisionId))?.label ?? '—'}
+              {readOnlyDivisionLabel}
             </div>
           )}
         </div>
@@ -244,24 +309,19 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
               (optional — leave blank to create as Unassigned)
             </span>
           </label>
-          <SearchableSelect
+          <AsyncSearchableSelect
             id="assignee-select"
-            options={assigneeOptions}
             value={assignedToUserId ? String(assignedToUserId) : ''}
             onChange={(val) => setAssignedToUserId(val ? Number(val) : '')}
-            placeholder={
-              targetDivisionId
-                ? assigneeOptions.length === 0
-                  ? 'No users in this division'
-                  : 'Search for assignee…'
-                : 'Select a division first'
-            }
+            fetchOptions={fetchAssigneeOptions}
+            placeholder={targetDivisionId ? 'Search for assignee…' : 'Select a division first'}
+            disabled={!targetDivisionId}
             clearable
             clearLabel="No assignee (Unassigned)"
           />
-          {targetDivisionId && assigneeOptions.length === 0 && (
+          {!targetDivisionId && (
             <p className="mt-1.5 text-xs text-amber-600 flex items-center gap-1">
-              <Info className="w-3.5 h-3.5" /> No users found in the selected division.
+              <Info className="w-3.5 h-3.5" /> Select a target division before searching for an assignee.
             </p>
           )}
         </div>
@@ -282,8 +342,8 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
           />
         </div>
 
-        {/* Skill Level + Requires Approval */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Skill Level + Estimated Hours + Requires Approval */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="skill-level-select">
               Skill Level <span className="font-normal text-slate-400">(seeded from template)</span>
@@ -298,6 +358,21 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
                 <option key={lvl} value={lvl}>Level {lvl}</option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="estimated-hours-input">
+              Estimated Hours <span className="font-normal text-slate-400">(seeded from template)</span>
+            </label>
+            <input
+              id="estimated-hours-input"
+              type="number"
+              min="0"
+              step="0.5"
+              value={estimatedHours}
+              onChange={(e) => setEstimatedHours(e.target.value === '' ? '' : Number(e.target.value))}
+              placeholder="Optional"
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+            />
           </div>
           <div className="flex items-end">
             <label className="flex items-center gap-2 cursor-pointer group pb-2.5">
@@ -325,26 +400,39 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
           {prefilledWpId ? (
             <>
               <div className="w-full px-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-sm text-slate-500">
-                {workPackages.find((w) => w.id === prefilledWpId)
-                  ? `${workPackages.find((w) => w.id === prefilledWpId)!.wpId} — ${workPackages.find((w) => w.id === prefilledWpId)!.name}`
-                  : `WP #${prefilledWpId}`}
+                {prefilledWp ? `${prefilledWp.wpId} — ${prefilledWp.name}` : `WP #${prefilledWpId}`}
               </div>
               <p className="mt-1.5 text-xs text-blue-600 flex items-center gap-1">
                 <Info className="w-3.5 h-3.5" /> Work package pre-selected from the work package page.
               </p>
             </>
           ) : (
-            <SearchableSelect
+            <AsyncSearchableSelect
               id="wp-select"
-              options={workPackages.map((w) => ({ value: String(w.id), label: `${w.wpId} — ${w.name}` }))}
               value={wpId ? String(wpId) : ''}
               onChange={(val) => setWpId(val ? Number(val) : '')}
-              placeholder="No work package"
+              fetchOptions={fetchWpOptions}
+              placeholder="Search for work package…"
               clearable
               clearLabel="No work package"
             />
           )}
         </div>
+
+        {/* Draft restore banner */}
+        {draftBanner && (
+          <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+            <span>You have an unsaved instruction draft from {formatRelativeDraftTime(draftBanner.savedAt)}.</span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button type="button" onClick={handleRestoreDraft} className="px-3 py-1 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition-colors">
+                Restore
+              </button>
+              <button type="button" onClick={handleDiscardDraft} className="px-3 py-1 text-amber-700 hover:bg-amber-100 rounded-lg font-semibold transition-colors">
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Task Instruction */}
         <div>
@@ -355,7 +443,7 @@ export default function TaskCreateForm({ prefilledWpId, onSaved, onCancel }: Tas
             id="instruction-input"
             rows={3}
             value={issuanceNote}
-            onChange={(e) => setIssuanceNote(e.target.value)}
+            onChange={(e) => { userInteractedRef.current = true; setIssuanceNote(e.target.value); }}
             placeholder="Add context or specific guidance for this task instance…"
             className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm resize-none"
           />

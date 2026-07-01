@@ -226,7 +226,7 @@ describe('Personnel Workload (GET /api/workload/personnel)', () => {
     expect(row.performance.findingsClosed).toBe(1);
   });
 
-  it('W16: overdueRejectedCount combines rejected tasks, overdue tasks, and overdue WPs', async () => {
+  it('W16: rejectedCount and overdueCount are reported separately', async () => {
     const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
     await prisma.task.create({ data: { taskId: 'WL-000040', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'Rejected', schemaSnapshot: [], targetDivisionId: divisionId, completedAt: new Date() } });
     await prisma.task.create({ data: { taskId: 'WL-000041', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'Assigned', schemaSnapshot: [], targetDivisionId: divisionId, deadline: past } });
@@ -235,16 +235,18 @@ describe('Personnel Workload (GET /api/workload/personnel)', () => {
 
     const res = await get(managerToken);
     const row = rowFor(res.body.personnel, staffId);
-    expect(row.performance.overdueRejectedCount).toBe(3);
+    expect(row.performance.rejectedCount).toBe(1);   // 1 Rejected task
+    expect(row.performance.overdueCount).toBe(2);    // 1 overdue task + 1 overdue WP
   });
 
-  it('W17: overdueRejectedCount excludes a task whose deadline is past `now` but outside the selected range', async () => {
+  it('W17: overdueCount excludes a task whose deadline is past `now` but outside the selected range', async () => {
     const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
     await prisma.task.create({ data: { taskId: 'WL-000042', templateId, issuerId: staffId, assignedToUserId: staffId, status: 'Assigned', schemaSnapshot: [], targetDivisionId: divisionId, deadline: past } });
 
     const res = await get(managerToken, '?from=2099-01-01&to=2099-12-31');
     const row = rowFor(res.body.personnel, staffId);
-    expect(row.performance.overdueRejectedCount).toBe(0);
+    expect(row.performance.overdueCount).toBe(0);
+    expect(row.performance.rejectedCount).toBe(0);
   });
 });
 

@@ -21,23 +21,17 @@ type PrismaLike = PrismaClient | Prisma.TransactionClient;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Generates the next sequential human-readable taskId for a division code.
- * Mirrors task.controller.generateTaskId — replicated to avoid a controller
- * import cycle. Must run inside a $transaction (division row locked by caller).
+ * Generates the next sequential human-readable taskId for a division code,
+ * via the same atomic TaskSequence upsert used by task.controller.generateTaskId
+ * (replicated here to avoid a controller import cycle).
  */
 async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
-  const lastTask = await tx.task.findFirst({
-    where: { taskId: { startsWith: `${divisionCode}-` }, deletedAt: null },
-    orderBy: { id: 'desc' },
-    select: { taskId: true }
+  const seq = await tx.taskSequence.upsert({
+    where: { divisionCode },
+    create: { divisionCode, sequence: 1 },
+    update: { sequence: { increment: 1 } }
   });
-  let nextSeq = 1;
-  if (lastTask?.taskId) {
-    const parts = lastTask.taskId.split('-');
-    const seqPart = parts[parts.length - 1];
-    if (seqPart) nextSeq = parseInt(seqPart, 10) + 1;
-  }
-  return `${divisionCode}-${String(nextSeq).padStart(6, '0')}`;
+  return `${divisionCode}-${String(seq.sequence).padStart(6, '0')}`;
 }
 
 /** Generates the next sequential wpId for a division code. */
@@ -577,7 +571,7 @@ export const getDuplicateCandidates = async (req: Request, res: Response): Promi
 export const listFindings = async (req: Request, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const { status, divisionId, severity, reportedBy, taskId } = req.query;
+    const { status, divisionId, severity, reportedBy, taskId, eventType, departmentId, ataChapterId } = req.query;
     const page = Math.max(1, parseInt((req.query.page as string) ?? '1', 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt((req.query.pageSize as string) ?? '20', 10) || 20));
 
@@ -585,9 +579,13 @@ export const listFindings = async (req: Request, res: Response): Promise<void> =
 
     if (typeof status === 'string' && FINDING_STATUSES.includes(status)) filters.push({ status });
     if (typeof severity === 'string' && SEVERITIES.includes(severity)) filters.push({ severity });
-    if (divisionId) filters.push({ targetDivisionId: parseInt(divisionId as string, 10) });
-    if (reportedBy) filters.push({ reportedByUserId: parseInt(reportedBy as string, 10) });
-    if (taskId) filters.push({ sourceTaskId: parseInt(taskId as string, 10) });
+    if (divisionId) { const d = parseInt(divisionId as string, 10); if (!Number.isNaN(d)) filters.push({ targetDivisionId: d }); }
+    if (reportedBy) { const d = parseInt(reportedBy as string, 10); if (!Number.isNaN(d)) filters.push({ reportedByUserId: d }); }
+    if (taskId) { const d = parseInt(taskId as string, 10); if (!Number.isNaN(d)) filters.push({ sourceTaskId: d }); }
+    // eventType is a free-form String field (not a Prisma enum), so no allow-list — any value is valid.
+    if (typeof eventType === 'string' && eventType) filters.push({ eventType });
+    if (departmentId) { const d = parseInt(departmentId as string, 10); if (!Number.isNaN(d)) filters.push({ departmentId: d }); }
+    if (ataChapterId) { const a = parseInt(ataChapterId as string, 10); if (!Number.isNaN(a)) filters.push({ ataChapterId: a }); }
 
     const where: Prisma.FindingWhereInput = { AND: filters };
 
@@ -1066,7 +1064,10 @@ export const generateFollowUpTasks = async (req: Request, res: Response): Promis
     const actorName = await getUserName(userId);
 
     const createdTasks = await prisma.$transaction(async (tx) => {
-      // Lock the division row so taskId / wpId sequences are race-free.
+      // Lock the division row so the wpId sequence (still table-scan based via
+      // generateWpId) is race-free. No longer needed for taskId — generateTaskId
+      // now uses the atomic TaskSequence upsert — but generateWpId below still
+      // requires it.
       await tx.$queryRaw`SELECT id FROM "Division" WHERE id = ${division.id} FOR UPDATE`;
 
       const results: { id: number; taskId: string }[] = [];

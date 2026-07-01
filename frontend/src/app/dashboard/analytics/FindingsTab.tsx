@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { getFindingsAnalytics, FindingsAnalytics } from '../../../api/taskApi';
 import { ErrorState, LoadingState, analyticsErrorMessage } from './shared';
 
@@ -16,7 +17,7 @@ const SEVERITY_COLORS: Record<string, string> = {
   Observation: 'bg-signal-blue',
   'Level 1': 'bg-amber-caution',
   'Level 2': 'bg-red-finding',
-  Unreviewed: 'bg-slate-400',
+  Unreviewed: 'bg-slate-400', // neutral state — no semantic token maps to mid-gray bar fill
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -24,17 +25,19 @@ const STATUS_COLORS: Record<string, string> = {
   'In Progress': 'bg-amber-caution',
   'Pending Verification': 'bg-amber-caution/60',
   Closed: 'bg-emerald-clear',
-  Dismissed: 'bg-slate-400',
+  Dismissed: 'bg-slate-400', // neutral state — no semantic token maps to mid-gray bar fill
 };
 
 interface BarItem {
   label: string;
   count: number;
   color?: string;
+  href?: string; // drill-through: links to filtered findings page
 }
 
 // Horizontal proportional bar list — no charting library, SSR-safe. Rendered as
 // a description list so each row reads as "label: count" to a screen reader.
+// When an item has an href, its label renders as a Link to the filtered view.
 function BarList({ items }: { items: BarItem[] }) {
   if (items.length === 0) {
     return <p className="text-sm text-ink-secondary px-1 py-2">No data.</p>;
@@ -45,9 +48,18 @@ function BarList({ items }: { items: BarItem[] }) {
       {items.map((i) => (
         <div key={i.label} className="flex items-center gap-3 text-sm">
           <dt className="w-36 shrink-0 truncate text-ink-secondary" title={i.label}>
-            {i.label}
+            {i.href ? (
+              <Link
+                href={i.href}
+                className="hover:text-signal-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-blue rounded"
+              >
+                {i.label}
+              </Link>
+            ) : (
+              i.label
+            )}
           </dt>
-          <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden" aria-hidden="true">
+          <div className="flex-1 bg-border-subtle rounded-full h-5 overflow-hidden" aria-hidden="true">
             <div
               className={`h-full rounded-full ${i.color ?? 'bg-signal-blue'}`}
               style={{ width: `${(i.count / max) * 100}%`, minWidth: i.count > 0 ? '0.5rem' : 0 }}
@@ -80,7 +92,7 @@ function MonthTrend({ items }: { items: { month: string; count: number }[] }) {
             className="w-full max-w-[2.5rem] bg-signal-blue rounded-t"
             style={{ height: `${(i.count / max) * 100}%`, minHeight: i.count > 0 ? '4px' : 0 }}
           />
-          <span className="text-[10px] text-ink-secondary truncate w-full text-center" title={i.month}>
+          <span className="text-[11px] text-ink-secondary truncate w-full text-center" title={i.month}>
             {i.month.slice(2)}
           </span>
         </div>
@@ -91,7 +103,7 @@ function MonthTrend({ items }: { items: { month: string; count: number }[] }) {
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
+    <div className="bg-surface-card rounded-xl border border-border-default p-5">
       <p className="text-xs font-semibold text-ink-secondary uppercase tracking-wider">{label}</p>
       <p className="text-2xl font-bold text-ink-primary mt-1">{value}</p>
       {hint && <p className="text-xs text-ink-secondary mt-1">{hint}</p>}
@@ -101,8 +113,8 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="p-5 border-b border-slate-100">
+    <div className="bg-surface-card rounded-xl border border-border-default overflow-hidden">
+      <div className="p-5 border-b border-border-subtle">
         <h2 className="text-lg font-semibold text-ink-primary">{title}</h2>
       </div>
       <div className="p-5">{children}</div>
@@ -112,14 +124,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 // ─── Tab ────────────────────────────────────────────────────────────────────
 
-export default function FindingsTab() {
+export default function FindingsTab({ from, to, dateRangeError }: { from: string; to: string; dateRangeError: string | null }) {
   const [data, setData] = useState<FindingsAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
+    if (dateRangeError) return; // invalid range — wait for correction
     let cancelled = false;
-    getFindingsAnalytics()
+    setError(null);
+    setLoading(true);
+    getFindingsAnalytics({ from: from || undefined, to: to || undefined })
       .then((d) => {
         if (!cancelled) setData(d);
       })
@@ -132,14 +148,14 @@ export default function FindingsTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [from, to, dateRangeError, retryKey]);
 
   if (loading) return <LoadingState />;
-  if (error || !data) return <ErrorState message={error ?? 'Something went wrong'} />;
+  if (error || !data) return <ErrorState message={error ?? 'Something went wrong'} onRetry={() => setRetryKey((k) => k + 1)} />;
 
   if (data.totalCount === 0) {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+      <div className="bg-surface-card rounded-xl border border-border-default p-12 text-center">
         <p className="text-ink-primary font-medium">No findings to report yet.</p>
         <p className="text-sm text-ink-secondary mt-1">
           Severity, status, and recurrence trends appear here once findings are raised against tasks.
@@ -155,22 +171,38 @@ export default function FindingsTab() {
     label: b.key,
     count: b.count,
     color: SEVERITY_COLORS[b.key],
+    href: `/dashboard/findings?severity=${encodeURIComponent(b.key)}`,
   }));
   const statusItems: BarItem[] = data.byStatus.map((b) => ({
     label: b.key,
     count: b.count,
     color: STATUS_COLORS[b.key],
+    href: `/dashboard/findings?status=${encodeURIComponent(b.key)}`,
   }));
-  const eventTypeItems: BarItem[] = data.byEventType.map((b) => ({ label: b.key, count: b.count }));
-  const departmentItems: BarItem[] = data.byDepartment.map((b) => ({ label: b.name, count: b.count }));
+  const eventTypeItems: BarItem[] = data.byEventType.map((b) => ({
+    label: b.key,
+    count: b.count,
+    href: `/dashboard/findings?eventType=${encodeURIComponent(b.key)}`,
+  }));
+  const departmentItems: BarItem[] = data.byDepartment.map((b) => ({
+    label: b.name,
+    count: b.count,
+    href: `/dashboard/findings?departmentId=${b.id}`,
+  }));
   const ataItems: BarItem[] = data.byAtaChapter.map((b) => ({
     label: `${b.code} · ${b.title}`,
     count: b.count,
+    href: `/dashboard/findings?ataChapterId=${b.id}`,
   }));
 
   return (
     <div className="space-y-6">
-      {/* Summary cards */}
+      {/* Summary cards — period label updates when a date range is active */}
+      <p className="text-xs text-ink-muted">
+        {from || to
+          ? `Findings raised${from ? ` from ${from}` : ''}${to ? ` to ${to}` : ''}`
+          : 'All-time totals'}
+      </p>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Total Findings" value={String(data.totalCount)} />
         <StatCard label="Unresolved" value={String(data.openCount)} hint="not yet resolved" />

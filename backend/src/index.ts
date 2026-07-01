@@ -29,6 +29,7 @@ import referenceDataRoutes from './routes/referenceData.routes';
 import attachmentRoutes from './routes/attachment.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import workloadRoutes from './routes/workload.routes';
+import sheetSyncRoutes from './routes/googleSheetSync.routes';
 import cron from 'node-cron';
 import { startRealtimeListener } from './realtime/pgEvents';
 import { purgeOldNotifications, buildFeedDigests } from './services/notificationService';
@@ -81,6 +82,7 @@ app.use('/api/admin/reference-data', referenceDataRoutes);
 app.use('/api/attachments', attachmentRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/workload', workloadRoutes);
+app.use('/api/sheet-sync', sheetSyncRoutes);
 
 // Basic health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {

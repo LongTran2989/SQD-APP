@@ -2,6 +2,10 @@
 // GET /api/analytics/time-booking and GET /api/workload/personnel so the two
 // surfaces compute "task efficiency" over the exact same population
 // (rated tasks with a known assignee) and the same ratio formula.
+//
+// Formula: avgEfficiencyRatio = mean of (estimatedHours / totalHours) per task.
+// ≥ 1.0 means on or under budget (good). < 1.0 means over budget (bad).
+// Higher is always better — this is the canonical direction for all UI surfaces.
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -18,6 +22,7 @@ export interface StaffEfficiencyRow {
   name: string;
   avgRating: number | null;
   ratedTaskCount: number;
+  tasksCompletedCount: number; // total final-state tasks with a time booking (the ratio's sample size)
   avgEfficiencyRatio: number | null;
 }
 
@@ -27,6 +32,7 @@ export function aggregateStaffEfficiency(tasks: RatedTaskInput[]): StaffEfficien
     name: string;
     ratingSum: number;
     ratedTaskCount: number;
+    tasksCompletedCount: number;
     ratioSum: number;
     ratioCount: number;
   }
@@ -39,7 +45,7 @@ export function aggregateStaffEfficiency(tasks: RatedTaskInput[]): StaffEfficien
     const uid = t.assignedToUser.id;
     let agg = staffMap.get(uid);
     if (!agg) {
-      agg = { userId: uid, name: t.assignedToUser.name, ratingSum: 0, ratedTaskCount: 0, ratioSum: 0, ratioCount: 0 };
+      agg = { userId: uid, name: t.assignedToUser.name, ratingSum: 0, ratedTaskCount: 0, tasksCompletedCount: 0, ratioSum: 0, ratioCount: 0 };
       staffMap.set(uid, agg);
     }
     agg.ratingSum += t.rating;
@@ -47,9 +53,11 @@ export function aggregateStaffEfficiency(tasks: RatedTaskInput[]): StaffEfficien
 
     const tb = t.timeBooking;
     // Guard > 0 mirrors the template over-budget guard in analytics.controller.
-    if (tb && tb.estimatedHours !== null && tb.estimatedHours > 0) {
-      agg.ratioSum += tb.totalHours / tb.estimatedHours;
+    // Formula inverted: est/actual so that ≥1.0 = good (efficient), <1.0 = over budget.
+    if (tb && tb.estimatedHours !== null && tb.estimatedHours > 0 && tb.totalHours > 0) {
+      agg.ratioSum += tb.estimatedHours / tb.totalHours;
       agg.ratioCount += 1;
+      agg.tasksCompletedCount += 1;
     }
   }
 
@@ -58,6 +66,7 @@ export function aggregateStaffEfficiency(tasks: RatedTaskInput[]): StaffEfficien
     name: agg.name,
     avgRating: agg.ratedTaskCount > 0 ? round2(agg.ratingSum / agg.ratedTaskCount) : null,
     ratedTaskCount: agg.ratedTaskCount,
+    tasksCompletedCount: agg.tasksCompletedCount,
     avgEfficiencyRatio: agg.ratioCount > 0 ? round2(agg.ratioSum / agg.ratioCount) : null,
   }));
 }

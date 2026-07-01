@@ -83,23 +83,12 @@ function taskDataError(data: unknown): string | null {
  * Must be called inside a $transaction to avoid race conditions.
  */
 async function generateTaskId(divisionCode: string, tx: Prisma.TransactionClient): Promise<string> {
-  const lastTask = await tx.task.findFirst({
-    where: { taskId: { startsWith: `${divisionCode}-` } },
-    orderBy: { id: 'desc' },
-    select: { taskId: true }
+  const seq = await tx.taskSequence.upsert({
+    where: { divisionCode },
+    create: { divisionCode, sequence: 1 },
+    update: { sequence: { increment: 1 } }
   });
-
-  let nextSeq = 1;
-  if (lastTask?.taskId) {
-    // taskId format: CODE-000001 (may have multiple segments if code has hyphens)
-    const parts = lastTask.taskId.split('-');
-    const seqPart = parts[parts.length - 1];
-    if (seqPart) {
-      nextSeq = parseInt(seqPart, 10) + 1;
-    }
-  }
-
-  return `${divisionCode}-${String(nextSeq).padStart(6, '0')}`;
+  return `${divisionCode}-${String(seq.sequence).padStart(6, '0')}`;
 }
 
 /**
@@ -301,7 +290,7 @@ function taskInclude() {
     targetDivision: { select: { id: true, name: true, code: true } },
     wp: { select: { id: true, wpId: true, name: true } },
     timeBooking: true,
-    parentFinding: { select: { id: true } }
+    parentFinding: { select: { id: true, findingId: true } }
   };
 }
 
@@ -475,6 +464,12 @@ function buildTaskFilters(req: Request): Prisma.TaskWhereInput[] {
 
   // attentionOnly — used by stat parity; deadline-or-followup needing attention.
   if (String(req.query.attentionOnly) === 'true') filters.push(attentionFilter());
+
+  // pendingRatingOnly mirrors the dashboard summary's Pending Rating figure:
+  // Closed but not yet rated.
+  if (String(req.query.pendingRatingOnly) === 'true') {
+    filters.push({ status: 'Closed', rating: null });
+  }
 
   // search across taskId + template title (case-insensitive).
   const search = req.query.search ? String(req.query.search).trim() : '';
@@ -744,8 +739,8 @@ export interface CreateTaskParams {
  * Core "create a task" logic, callable from the HTTP handler OR another flow
  * (e.g. the escalation CREATE_TASK action) that wants to reuse this validation
  * verbatim. Every write runs on the supplied `client`; pass a transaction client
- * (the taskId generation needs a `FOR UPDATE` row lock, so the caller MUST wrap
- * this in a $transaction). Throws HttpError on validation failure.
+ * (the taskId generation relies on an atomic `TaskSequence` upsert, so the caller
+ * MUST wrap this in a $transaction). Throws HttpError on validation failure.
  */
 export async function createTaskService(
   client: PrismaLike,
@@ -841,8 +836,6 @@ export async function createTaskService(
 
   const initialStatus = assignedToUserId ? 'Assigned' : 'Unassigned';
 
-  // Lock division row to prevent concurrent taskId collisions (requires a tx).
-  await client.$queryRaw`SELECT id FROM "Division" WHERE id = ${targetDivisionId} FOR UPDATE`;
   const newTaskId = await generateTaskId(targetDiv.code, client as Prisma.TransactionClient);
 
   const task = await client.task.create({

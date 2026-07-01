@@ -7,6 +7,8 @@ interface BreakdownItem {
   value: number;
   colorClass: string;
   urgent?: boolean;
+  /** Drill-through to the filtered list for this status (e.g. /dashboard/tasks?status=Overdue). */
+  href?: string;
 }
 
 interface DetailedMetricWidgetProps {
@@ -29,19 +31,24 @@ export function DetailedMetricWidget({
   linkTo
 }: DetailedMetricWidgetProps) {
   const total = breakdown.reduce((sum, item) => sum + item.value, 0);
+  // Urgent items (e.g. Overdue) are promoted out of the list so they read
+  // as a distinguished top-line figure instead of one row among several —
+  // this also keeps the remaining breakdown within the ≤4 chunking limit.
+  const urgentItem = breakdown.find((item) => item.urgent);
+  const restItems = breakdown.filter((item) => !item.urgent);
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col">
-      <div className="flex items-center justify-between mb-4">
+    <div className="p-5 sm:p-6 flex flex-col h-full">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center space-x-3">
-          <div className={`p-2 rounded-lg ${iconBgColor}`}>
-            <div className={`${iconTextColor}`}>{icon}</div>
+          <div className={`p-1.5 rounded-md ${iconBgColor}`}>
+            <div className={`${iconTextColor} [&>svg]:w-4 [&>svg]:h-4`}>{icon}</div>
           </div>
-          <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
+          <h2 className="text-sm font-semibold text-slate-600">{title}</h2>
         </div>
         {linkTo && !isLoading && (
-          <Link href={linkTo} className="text-sm font-semibold text-blue-600 hover:text-blue-700 flex items-center">
-            View All <ChevronRight className="w-4 h-4 ml-1" aria-hidden="true" />
+          <Link href={linkTo} className="text-xs font-semibold text-signal-blue hover:text-signal-blue-hover flex items-center">
+            View All <ChevronRight className="w-3.5 h-3.5 ml-0.5" aria-hidden="true" />
           </Link>
         )}
       </div>
@@ -58,22 +65,62 @@ export function DetailedMetricWidget({
         </div>
       ) : (
         <>
-          <div className="mb-4">
-            <span className="text-3xl font-bold text-slate-800 tracking-tight">{total}</span>
-            <span className="text-sm text-slate-500 ml-2 font-medium">Total</span>
+          <div className="flex items-baseline justify-between mb-3">
+            <div>
+              <span className="text-3xl font-bold text-slate-800 tracking-tight">{total}</span>
+              <span className="text-xs text-slate-500 ml-2 font-medium">Total</span>
+            </div>
+            {urgentItem && (() => {
+              const content = (
+                <>
+                  <span className="text-2xl font-extrabold leading-none tracking-tight">{urgentItem.value}</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-wide mt-0.5">{urgentItem.label}</span>
+                </>
+              );
+              const className = `flex flex-col items-end ${urgentItem.value > 0 ? 'text-red-finding' : 'text-slate-400'}`;
+              return urgentItem.href ? (
+                <Link
+                  href={urgentItem.href}
+                  className={`${className} hover:opacity-80 transition-opacity`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {content}
+                </Link>
+              ) : (
+                <div
+                  className={className}
+                  role={urgentItem.value > 0 ? 'status' : undefined}
+                  aria-live={urgentItem.value > 0 ? 'polite' : undefined}
+                >
+                  {content}
+                </div>
+              );
+            })()}
           </div>
           <div className="space-y-2 mt-auto">
-            {breakdown.map((item, idx) => (
-              <div key={idx} className={`flex justify-between items-center text-sm rounded-lg px-2 py-1 -mx-2 ${item.urgent && item.value > 0 ? 'bg-red-50' : ''}`}>
-                <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${item.colorClass}`} aria-hidden="true"></div>
-                  <span className={`font-medium ${item.urgent && item.value > 0 ? 'text-red-700' : 'text-slate-600'}`}>{item.label}</span>
+            {restItems.map((item, idx) => {
+              const rowContent = (
+                <>
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-2 h-2 rounded-full ${item.colorClass}`} aria-hidden="true"></div>
+                    <span className="font-medium text-slate-600">{item.label}</span>
+                  </div>
+                  <span className="font-bold px-2 py-0.5 rounded-md text-slate-700 bg-slate-50">
+                    {item.value}
+                  </span>
+                </>
+              );
+              return item.href ? (
+                <Link key={idx} href={item.href} className="flex justify-between items-center text-sm px-2 py-1 -mx-2 rounded-lg hover:bg-slate-50 transition-colors">
+                  {rowContent}
+                </Link>
+              ) : (
+                <div key={idx} className="flex justify-between items-center text-sm px-2 py-1 -mx-2">
+                  {rowContent}
                 </div>
-                <span className={`font-bold px-2 py-0.5 rounded-md ${item.urgent && item.value > 0 ? 'text-red-700 bg-red-100' : 'text-slate-700 bg-slate-50'}`}>
-                  {item.value}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

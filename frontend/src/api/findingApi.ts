@@ -28,6 +28,9 @@ export interface FindingListParams {
   divisionId?: number;
   reportedBy?: number;
   taskId?: number;
+  eventType?: string;
+  departmentId?: number;
+  ataChapterId?: number;
   page?: number;
   pageSize?: number;
 }
