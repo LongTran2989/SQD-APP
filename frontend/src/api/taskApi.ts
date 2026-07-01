@@ -364,6 +364,7 @@ export const getUsers = (): Promise<{ value: string; label: string; divisionId: 
   apiClient.get('/datasources/users').then((r) => r.data);
 
 export const getDatasource = (
-  source: string
-): Promise<{ value: string; label: string }[]> =>
-  apiClient.get(`/datasources/${source}`).then((r) => r.data);
+  source: string,
+  params?: { q?: string; limit?: number; divisionId?: number }
+): Promise<{ value: string; label: string; divisionId?: number | null }[]> =>
+  apiClient.get(`/datasources/${source}`, { params }).then((r) => r.data);
