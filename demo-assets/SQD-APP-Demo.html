@@ -516,7 +516,39 @@
     <div class="kicker">Workflow</div>
     <h2>Swimlane — task lifecycle across roles (all cases)</h2>
     <div class="shot" style="margin-top:2px"><img src="workflow-swimlane.png" alt="Task lifecycle swimlane" style="box-shadow:none"></div>
-    <div class="caption">System · Staff · Manager · Director lanes — self-assign, review (segregation of duties), the finding loop, reassign, closure. Full-res PNG + Mermaid source in <span class="mono">demo-assets/</span>.</div>
+    <div class="caption">Full reference (all cases connected). The next four slides break it into focused cases. Full-res PNG + Mermaid source in <span class="mono">demo-assets/</span>.</div>
+  </section>
+
+  <!-- 18a. CASE A -->
+  <section class="slide">
+    <div class="kicker">Workflow · Case A</div>
+    <h2>Standard task — no finding</h2>
+    <div class="shot" style="margin-top:2px"><img src="case-a-standard.png" alt="Case A standard task" style="box-shadow:none"></div>
+    <div class="caption">Unassigned → (Manager/Director assign, or Staff self-assign — own division) → In Progress → Submit → Review → <b>Approve → Closed</b> → book hours.</div>
+  </section>
+
+  <!-- 18b. CASE B -->
+  <section class="slide">
+    <div class="kicker">Workflow · Case B</div>
+    <h2>Task raises a finding — corrective-action loop</h2>
+    <div class="shot" style="margin-top:2px"><img src="case-b-finding.png" alt="Case B finding loop" style="box-shadow:none"></div>
+    <div class="caption">Raise Finding → Manager triages severity + due → generates follow-up tasks → each runs Case A → all final → <b>Pending Verification</b> → Manager/Director close.</div>
+  </section>
+
+  <!-- 18c. CASE C -->
+  <section class="slide">
+    <div class="kicker">Workflow · Case C</div>
+    <h2>Review outcomes &amp; interventions</h2>
+    <div class="shot" style="margin-top:2px"><img src="case-c-review.png" alt="Case C review outcomes" style="box-shadow:none"></div>
+    <div class="caption">QN → Director-only gate. Review (assignee may not review) → <b>Approve/Closed · Reject/Rejected · Follow-up</b>. Reassign at any non-final stage; Director re-open/inactivate.</div>
+  </section>
+
+  <!-- 18d. CASE D -->
+  <section class="slide">
+    <div class="kicker">Workflow · Case D</div>
+    <h2>Work Package setup &amp; task origination</h2>
+    <div class="shot" style="margin-top:2px"><img src="case-d-wp-origination.png" alt="Case D WP setup" style="box-shadow:none"></div>
+    <div class="caption">Create WP (or launch a Blueprint / cron) → auto-generate (Single-shot: template/set/inline · Repeat: every N days) or create manually → Unassigned pool → assignment (Case A) → WP close.</div>
   </section>
 
   <!-- 19. ESCALATION FLOW -->

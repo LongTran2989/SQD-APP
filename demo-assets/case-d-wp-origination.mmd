@@ -1,0 +1,36 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Geist Sans, system-ui, sans-serif','fontSize':'15px','primaryColor':'#ffffff','primaryTextColor':'#1e293b','primaryBorderColor':'#e2e8f0','lineColor':'#94a3b8','clusterBkg':'#f8fafc','clusterBorder':'#cbd5e1'}}}%%
+flowchart TB
+%% CASE D — Work Package setup & task origination
+subgraph MGR["👔  MANAGER / DIRECTOR"]
+  direction TB
+  NW["Create Work Package<br/><i>own division (Director: any)</i>"]
+  AG{"Auto-generate?"}
+  MODE{"Mode"}
+  MAN["Manually create task(s)<br/>assigned or Unassigned"]
+  WPC["Close WP<br/><i>creator, or wp:manage_status</i>"]
+  NW --> AG
+  AG -- no --> MAN
+  AG -- yes --> MODE
+end
+subgraph BP["🚀  BLUEPRINT / CRON"]
+  direction TB
+  BL["Launch WP Blueprint<br/>or nightly recurrence cron"]
+  BL --> NW
+end
+subgraph SYS["⚙️  SYSTEM / AUTO-GEN"]
+  direction TB
+  SShot["SINGLE_SHOT<br/>Template · Set · inline"]
+  Rep["REPEAT every N days<br/>(single template)"]
+  POOL(["Tasks spawned = Unassigned"])
+  SShot --> POOL
+  Rep --> POOL
+end
+subgraph NEXT["➡️  ASSIGNMENT"]
+  direction TB
+  GO(["Assignment paths → Case A<br/>(assign / self-assign, own-division)"])
+end
+MODE -- single --> SShot
+MODE -- repeat --> Rep
+MAN --> POOL
+POOL --> GO
+GO -. "tasks close" .-> WPC

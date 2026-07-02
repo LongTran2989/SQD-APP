@@ -338,6 +338,21 @@ picture_contain(s,os.path.join(HERE,'workflow-swimlane.png'),0.7,1.7,11.9,5.0,bo
 add_text(s,0.7,6.72,11.9,0.3,[{'t':'System · Staff · Manager · Director lanes — self-assign, review (segregation of duties), finding loop, reassign, closure. Full-res PNG in demo-assets/.','size':10.5,'color':MUT,'italic':True,'align':PP_ALIGN.CENTER}])
 footer(s,n)
 
+# 18a-d Per-case swimlanes
+def case_slide(kicker,title,img,cap):
+    s=slide(); N(); kicker_title(s,kicker,title)
+    picture_contain(s,os.path.join(HERE,img),0.7,1.7,11.9,4.95,border=False)
+    add_text(s,0.7,6.72,11.9,0.35,[{'t':cap,'size':10.5,'color':MUT,'italic':True,'align':PP_ALIGN.CENTER}])
+    footer(s,n)
+case_slide('Workflow · Case A','Standard task — no finding','case-a-standard.png',
+  'Unassigned → (Manager/Director assign, or Staff self-assign — own division) → In Progress → Submit → Review → Approve → Closed → book hours.')
+case_slide('Workflow · Case B','Task raises a finding — corrective-action loop','case-b-finding.png',
+  'Raise Finding → Manager triages severity + due → generates follow-up tasks → each runs Case A → all final → Pending Verification → close.')
+case_slide('Workflow · Case C','Review outcomes & interventions','case-c-review.png',
+  'QN → Director-only gate. Review (assignee may not review) → Approve/Closed · Reject/Rejected · Follow-up. Reassign non-final; Director re-open/inactivate.')
+case_slide('Workflow · Case D','Work Package setup & task origination','case-d-wp-origination.png',
+  'Create WP (or launch a Blueprint / cron) → auto-generate (Single-shot / Repeat) or create manually → Unassigned pool → assignment (Case A) → WP close.')
+
 # 19 Escalation flow
 s=slide(); N(); kicker_title(s,'Workflow','Swimlane — Unified Feed & Escalation loop')
 picture_contain(s,os.path.join(HERE,'workflow-escalation.png'),0.7,1.7,11.9,5.0,border=False)

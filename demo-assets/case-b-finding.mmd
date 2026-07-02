@@ -1,0 +1,31 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Geist Sans, system-ui, sans-serif','fontSize':'15px','primaryColor':'#ffffff','primaryTextColor':'#1e293b','primaryBorderColor':'#e2e8f0','lineColor':'#94a3b8','clusterBkg':'#f8fafc','clusterBorder':'#cbd5e1'}}}%%
+flowchart TB
+%% CASE B — Task raises a finding (corrective-action loop)
+subgraph STF["🔧  STAFF"]
+  direction TB
+  WIP["Executing task (In Progress)"]
+  FQ{"template allowsFindings<br/>& task not final?"}
+  RF["Raise Finding<br/>status = Open"]:::finding
+  WIP --> FQ -- yes --> RF
+end
+subgraph MGR["👔  MANAGER / DIRECTOR"]
+  direction TB
+  TR["Triage: severity (Obs/L1/L2)<br/>+ due  → In Progress"]
+  GEN["Generate follow-up task(s)<br/>Unassigned · parentFindingId"]
+  VC["Verify & close finding<br/>→ Closed"]:::closed
+  TR --> GEN
+end
+subgraph SYS["⚙️  SYSTEM"]
+  direction TB
+  LC(["Each follow-up runs the<br/><b>standard task lifecycle (Case A)</b>"])
+  ALL{"All follow-ups<br/>in a final state?"}
+  PV["Finding → Pending Verification<br/><i>(automatic)</i>"]:::pending
+  LC --> ALL -- yes --> PV
+end
+RF --> TR
+GEN --> LC
+PV --> VC
+classDef closed fill:#ecfdf5,stroke:#059669,color:#059669;
+classDef finding fill:#fef2f2,stroke:#dc2626,color:#dc2626;
+classDef pending fill:#fffbeb,stroke:#d97706,color:#d97706;
+class VC closed; class RF finding; class PV pending;

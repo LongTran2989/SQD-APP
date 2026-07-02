@@ -1,0 +1,36 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Geist Sans, system-ui, sans-serif','fontSize':'15px','primaryColor':'#ffffff','primaryTextColor':'#1e293b','primaryBorderColor':'#e2e8f0','lineColor':'#94a3b8','clusterBkg':'#f8fafc','clusterBorder':'#cbd5e1'}}}%%
+flowchart TB
+%% CASE C — Review outcomes & interventions
+subgraph STF["🔧  STAFF"]
+  direction TB
+  IR(["Task: In Review"])
+  WIP["Back to In Progress<br/>(rework)"]
+end
+subgraph REV["🎖️  REVIEWER (Issuer / Manager-same-div / Director)"]
+  direction TB
+  GATE{"requiresDirectorApproval?<br/>(QN task)"}
+  DONLY["Director only<br/>reviews/approves"]
+  R{"Review action<br/><b>assignee may NOT review</b>"}
+  C["approve → Closed"]:::closed
+  RJ["reject → Rejected"]:::rejected
+  FU["follow-up → Follow-up Required"]:::followup
+  RA["Reassign (reason, non-final)<br/><i>own-division unless assign_any</i>"]
+  GATE -- yes --> DONLY --> R
+  GATE -- no --> R
+  R -- approve --> C
+  R -- reject --> RJ
+  R -- "follow-up" --> FU
+end
+subgraph DIR["🎖️  DIRECTOR / ADMIN"]
+  direction TB
+  RO["Re-open (Closed→) / Inactivate"]
+end
+IR --> GATE
+FU --> WIP
+RA --> WIP
+C -.-> RO
+RJ -.-> RO
+classDef closed fill:#ecfdf5,stroke:#059669,color:#059669;
+classDef rejected fill:#fef2f2,stroke:#dc2626,color:#dc2626;
+classDef followup fill:#fffbeb,stroke:#d97706,color:#d97706;
+class C closed; class RJ rejected; class FU followup;
