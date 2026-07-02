@@ -1,0 +1,96 @@
+%%{init: {'theme':'base','themeVariables':{
+  'fontFamily':'Geist Sans, system-ui, sans-serif','fontSize':'15px',
+  'primaryColor':'#ffffff','primaryTextColor':'#1e293b','primaryBorderColor':'#e2e8f0',
+  'lineColor':'#94a3b8','clusterBkg':'#f8fafc','clusterBorder':'#cbd5e1'
+}}}%%
+flowchart TB
+
+%% ============================================================
+%%  SQD-APP — Task lifecycle swimlane (all cases, connected)
+%%  Lanes: System · Staff · Manager · Director
+%% ============================================================
+
+subgraph SYS["⚙️  SYSTEM  /  AUTO-GEN"]
+  direction TB
+  WP["Work Package created<br/>(Manager or Director)"]
+  AG{"Auto-generate<br/>enabled?"}
+  GEN["Tasks spawned<br/>status = Unassigned"]
+  POOL(["Unassigned pool<br/>(own-division visible)"])
+  PV["Finding →<br/>Pending Verification<br/><i>(auto: all follow-ups final)</i>"]
+  WP --> AG
+  AG -- yes --> GEN --> POOL
+  AG -- no --> POOL
+end
+
+subgraph STF["🔧  STAFF  /  GROUP LEADER"]
+  direction TB
+  SELF["Self-assign — 'Perform This Task'<br/><i>own-division task only</i>"]
+  ASSN["status = Assigned"]
+  WIP["In Progress<br/>fill snapshot form (branching)"]
+  FQ{"Raise a finding?<br/><i>template allowsFindings</i>"}
+  RF["Raise Finding<br/>status = Open"]
+  SUB["Submit for review<br/>status = In Review"]
+  TB["Book actual hours + collaborators<br/>(budget vs actual) → rating"]
+  ASSN --> WIP --> FQ
+  FQ -- no --> SUB
+  FQ -- yes --> RF --> WIP
+end
+
+subgraph MGR["👔  MANAGER  (own division)"]
+  direction TB
+  MCREATE["Create task &amp; assign<br/><i>own-division staff only</i>"]
+  MASSIGN["Assign unassigned task<br/><i>own-division staff only</i>"]
+  REV{"Review<br/>Issuer · Manager(same div) · Director<br/><b>assignee may NOT review</b>"}
+  REASSIGN["Reassign (reason, non-final)<br/><i>own-division unless assign_any</i>"]
+  TRIAGE["Triage finding: severity<br/>(Obs / L1 / L2) + due → In Progress"]
+  GENF["Generate follow-up task(s)<br/>linked via parentFindingId = Unassigned"]
+  FCLOSE["Verify &amp; close finding<br/>Pending Verification → Closed"]
+end
+
+subgraph DIR["🎖️  DIRECTOR  /  ADMIN"]
+  direction TB
+  DASSIGN["Assign / reassign<br/><b>across any division</b>"]
+  DREV{"Director-only approval gate<br/><i>requiresDirectorApproval (e.g. QN)</i>"}
+  REOPEN["Re-open / Inactivate<br/>(Director/Admin)"]
+  WPCLOSE["Close Work Package<br/>(creator, or wp:manage_status)"]
+  DGLOBAL(["Global oversight<br/>dashboard · analytics · all findings"])
+end
+
+%% ---- Assignment paths (into Assigned) ----
+POOL -->|"self-serve"| SELF --> ASSN
+POOL --> MASSIGN --> ASSN
+POOL --> DASSIGN --> ASSN
+MCREATE --> ASSN
+
+%% ---- Review outcomes ----
+SUB --> REV
+SUB -.->|"if QN task"| DREV
+DREV --> REV
+REV -- approve --> CLOSED["status = Closed"]:::closed
+REV -- reject --> REJ["status = Rejected"]:::rejected
+REV -- "follow-up" --> FUP["status = Follow-up Required"]:::followup
+FUP --> WIP
+CLOSED --> TB
+
+%% ---- Finding corrective-action loop ----
+RF --> TRIAGE --> GENF --> POOL
+GENF -. "each follow-up runs the task lifecycle" .-> ASSN
+CLOSED -. "all follow-ups final" .-> PV
+REJ -. "all follow-ups final" .-> PV
+PV --> FCLOSE
+
+%% ---- Cross-cutting actions ----
+ASSN -.-> REASSIGN
+WIP  -.-> REASSIGN
+FUP  -.-> REASSIGN
+REASSIGN --> ASSN
+CLOSED -.-> REOPEN
+CLOSED --> WPCLOSE
+DGLOBAL -.-> DREV
+
+classDef closed fill:#ecfdf5,stroke:#059669,color:#059669;
+classDef rejected fill:#fef2f2,stroke:#dc2626,color:#dc2626;
+classDef followup fill:#fffbeb,stroke:#d97706,color:#d97706;
+class CLOSED closed;
+class REJ rejected;
+class FUP followup;

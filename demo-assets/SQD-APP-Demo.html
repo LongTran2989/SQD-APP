@@ -511,7 +511,66 @@
     </div>
   </section>
 
-  <!-- 18. CLOSING / APPENDIX -->
+  <!-- 18. SWIMLANE -->
+  <section class="slide">
+    <div class="kicker">Workflow</div>
+    <h2>Swimlane — task lifecycle across roles (all cases)</h2>
+    <div class="shot" style="margin-top:2px"><img src="workflow-swimlane.png" alt="Task lifecycle swimlane" style="box-shadow:none"></div>
+    <div class="caption">System · Staff · Manager · Director lanes — self-assign, review (segregation of duties), the finding loop, reassign, closure. Full-res PNG + Mermaid source in <span class="mono">demo-assets/</span>.</div>
+  </section>
+
+  <!-- 19. ESCALATION FLOW -->
+  <section class="slide">
+    <div class="kicker">Workflow</div>
+    <h2>Swimlane — Unified Feed &amp; Escalation loop</h2>
+    <div class="shot" style="margin-top:2px"><img src="workflow-escalation.png" alt="Escalation loop swimlane" style="box-shadow:none"></div>
+    <div class="caption">Any user flags → the system posts cards → a Director/Admin or scoped Manager actions it → it connects back into the Findings / Task loops.</div>
+  </section>
+
+  <!-- 20. RBAC KEY RULES -->
+  <section class="slide">
+    <div class="kicker">Governance</div>
+    <h2>RBAC — the rules that matter most</h2>
+    <div class="sub">The complete, code-verified list is in <span class="mono">RBAC_RULES.md</span>. The essentials:</div>
+    <div class="row grow">
+      <div class="col card"><h3>Assignment &amp; division scope</h3><ul>
+        <li>Assign / reassign only to your <b>own division</b> — unless you hold <span class="mono">assign_any</span> (Director/Admin).</li>
+        <li>Self-assign only from your <b>own division's</b> unassigned pool.</li>
+        <li>WP membership lets you create/assign <b>within that WP</b> — still own-division-locked.</li>
+        <li><b>Multi-division WP:</b> only a Director/Admin can add out-of-division members; routing the work still stays division-scoped per actor.</li>
+      </ul></div>
+      <div class="col card"><h3>Review, findings &amp; escalation</h3><ul>
+        <li>Review = <b>Issuer + Director + Manager (same division)</b>. Admin is <b>not</b> a reviewer.</li>
+        <li>The person who <b>performed</b> a task can never review it (segregation of duties).</li>
+        <li><b>QN tasks</b> require Director approval — overrides the Issuer exception.</li>
+        <li>Manager reviews findings only within their <b>division scope</b>.</li>
+        <li>Escalations: Director/Admin any; Manager <b>own-division</b> WP/Div + all Org.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- 21. LIVE-DEMO RUNBOOK -->
+  <section class="slide">
+    <div class="kicker">Appendix</div>
+    <h2>Live-demo runbook — exact click paths</h2>
+    <div class="row grow" style="gap:20px">
+      <div class="col card" style="padding:16px 20px"><ul style="gap:11px">
+        <li><b>1 · Groundwork</b> — Slides 4–6 (ERD, schema, RBAC). Frame "view-transparent, action-scoped".</li>
+        <li><b>2A · Manager</b> <span class="mono">VAE00061</span> — Work Packages → New → toggle <b>Automatic Task Generation</b> → pick a Template → Create. Open the WP: tasks already spawned.</li>
+        <li><b>2B · Staff</b> <span class="mono">VAE00051</span> — Tasks → Unassigned → <b>Perform This Task</b> → fill the branching form → note the status badge → Submit.</li>
+        <li><b>2C · Findings</b> — On a findings-enabled task → <b>Raise Finding</b>. As Manager: Findings → set severity + due → <b>Generate follow-up task</b>.</li>
+      </ul></div>
+      <div class="col card" style="padding:16px 20px"><ul style="gap:11px">
+        <li><b>3 · RCA/CAPA</b> — Findings → open <span class="mono">FND-000101</span> (hero) → recurrence banner, ATA/hazard tags, RCA (5-Whys/MEDA) + CAPA.</li>
+        <li><b>3 · Escalation</b> — Any feed → flag a comment → header <b>bell</b> → Escalations page → action it (Acknowledge / Create Task / Disseminate).</li>
+        <li><b>2D · Time + Review</b> — On a Closed task → book hours (budget vs actual). As Issuer/Manager → Review → Approve / Reject / Follow-up.</li>
+        <li><b>2E · Director</b> <span class="mono">VAE00071</span> — Close the Work Package → Analytics (Time Efficiency / Personnel).</li>
+      </ul></div>
+    </div>
+    <div class="note">Accounts password <span class="mono">Demo@12345</span> · set <span class="mono">DISABLE_RATE_LIMIT=true</span> in <span class="mono">backend/.env</span> for rapid multi-role logins.</div>
+  </section>
+
+  <!-- 22. CLOSING / APPENDIX -->
   <section class="slide center">
     <div class="kicker">Wrap-up</div>
     <h1 style="font-size:40px">Everything traces back to the audit log</h1>

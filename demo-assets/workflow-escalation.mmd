@@ -1,0 +1,54 @@
+%%{init: {'theme':'base','themeVariables':{
+  'fontFamily':'Geist Sans, system-ui, sans-serif','fontSize':'15px',
+  'primaryColor':'#ffffff','primaryTextColor':'#1e293b','primaryBorderColor':'#e2e8f0',
+  'lineColor':'#94a3b8','clusterBkg':'#f8fafc','clusterBorder':'#cbd5e1'
+}}}%%
+flowchart TB
+
+%% ============================================================
+%%  SQD-APP — Unified Feed & Escalation loop (connects to the
+%%  task lifecycle at "comment on a Task/WP/Division feed")
+%% ============================================================
+
+subgraph ANY["👥  ANY AUTHENTICATED USER"]
+  direction TB
+  CMT["Comment on a feed<br/>(Task · WP · Division · Org · Finding)"]
+  FLAG["Flag a comment to a higher scope<br/><i>Task→WP→Division→Org (upward only)</i>"]
+  SEE(["Everyone SEES the escalation cards"])
+  CMT --> FLAG
+end
+
+subgraph SYSTEM["⚙️  SYSTEM"]
+  direction TB
+  MKFLAG["Create EscalationFlag = PENDING<br/>(one per comment+target)"]
+  CARDS["Post Escalation Card at target scope<br/>+ Info Cards at every level in between"]
+  BELL(["Header bell: PENDING count<br/><i>shown only to actioner roles</i>"])
+  MKFLAG --> CARDS --> SEE
+  CARDS --> BELL
+end
+
+subgraph ACT["🎖️  ACTIONERS  —  Director/Admin (any) · Manager (own-div WP/Div + all Org)"]
+  direction TB
+  DECIDE{"Action the flag<br/>canActionFlag"}
+  ACK["Acknowledge"]
+  DIS["Dismiss"]
+  RAISE["Raise Finding<br/><i>(task comment, allowsFindings)</i>"]
+  NEWT["Create / Reassign Task"]
+  DISS["Disseminate to Org Feed"]
+  DONE(["Flag = ACTIONED / DISMISSED<br/>(final — dual-write AuditLog + feed)"])
+end
+
+FLAG --> MKFLAG
+BELL --> DECIDE
+DECIDE --> ACK --> DONE
+DECIDE --> DIS --> DONE
+DECIDE --> RAISE --> DONE
+DECIDE --> NEWT --> DONE
+DECIDE --> DISS --> DONE
+
+%% Connection points back to the task lifecycle
+RAISE -. "enters Findings loop" .-> XF(["→ Finding: Open<br/>(see task-lifecycle swimlane)"]):::hook
+NEWT  -. "enters Task loop" .-> XT(["→ Task: Unassigned/Assigned<br/>(see task-lifecycle swimlane)"]):::hook
+
+classDef hook fill:#eff6ff,stroke:#2563eb,color:#2563eb,stroke-dasharray:4 3;
+class XF,XT hook;
