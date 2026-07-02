@@ -11,7 +11,8 @@ This document outlines the high-level business logic and application workflow fo
 
 ## 2. Work Packages (WP)
 - **Purpose:** A WP is a container grouping related Tasks under a defined timeframe and type (e.g., CHECK, AUDIT, INVESTIGATION).
-- **Timeframes & Auto-Generation:** Managers create a WP and assign users. If the type is CHECK, the system can auto-generate a daily task from a base Template for the duration of the WP.
+- **Timeframes & Auto-Generation:** Managers create a WP and assign users. **Any WP type** (not just CHECK) can opt in to auto-generation. When enabled, the source is one of three: a single **Template**, a saved **Template Set** (an ordered bundle of templates), or an **inline set** defined at creation. Two modes are supported: `SINGLE_SHOT` (spawn the source's tasks once) and `REPEAT` (re-spawn a single template every `autoGenInterval` days for the WP's duration). The first batch fires **synchronously on WP creation**; `REPEAT` catch-ups fire via a nightly cron. Idempotency is anchored by `autoGenFiredAt`. (See `services/autoGenService.ts`.)
+- **Reusable recipes (Blueprints & recurrence):** A **WP Blueprint** pre-fills WP creation values plus the auto-gen config and an optional recurrence schedule; "launching" a blueprint instantiates a WorkPackage. When a recurrence is set, a nightly cron auto-launches routine WPs on schedule (`services/recurrenceService.ts`).
 - **Scoping:** Staff members assigned to a WP can create tasks within the WP and assign them to any user in the same Division.
 
 ## 3. Task Execution & Assignment
