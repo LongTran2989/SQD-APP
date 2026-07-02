@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQD-APP — Product Demonstration</title>
+<style>
+  :root{
+    --blue:#2563eb; --blue-hover:#1d4ed8; --blue-surface:#eff6ff;
+    --amber:#d97706; --amber-surface:#fffbeb;
+    --red:#dc2626; --red-surface:#fef2f2;
+    --emerald:#059669; --emerald-surface:#ecfdf5;
+    --ink:#1e293b; --ink-2:#475569; --ink-muted:#94a3b8;
+    --base:#f8fafc; --card:#ffffff; --border:#e2e8f0; --border-2:#f1f5f9;
+    --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"Geist Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:var(--sans);background:#0b1220;color:var(--ink);overflow:hidden}
+  #deck{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  .slide{
+    position:absolute;width:100vw;height:100vh;
+    display:none;flex-direction:column;
+    background:var(--base);
+    padding:48px 64px 64px;overflow:hidden;
+  }
+  .slide.active{display:flex;animation:fade .35s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  /* Kicker + headings */
+  .kicker{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);margin-bottom:10px}
+  h1{font-size:44px;font-weight:700;letter-spacing:-.02em;line-height:1.1;text-wrap:balance}
+  h2{font-size:32px;font-weight:700;letter-spacing:-.02em;line-height:1.15;margin-bottom:6px;text-wrap:balance}
+  .sub{font-size:16px;color:var(--ink-2);line-height:1.5;margin-bottom:22px;max-width:70ch}
+  p{line-height:1.6}
+  .mono{font-family:var(--mono);font-size:.9em}
+  strong{font-weight:600}
+  a{color:var(--blue);text-decoration:none}
+
+  /* Layout helpers */
+  .row{display:flex;gap:24px}
+  .col{flex:1;min-width:0}
+  .grow{flex:1;min-height:0;display:flex;flex-direction:column}
+  .center{align-items:center;justify-content:center;text-align:center}
+
+  /* Cards */
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 22px}
+  .card h3{font-size:16px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  ul{list-style:none;display:flex;flex-direction:column;gap:9px}
+  ul li{position:relative;padding-left:20px;font-size:15px;color:var(--ink-2);line-height:1.5}
+  ul li::before{content:"";position:absolute;left:2px;top:9px;width:6px;height:6px;border-radius:50%;background:var(--blue)}
+  ul li b{color:var(--ink);font-weight:600}
+
+  /* Badges / chips */
+  .badge{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:3px 10px;border-radius:9999px;vertical-align:middle}
+  .b-blue{background:var(--blue-surface);color:var(--blue)}
+  .b-amber{background:var(--amber-surface);color:var(--amber)}
+  .b-red{background:var(--red-surface);color:var(--red)}
+  .b-emerald{background:var(--emerald-surface);color:var(--emerald)}
+  .b-neutral{background:var(--border-2);color:var(--ink-muted)}
+
+  /* Screenshot frame */
+  .shot{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;margin-top:6px}
+  .shot img{max-width:100%;max-height:100%;object-fit:contain;border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 48px rgba(15,23,42,.18)}
+  .shot.two{gap:20px}
+  .shot.two img{max-width:calc(50% - 10px)}
+
+  .caption{font-size:13px;color:var(--ink-muted);margin-top:10px;text-align:center}
+
+  /* Chrome: page number + progress + footer brand */
+  .foot{position:fixed;bottom:18px;left:64px;right:64px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--ink-muted);z-index:10}
+  .foot .brand{font-weight:600;color:var(--ink-2)}
+  .progress{position:fixed;top:0;left:0;height:3px;background:var(--blue);z-index:20;transition:width .3s}
+  .hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--ink-muted);z-index:10}
+
+  /* ERD diagram */
+  .erd{display:flex;flex-direction:column;gap:0;align-items:center;justify-content:center;flex:1}
+  .node{border:1.5px solid var(--border);background:var(--card);border-radius:10px;padding:10px 16px;text-align:center;min-width:120px}
+  .node .t{font-weight:700;font-size:15px}
+  .node .k{font-family:var(--mono);font-size:11px;color:var(--ink-muted)}
+  .node.accent{border-color:var(--blue);background:var(--blue-surface)}
+  .node.accent .t{color:var(--blue)}
+  .node.warn{border-color:var(--red);background:var(--red-surface)}
+  .node.warn .t{color:var(--red)}
+  .rel{font-family:var(--mono);font-size:12px;color:var(--ink-2);padding:4px 0;text-align:center}
+  .rel .line{color:var(--ink-muted)}
+
+  /* Pipeline */
+  .pipe{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin-top:8px}
+  .step{flex:1;min-width:120px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;position:relative}
+  .step .n{font-family:var(--mono);font-size:12px;color:var(--blue);font-weight:600}
+  .step .st{font-weight:600;font-size:15px;margin:4px 0 6px}
+  .step .d{font-size:12.5px;color:var(--ink-2);line-height:1.45}
+  .arrow{display:flex;align-items:center;color:var(--ink-muted);font-size:22px;padding:0 6px}
+
+  /* Stat tiles */
+  .stats{display:flex;gap:18px;margin-top:6px}
+  .stat{flex:1;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px}
+  .stat .v{font-size:34px;font-weight:700;letter-spacing:-.02em;line-height:1}
+  .stat .l{font-size:13px;color:var(--ink-2);margin-top:6px}
+
+  /* Role columns */
+  .roles{display:flex;gap:18px;flex:1;min-height:0}
+  .role{flex:1;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;display:flex;flex-direction:column}
+  .role .rh{font-size:17px;font-weight:700;margin-bottom:2px}
+  .role .rs{font-size:12px;color:var(--ink-muted);margin-bottom:12px}
+  .role ul li{font-size:13px;padding-left:16px}
+  .role ul li::before{width:5px;height:5px;top:8px}
+
+  .two-col{columns:2;column-gap:28px}
+  .schemaGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:4px}
+  .schemaGrid .m{border:1px solid var(--border);border-radius:9px;padding:9px 11px;background:var(--card)}
+  .schemaGrid .m .nm{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink)}
+  .schemaGrid .m .de{font-size:11px;color:var(--ink-muted);line-height:1.35;margin-top:2px}
+  .title-slide{background:linear-gradient(160deg,#0b1220 0%,#111a2e 55%,#0b1220 100%);color:#fff;justify-content:center}
+  .title-slide h1{font-size:60px;color:#fff}
+  .title-slide .sub{color:#94a3b8;font-size:20px;max-width:60ch}
+  .title-slide .kicker{color:#60a5fa}
+  .title-slide .metaline{margin-top:26px;display:flex;gap:26px;color:#cbd5e1;font-size:14px}
+  .title-slide .metaline b{color:#fff}
+  .divlabel{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-muted);margin:2px 0 10px}
+  .note{font-size:12.5px;color:var(--ink-muted);margin-top:10px;font-style:italic}
+</style>
+</head>
+<body>
+<div class="progress" id="prog"></div>
+<div id="deck">
+
+  <!-- 1. TITLE -->
+  <section class="slide title-slide active">
+    <div class="kicker">Aviation MRO · Quality Assurance &amp; Control</div>
+    <h1>SQD-APP</h1>
+    <div class="sub">A full-stack platform for dynamic audit templates, work packages, task execution, findings, and corrective action — built to enforce compliance and keep an immutable, auditable record of every quality event.</div>
+    <div class="metaline">
+      <span><b>Audience:</b> Staff · Managers · Directors</span>
+      <span><b>Aesthetic:</b> "The Technical Manual"</span>
+      <span><b>Live demo data:</b> 30 WPs · 150 Tasks · 27 Findings</span>
+    </div>
+  </section>
+
+  <!-- 2. PURPOSE / AESTHETIC -->
+  <section class="slide">
+    <div class="kicker">Introduction</div>
+    <h2>What it is, and the design philosophy</h2>
+    <div class="sub">An internal tool for a high-stakes, compliance-driven environment where errors have safety consequences.</div>
+    <div class="row grow">
+      <div class="col card">
+        <h3>🎯 Product purpose</h3>
+        <ul>
+          <li>Manage <b>audit templates, task assignment, inspections, findings, and work packages</b> across the MRO org.</li>
+          <li>Enforce compliance workflows and surface issues <b>before they become safety incidents</b>.</li>
+          <li>Success = inspectors work without friction; managers <b>trust the data they see</b>.</li>
+        </ul>
+      </div>
+      <div class="col card">
+        <h3>🧭 "The Technical Manual"</h3>
+        <ul>
+          <li><b>Authority through restraint</b> — structure signals safety, decoration undermines it.</li>
+          <li><b>Zero ambiguity on status</b> — every task/finding/WP status readable in under one second.</li>
+          <li><b>One Signal Rule</b> — <span class="badge b-blue">Blue</span> means "act here"; status colours fire only on live conditions.</li>
+          <li>A screen free of <span class="badge b-amber">amber</span> / <span class="badge b-red">red</span> is itself a signal: the system is healthy.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. TECH STACK -->
+  <section class="slide">
+    <div class="kicker">Introduction</div>
+    <h2>Technology &amp; platform</h2>
+    <div class="row grow">
+      <div class="col card"><h3>Frontend</h3><ul>
+        <li><b>Next.js 16</b> (App Router, React 19)</li>
+        <li><b>Tailwind CSS v4</b>, Zustand auth state</li>
+        <li>TypeScript 5 strict, Axios</li>
+      </ul></div>
+      <div class="col card"><h3>Backend</h3><ul>
+        <li><b>Express 5</b>, Node, TypeScript strict</li>
+        <li><b>Prisma v6</b> ORM + Postgres adapter</li>
+        <li>JWT auth, bcrypt, single-session tracking</li>
+        <li>Jest + Supertest (~500 tests)</li>
+      </ul></div>
+      <div class="col card"><h3>Data &amp; compliance</h3><ul>
+        <li><b>PostgreSQL</b> — status machines enforced by DB CHECK constraints</li>
+        <li><b>Soft-delete</b> on all compliance records</li>
+        <li><b>Dual audit</b>: AuditLog + operational feed</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- 4. ERD -->
+  <section class="slide">
+    <div class="kicker">Architecture</div>
+    <h2>Data model — two clusters around the Task</h2>
+    <div class="sub">Not a linear pipeline: <b>Task</b> is the hub, and <b>Finding</b> is both born from a task and resolved by new tasks (the corrective-action loop).</div>
+    <div style="display:flex;flex-direction:row;gap:60px;align-items:center;justify-content:center;flex:1;min-height:0">
+      <div class="col" style="flex:1.1">
+        <div class="divlabel">Task hub</div>
+        <div class="erd">
+          <div class="node"><div class="t">Template</div><div class="k">formSchema · draftSchema</div></div>
+          <div class="rel"><span class="line">│ 1 : N &nbsp;(schema snapshot copied at creation)</span></div>
+          <div class="node accent"><div class="t">Task</div><div class="k">schemaSnapshot · status(9)</div></div>
+          <div class="rel"><span class="line">▲ N : 1 &nbsp; wpId (optional)</span></div>
+          <div class="node"><div class="t">WorkPackage</div><div class="k">autoGenTemplateId → Template</div></div>
+        </div>
+      </div>
+      <div class="col" style="flex:1.1">
+        <div class="divlabel">Finding cluster</div>
+        <div class="erd">
+          <div class="node accent"><div class="t">Task</div><div class="k">source &amp; follow-up</div></div>
+          <div class="rel"><span class="line">│ sourceTaskId ▼ &nbsp;&nbsp; ▲ parentFindingId</span></div>
+          <div class="node warn"><div class="t">Finding</div><div class="k">severity · status(5)</div></div>
+          <div class="rel"><span class="line">└─ RCA · CAPA · ATA chapter · Hazard tags</span></div>
+          <div class="row" style="gap:8px;margin-top:4px">
+            <div class="node" style="min-width:0;padding:6px 10px"><div class="t" style="font-size:12px">RcaInvestigation</div></div>
+            <div class="node" style="min-width:0;padding:6px 10px"><div class="t" style="font-size:12px">CapaAction</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="note">Every arrow is a real foreign key in <span class="mono">schema.prisma</span> · <span class="mono">Task.templateId</span>, <span class="mono">Task.wpId</span>, <span class="mono">Finding.sourceTaskId</span>, <span class="mono">Task.parentFindingId</span>.</div>
+  </section>
+
+  <!-- 5. SCHEMA HIGHLIGHTS -->
+  <section class="slide">
+    <div class="kicker">Architecture</div>
+    <h2>Schema &amp; the three immutability guarantees</h2>
+    <div class="row" style="gap:24px;margin-bottom:16px">
+      <div class="col card" style="flex:1"><h3>📸 Schema snapshot</h3><p style="font-size:14px;color:var(--ink-2)">Each Task stores an immutable <span class="mono">schemaSnapshot</span> at creation. Editing/deleting the Template never alters an in-flight task's form.</p></div>
+      <div class="col card" style="flex:1"><h3>🗑️ Soft delete</h3><p style="font-size:14px;color:var(--ink-2)">Records with <span class="mono">deletedAt</span> are never physically removed. Evidence persists — an aviation compliance requirement.</p></div>
+      <div class="col card" style="flex:1"><h3>📝 Dual audit</h3><p style="font-size:14px;color:var(--ink-2)">Every state change writes to <b>both</b> the system-wide <span class="mono">AuditLog</span> and the operational feed. AuditLog is the source of truth.</p></div>
+    </div>
+    <div class="divlabel">Core models (30+ total)</div>
+    <div class="schemaGrid">
+      <div class="m"><div class="nm">Template</div><div class="de">Audit form + branching logic</div></div>
+      <div class="m"><div class="nm">Task</div><div class="de">9-status execution unit</div></div>
+      <div class="m"><div class="nm">WorkPackage</div><div class="de">Timeframed task container</div></div>
+      <div class="m"><div class="nm">Finding</div><div class="de">Defect / quality event</div></div>
+      <div class="m"><div class="nm">RcaInvestigation</div><div class="de">5-Whys / MEDA root cause</div></div>
+      <div class="m"><div class="nm">CapaAction</div><div class="de">Corrective / preventive</div></div>
+      <div class="m"><div class="nm">TemplateSet</div><div class="de">Reusable template bundle</div></div>
+      <div class="m"><div class="nm">WpBlueprint</div><div class="de">Recurring WP recipe</div></div>
+      <div class="m"><div class="nm">FeedPost</div><div class="de">Unified 5-scope feed</div></div>
+      <div class="m"><div class="nm">EscalationFlag</div><div class="de">Escalation lifecycle</div></div>
+      <div class="m"><div class="nm">TimeBooking / TimeEntry</div><div class="de">Budget vs actual, immutable</div></div>
+      <div class="m"><div class="nm">AuditLog</div><div class="de">Immutable compliance log</div></div>
+    </div>
+  </section>
+
+  <!-- 6. RBAC -->
+  <section class="slide">
+    <div class="kicker">Architecture</div>
+    <h2>RBAC — view-transparent, action-scoped</h2>
+    <div class="sub">The design decision that surprises people: <b>everyone can see everything; only acting is restricted.</b></div>
+    <div class="row grow">
+      <div class="col card" style="flex:1.2">
+        <h3>👁️ Viewing is open (safety transparency)</h3>
+        <ul>
+          <li>Every authenticated user can view <b>all</b> Work Packages, Tasks and Findings — regardless of division or assignment.</li>
+          <li>Awareness of ongoing work matters for safety in an MRO environment.</li>
+        </ul>
+        <h3 style="margin-top:16px">🔒 Acting is role &amp; division scoped</h3>
+        <ul>
+          <li><b>Review/approve/reject/reassign:</b> Issuer + Director + Managers of the <b>same Division</b>.</li>
+          <li><b>Assign to WPs / close them:</b> Managers &amp; Directors only.</li>
+          <li>Privileges are <b>database-driven</b> (<span class="mono">PrivilegeConfig</span>) — Admin-tunable without a code change.</li>
+        </ul>
+      </div>
+      <div class="col card" style="flex:1">
+        <div class="divlabel">Role hierarchy</div>
+        <ul>
+          <li><b>Director / Admin</b> — global visibility + global action rights.</li>
+          <li><b>Senior Advisor</b> — senior oversight, global dashboard visibility.</li>
+          <li><b>Manager</b> — division-scoped assign &amp; review.</li>
+          <li><b>Group Leader</b> — create/assign in assigned WPs (division-scoped).</li>
+          <li><b>Staff</b> — perform assigned tasks; self-assign from the unassigned pool.</li>
+        </ul>
+        <div class="note">The interface is <b>role-adaptive</b>: a Staff sidebar and a Director sidebar differ meaningfully (see upcoming screens).</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. LIFECYCLE OVERVIEW -->
+  <section class="slide">
+    <div class="kicker">The Centrepiece</div>
+    <h2>The end-to-end lifecycle</h2>
+    <div class="sub">One narrative, followed across roles — the spine of the demo.</div>
+    <div class="pipe">
+      <div class="step"><div class="n">01</div><div class="st">Template</div><div class="d">Branching audit form; flags for approval &amp; findings.</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">02</div><div class="st">Work Package</div><div class="d">Manager groups tasks; auto-generates from a template.</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">03</div><div class="st">Execution</div><div class="d">Staff perform tasks; raise findings.</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">04</div><div class="st">Findings</div><div class="d">Severity, follow-up tasks, RCA/CAPA.</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">05</div><div class="st">Time + Review</div><div class="d">Budget vs actual; approve / reject.</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">06</div><div class="st">Closure</div><div class="d">Director closes; analytics &amp; audit trail.</div></div>
+    </div>
+    <div class="row grow" style="margin-top:22px">
+      <div class="shot"><img src="screens/director-01-dashboard.png" alt="Director dashboard"></div>
+    </div>
+    <div class="caption">Director "Operations Overview" — live seeded data: 53 pending tasks (19 overdue), 16 findings, active work packages, live activity feed.</div>
+  </section>
+
+  <!-- 8. MANAGER: WP + AUTOGEN -->
+  <section class="slide">
+    <div class="kicker">Step 2A · Manager</div>
+    <h2>Work Package setup &amp; automatic task generation</h2>
+    <div class="row" style="gap:24px;flex:0 0 auto;margin-bottom:6px">
+      <div class="col"><ul>
+        <li>A WP groups tasks under a <b>timeframe</b> and <b>type</b> (CHECK, AUDIT, SURVEILLANCE, INVESTIGATION…).</li>
+        <li><b>Any WP type</b> can auto-generate tasks — from a single <b>Template</b>, a saved <b>Template Set</b>, or an inline set.</li>
+      </ul></div>
+      <div class="col"><ul>
+        <li>Two modes: <span class="badge b-blue">Single-shot</span> (spawn once) and <span class="badge b-blue">Repeat</span> (every N days across the WP).</li>
+        <li>First batch fires <b>the moment the WP is saved</b> — instant, not a background delay.</li>
+      </ul></div>
+    </div>
+    <div class="shot"><img src="screens/manager-02-wp-new-autogen.png" alt="New Work Package with auto-gen"></div>
+    <div class="caption">"Automatic Task Generation — spawn tasks from a template automatically, once or on a repeating cadence while the WP is active."</div>
+  </section>
+
+  <!-- 9. MANAGER: SETS + BLUEPRINTS -->
+  <section class="slide">
+    <div class="kicker">Step 2A · Manager</div>
+    <h2>Reusable recipes — Template Sets &amp; WP Blueprints</h2>
+    <div class="sub">The "the system runs its routine audits itself" story: standardise once, launch repeatedly, or let a nightly cron auto-launch recurring routine WPs.</div>
+    <div class="shot two">
+      <img src="screens/manager-03-template-sets.png" alt="Template Sets">
+      <img src="screens/manager-04-wp-blueprints.png" alt="WP Blueprints">
+    </div>
+    <div class="caption">Template Sets (ordered bundles of templates) &nbsp;·&nbsp; WP Blueprints (pre-filled WP + auto-gen config + recurrence schedule).</div>
+  </section>
+
+  <!-- 10. STAFF: TASKS + UNASSIGNED -->
+  <section class="slide">
+    <div class="kicker">Step 2B · Staff</div>
+    <h2>Task execution &amp; the self-serve pool</h2>
+    <div class="row" style="gap:24px;flex:0 0 auto;margin-bottom:6px">
+      <div class="col"><ul>
+        <li>Tasks arrive assigned, or sit <span class="badge b-neutral">Unassigned</span> in a pool eligible Staff self-serve via <b>"Perform This Task"</b>.</li>
+      </ul></div>
+      <div class="col"><ul>
+        <li>Role-adaptive sidebar: Staff see a <b>focused nav</b> (no Analytics / Template Builder / Escalations).</li>
+      </ul></div>
+    </div>
+    <div class="shot two">
+      <img src="screens/staff-02-tasks.png" alt="Staff task list">
+      <img src="screens/staff-03-task-unassigned.png" alt="Unassigned task">
+    </div>
+    <div class="caption">Task list with the status-badge column (fixed position) · an unassigned task ready to be picked up.</div>
+  </section>
+
+  <!-- 11. STAFF: EXECUTION FORM -->
+  <section class="slide">
+    <div class="kicker">Step 2B · Staff</div>
+    <h2>Executing a task — snapshot form &amp; status vocabulary</h2>
+    <div class="row" style="gap:24px;flex:0 0 auto;margin-bottom:6px">
+      <div class="col"><ul>
+        <li>The form renders from the task's <b>immutable snapshot</b> — it can never drift from a later template edit.</li>
+        <li>Templates support <b>Google-Forms-style branching</b> ("Damage Found = Yes → show Upload Photo").</li>
+      </ul></div>
+      <div class="col"><ul>
+        <li>9-status machine: <span class="badge b-neutral">Unassigned</span> <span class="badge b-blue">In Progress</span> <span class="badge b-blue">In Review</span> <span class="badge b-amber">Follow-up</span> <span class="badge b-emerald">Closed</span> …</li>
+        <li>A <b>Raise Finding</b> action is available when the template allows it.</li>
+      </ul></div>
+    </div>
+    <div class="shot"><img src="screens/staff-04-task-inprogress-form.png" alt="Staff task detail"></div>
+    <div class="caption">Task detail — template link, issuer/assignee, WP, deadline, estimated hours, progress-report editor, activity feed.</div>
+  </section>
+
+  <!-- 12. FINDINGS LIST -->
+  <section class="slide">
+    <div class="kicker">Step 2C · Staff → Manager</div>
+    <h2>Raising &amp; routing findings</h2>
+    <div class="row" style="gap:24px;flex:0 0 auto;margin-bottom:6px">
+      <div class="col"><ul>
+        <li>Any user can raise a finding from a task (if the template <b>allows findings</b> and the task isn't final).</li>
+        <li>A Manager/Director assigns <b>severity</b> — <span class="badge b-neutral">Observation</span> <span class="badge b-amber">Level 1</span> <span class="badge b-red">Level 2</span> — and a due date.</li>
+      </ul></div>
+      <div class="col"><ul>
+        <li>Findings visibility follows RBAC: Directors see all, Managers their division, Staff only what they raised / were assigned.</li>
+        <li>Sidebar badge counts Open + In Progress findings in scope.</li>
+      </ul></div>
+    </div>
+    <div class="shot"><img src="screens/director-04-findings.png" alt="Findings list"></div>
+    <div class="caption">Findings register — status &amp; severity badges read in under one second.</div>
+  </section>
+
+  <!-- 13. RCA/CAPA — HEADLINE -->
+  <section class="slide">
+    <div class="kicker">Differentiator · Headline</div>
+    <h2>Root Cause &amp; Corrective Action (RCA / CAPA)</h2>
+    <div class="row" style="gap:24px;flex:0 0 auto;margin-bottom:6px">
+      <div class="col"><ul>
+        <li><b>RCA</b> (1:1 with a finding): <b>5-Whys</b>, <b>MEDA</b> contributing factors, or OTHER — concluding in a cause code.</li>
+        <li><b>CAPA</b>: corrective &amp; preventive actions with owner, deadline, status; linked tasks must close before verify.</li>
+      </ul></div>
+      <div class="col"><ul>
+        <li><b>Taxonomy &amp; traceability</b>: ATA chapters, hazard tags, finding-to-finding links, response actions (CAR/NCR/QN…).</li>
+        <li><b>Trend detection</b>: shared dept + ATA + cause + hazard tag fires a <b>recurrence banner</b> → systemic action.</li>
+      </ul></div>
+    </div>
+    <div class="shot"><img src="screens/director-05-finding-hero-rca-capa.png" alt="Hero finding with RCA/CAPA"></div>
+    <div class="caption">Hero finding FND-000101 — "Recurrent pattern detected" banner, ATA chapter, hazard tags, Level 2 severity, full lifecycle.</div>
+  </section>
+
+  <!-- 14. ESCALATION — HEADLINE -->
+  <section class="slide">
+    <div class="kicker">Differentiator · Headline</div>
+    <h2>Unified Feed &amp; the Escalation loop</h2>
+    <div class="row" style="gap:24px;flex:0 0 auto;margin-bottom:6px">
+      <div class="col"><ul>
+        <li><b>One feed, five scopes</b>: Task · Work Package · Division Board · Org Feed · Finding.</li>
+        <li>Reading is open; posting is scoped. Any user can <b>flag a comment</b> to escalate it upward.</li>
+      </ul></div>
+      <div class="col"><ul>
+        <li>Escalation posts a card at the target and <b>info cards at every level in between</b> — no skipped level is blind. Cards carry an excerpt + deep link, never full text (compliance).</li>
+        <li>Only Directors/Admins &amp; scoped Managers can <b>action</b> a flag; the header bell shows their pending count.</li>
+      </ul></div>
+    </div>
+    <div class="shot"><img src="screens/director-06-escalations.png" alt="Escalations page"></div>
+    <div class="caption">The Escalations queue — full history (Pending / Actioned / Dismissed) with reuse of existing workflows (Raise Finding, Create Task, Disseminate…).</div>
+  </section>
+
+  <!-- 15. TIME + REVIEW -->
+  <section class="slide">
+    <div class="kicker">Step 2D · Staff → Manager</div>
+    <h2>Time booking &amp; review</h2>
+    <div class="row grow">
+      <div class="col card"><h3>⏱️ Budget vs actual</h3><ul>
+        <li>At a final state, the assignee logs <b>actual hours</b> (plus collaborators).</li>
+        <li>If the template had <span class="mono">estimatedHours</span>, a <b>budget-vs-actual badge</b> appears.</li>
+        <li>Exceeding <b>120%</b> of estimate forces an over-budget reason.</li>
+        <li>Each submission writes an <b>append-only <span class="mono">TimeEntry</span></b> — an immutable revision trail.</li>
+      </ul></div>
+      <div class="col card"><h3>✔️ Review rights (RBAC precision)</h3><ul>
+        <li>Approve / Reject / Follow-up = <b>Issuer + Director + Managers of the same Division</b>.</li>
+        <li>Not any manager. Not the issuer alone.</li>
+        <li>Every action dual-writes AuditLog + feed system event.</li>
+        <li>Reassignment allowed at any non-final stage (mandatory reason; all task data preserved).</li>
+      </ul></div>
+      <div class="col card"><h3>📊 Efficiency surfaces to Analytics</h3><ul>
+        <li>Managers &amp; Directors see time-efficiency trends and per-staff performance.</li>
+        <li>Scoped to division or system-wide.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- 16. DIRECTOR: ANALYTICS -->
+  <section class="slide">
+    <div class="kicker">Step 2E · Director</div>
+    <h2>Oversight &amp; analytics</h2>
+    <div class="row" style="gap:24px;flex:0 0 auto;margin-bottom:6px">
+      <div class="col"><ul>
+        <li>Directors close tasks &amp; work packages; global action rights across all divisions.</li>
+      </ul></div>
+      <div class="col"><ul>
+        <li>Analytics: <b>Time Efficiency</b>, <b>Findings</b> and <b>Personnel</b> tabs — staff avg rating, tasks rated, efficiency multiplier.</li>
+      </ul></div>
+    </div>
+    <div class="shot"><img src="screens/director-07-analytics.png" alt="Analytics"></div>
+    <div class="caption">Staff Performance — average rating, tasks rated, and efficiency (green = ahead of estimate, red = behind).</div>
+  </section>
+
+  <!-- 17. PER-ROLE WORKFLOW SUMMARY -->
+  <section class="slide">
+    <div class="kicker">Summary</div>
+    <h2>What each role does</h2>
+    <div class="roles">
+      <div class="role">
+        <div class="rh">Staff</div>
+        <div class="rs">Perform the work</div>
+        <ul>
+          <li>Pick up unassigned tasks ("Perform This Task")</li>
+          <li>Execute snapshot forms with branching logic</li>
+          <li>Raise findings from tasks</li>
+          <li>Log actual hours + collaborators</li>
+          <li>Comment &amp; flag on feeds</li>
+          <li>View all work (transparency)</li>
+        </ul>
+      </div>
+      <div class="role">
+        <div class="rh">Manager</div>
+        <div class="rs">Plan &amp; review (division-scoped)</div>
+        <ul>
+          <li>Create WPs, auto-generate tasks</li>
+          <li>Build Template Sets &amp; Blueprints</li>
+          <li>Assign tasks / users within division</li>
+          <li>Review: approve / reject / follow-up</li>
+          <li>Triage findings: severity + follow-ups</li>
+          <li>Action escalations in scope</li>
+          <li>Division analytics</li>
+        </ul>
+      </div>
+      <div class="role">
+        <div class="rh">Director / Admin</div>
+        <div class="rs">Global oversight</div>
+        <ul>
+          <li>Global assign &amp; review, everywhere</li>
+          <li>Close tasks &amp; work packages</li>
+          <li>Action any escalation; moderate feeds</li>
+          <li>System-wide findings &amp; RCA/CAPA sign-off</li>
+          <li>System-wide analytics &amp; trends</li>
+          <li>Configure privileges &amp; settings</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. CLOSING / APPENDIX -->
+  <section class="slide center">
+    <div class="kicker">Wrap-up</div>
+    <h1 style="font-size:40px">Everything traces back to the audit log</h1>
+    <div class="sub" style="text-align:center;margin:16px auto 26px">Every status change, time entry, escalation and closure shown today landed in the immutable <span class="mono">AuditLog</span> — the compliance backbone that lets managers trust the data.</div>
+    <div class="stats" style="max-width:900px">
+      <div class="stat"><div class="v">9</div><div class="l">Task statuses, DB-enforced</div></div>
+      <div class="stat"><div class="v">5</div><div class="l">Feed scopes, one model</div></div>
+      <div class="stat"><div class="v">6</div><div class="l">Roles, DB-driven privileges</div></div>
+      <div class="stat"><div class="v">30+</div><div class="l">Schema models</div></div>
+    </div>
+    <div class="note" style="margin-top:28px">Demo accounts (password <span class="mono">Demo@12345</span>): Director <span class="mono">VAE00071</span> · Manager <span class="mono">VAE00061</span> · Staff <span class="mono">VAE00051</span> &nbsp;·&nbsp; seeded via <span class="mono">seed-mass-mockup-v2.ts</span></div>
+  </section>
+
+</div>
+
+<div class="foot">
+  <span class="brand">SQD-APP · Aviation MRO Quality Assurance</span>
+  <span><span id="cur">1</span> / <span id="tot">18</span></span>
+</div>
+<div class="hint">← / → or Space to navigate · F for fullscreen</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  let i = 0;
+  const tot = slides.length;
+  document.getElementById('tot').textContent = tot;
+  function show(n){
+    i = Math.max(0, Math.min(tot-1, n));
+    slides.forEach((s,idx)=>s.classList.toggle('active', idx===i));
+    document.getElementById('cur').textContent = i+1;
+    document.getElementById('prog').style.width = ((i+1)/tot*100)+'%';
+  }
+  function next(){show(i+1)} function prev(){show(i-1)}
+  document.addEventListener('keydown', e=>{
+    if(['ArrowRight','ArrowDown',' ','PageDown'].includes(e.key)){e.preventDefault();next()}
+    else if(['ArrowLeft','ArrowUp','PageUp'].includes(e.key)){e.preventDefault();prev()}
+    else if(e.key==='Home'){show(0)} else if(e.key==='End'){show(tot-1)}
+    else if(e.key.toLowerCase()==='f'){ if(!document.fullscreenElement){document.documentElement.requestFullscreen()} else {document.exitFullscreen()} }
+  });
+  document.addEventListener('click', e=>{ if(e.target.closest('a'))return; const half=window.innerWidth/2; (e.clientX>half?next:prev)() });
+  show(0);
+</script>
+</body>
+</html>
