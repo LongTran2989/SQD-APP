@@ -34,9 +34,10 @@ isolation, `prisma generate`, handover updates) and the transparency/RBAC model 
 | Q1 | Reduce assignment effort | **a + b + c**: default roster on Blueprint/WP; auto-assign generated tasks (strategy); bulk-assign UI |
 | Q2 | Link WPs of one purpose | **Program/Campaign entity**, **many-to-many** (a WP can be in several programs), **Party-driven auto-membership** |
 | Q3 | Same-blueprint variants | **Both**: structured **Party** dimension (authority/operator/contractor/…) **and** lightweight free **Tags** |
-| Q4 | Div A WP needs Div B staff | **Guest roster with the helper-division manager's consent** |
-| Q4-followup | Who reviews/rates/adjusts a Div-A task done by Div-B staff | Div A (WP-owning division) by default; **configurable** flag to also grant the assignee's home-division (Div B) manager — "either may", not "both must" |
+| Q4 | Div A WP needs Div B staff | **WP membership = a WP-scoped execution grant.** The Div B manager adds their staff to the WP; those members then self-claim / can be assigned that WP's tasks *as if* Div A staff, **inside that WP only**. No manual task creation, no per-task assignment by the manager. Guest-consent subsystem and the review-config flag are **dropped**. |
+| Q4-followup | Who reviews/rates/adjusts a Div-A task done by Div-B staff | **Div A, always** — review/rate follow the task's `targetDivisionId` (= Div A). Membership never grants review (SoD intact; assignee can't review own task). The Div B manager "oversees" via the WP feed + roster (transparency). **No config flag.** |
 | Q4-followup | Where do logged hours count | **Both axes, derived, no new column**: *work division* (WP owner) for cost/WP/program rollups; *home division* (person) for capacity/utilization. Surface a cross-division contribution view |
+| Q4-risk | WP-owner consent for external helpers | A Div B manager can already add own-division staff to any WP (verified — `assignUserToWp` compares target-vs-actor division only). Accept + **log the cross-division join** (WP `SYSTEM_EVENT` + roster shows home division). Optional future `WorkPackage.acceptsExternalHelpers` flag (default on); **no approval flow now**. |
 | Q2-followup | More party types | **Generalized Party model** (`PartyType` lookup + `Party` + `WorkPackageParty`), replacing ad-hoc `authority`/`customer` strings (kept for back-compat) |
 | Q2-followup | Program chat | **Yes** — add a `PROGRAM` scope to the existing unified `FeedPost` feed. Discussion/mentions/attachments/pinning; **not** on the escalation ladder initially |
 | Q2-followup | Tags vs Parties | Tags = free labels (Renewal, Supplement, Q1-2026); Parties = real external entities |
@@ -149,8 +150,9 @@ model WpBlueprintAssignee {
 - `WorkPackage` create/launch accepts an optional initial `assigneeUserIds[]`.
 - `recurrenceService.fireRecurrenceForBlueprint` and `wpBlueprint.launchBlueprint` populate
   `WorkPackageAssignment` from the blueprint roster **inside the same transaction** as WP creation.
-- **RBAC:** roster members validated against the blueprint's division (or via the Phase 3 guest
-  path for cross-division members). Reuse `hasCrossDivisionReach`.
+- **RBAC:** roster members validated against the blueprint's division. Cross-division members are
+  added the same way a Div B manager adds their own staff today (see Phase 3 — WP-scoped execution
+  grant). Reuse `hasCrossDivisionReach` for the owner-side path.
 - **Dual-write:** WP creation already dual-writes; add roster info to `auditDetails` +
   `systemEventContent`.
 
@@ -164,7 +166,7 @@ model WpBlueprintAssignee {
 
 **Service (`autoGenService.ts`):**
 - Candidate pool = WP roster (`WorkPackageAssignment`); fallback = division staff.
-- `ROUND_ROBIN` — rotate deterministically (persist a cursor or use spawn count modulo roster).
+- `ROUND_ROBIN` — persist `WorkPackage.lastAssignedUserId` (do **not** use spawn-count modulo — the roster is mutable and modulo skips/double-assigns when members are added/removed). Pick the next roster member by id after `lastAssignedUserId`, wrapping; update the cursor after each spawn.
 - `LEAST_LOADED` — reuse the active-task/estimated-hours calc from `workload.controller`
   (extract a shared `computeUserLoad(userIds)` helper — no duplicate query logic).
 - On assign: set `assignedToUserId`, `status = 'Assigned'`, dual-write (`createTaskService` already
@@ -216,6 +218,7 @@ model Party {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   @@unique([partyTypeId, name])
+  @@unique([partyTypeId, code]) // prevent duplicate formal-code refs (IATA/ICAO); nulls don't collide in Postgres
   @@index([partyTypeId, isActive, deletedAt])
 }
 
@@ -232,10 +235,13 @@ model WorkPackageParty {
 ```
 - **`Party` carries `deletedAt`** → **Rule 2 obligation**: every Party read filters `deletedAt: null`
   (pickers, existence checks, rollups).
-- **Migration/back-compat:** keep `WorkPackage.authority`/`customer`/`acRegistration`. Seed default
-  `PartyType` rows; back-fill existing `Operator` records as `partyType=OPERATOR` Parties and link
-  WPs whose `customer`/`authority` match. Google-Sheet sync continues writing the string columns;
-  a follow-up can resolve strings → parties.
+- **Migration/back-compat:** keep `WorkPackage.authority`/`customer`/`acRegistration` as the **raw
+  input / audit trail**. Seed default `PartyType` rows; back-fill existing `Operator` records as
+  `partyType=OPERATOR` Parties and link WPs whose `customer`/`authority` match. **Google-Sheet sync
+  is match-and-link, never auto-create:** on sync, if a `Party` matches the sheet string, link it via
+  `WorkPackageParty`; if none matches (e.g. a typo), keep the raw string only and do **not** create a
+  Party (avoids duplicate/garbage parties + sync errors). Deprecate the string columns later once the
+  UI is the primary entry point.
 - **RBAC:** Party/PartyType CRUD behind an admin/reference privilege (mirror
   `referenceData.controller` pattern). WP↔Party linking follows WP edit rights.
 
@@ -255,7 +261,7 @@ model Program {
   id              Int      @id @default(autoincrement())
   name            String
   description     String?
-  status          String   @default("Open") // Open | In Progress | Closed | Inactive (CHECK-constrained)
+  status          String   @default("Open") // Open | In Progress | Closed | Inactive (CHECK-constrained). MANUAL — never derived from member WPs.
   ownerId         Int
   owner           User     @relation("ProgramOwner", fields: [ownerId], references: [id])
   // Optional: a Party whose linked WPs auto-populate this program (e.g. Program "EASA" ↔ Party EASA)
@@ -284,6 +290,10 @@ model WorkPackageProgram {
   auto-create the `WorkPackageProgram` row (`auto: true`). Manager can confirm/remove. Manual links
   set `auto: false`.
 - A WP can belong to **many** programs (EASA-by-authority ∩ HVN-by-operator ∩ Contractor-X).
+- **Status is manual** (Open/In Progress/Closed/Inactive) — a program may stay Open for admin wrap-up
+  after all WPs close, or close early with WPs still open. The frontend shows a **derived progress
+  indicator** ("3 of 5 WPs Closed") from the `WorkPackageProgram` rollup — display only, never the
+  source of the status field.
 - **RBAC:** Program CRUD — Director/Admin global; Managers for programs they own / in their division
   (reuse `canManageDivision` pattern). Because a program spans divisions, membership edits check WP
   edit rights per WP.
@@ -329,50 +339,69 @@ model WorkPackageTag {
 
 ---
 
-## 8. Phase 3 — Cross-division execution (Q4)
+## 8. Phase 3 — Cross-division help via WP-scoped execution grant (Q4)
 
-### Guest roster with consent
-- Extend `WorkPackageAssignment`:
-  ```prisma
-  // added columns
-  isGuest           Boolean  @default(false)
-  requestedByUserId Int?
-  approvedByUserId  Int?
-  guestStatus       String?  // PENDING | APPROVED | REJECTED (null for normal same-division members)
-  ```
-  (Or a dedicated `WorkPackageGuestRequest` model if we want request history separate from
-  membership — decide at build time; the column approach is lighter.)
-- **Flow:** Div A manager requests Div B user (`guestStatus=PENDING`); Div B manager (holder of
-  `wp:assign` in the user's division) approves → `APPROVED` + assignment becomes active. The approval
-  **is** the cross-division grant — the existing `hasCrossDivisionReach` block is *not* bypassed
-  silently; it is satisfied by the recorded consent.
-- Once approved, the Div B user is assignable on that WP's tasks (the `createTaskService` assignee
-  division lock consults an "approved guest on this WP" exception).
-- **Dual-write** on request + approve (AuditLog + WP-scope SYSTEM_EVENT). Notify both managers +
-  the guest.
+**Model: WP membership *is* the execution grant.** A Div B manager adds their staff to a Div A WP
+(a single action — the same self-service path that already works today). Those members then **see,
+self-claim, and can be assigned that WP's tasks as if they were Div A staff — but only inside that
+WP.** The manager oversees + delegates; the staff claim the actual tasks. No manual task creation, no
+per-task assignment by the manager.
 
-### Governance (review / rate / adjust) — configurable
-- **Default (flag off):** review/rate stay with **Div A** (WP owner) exactly as
-  `canReviewTask` already computes (`task:review_div` && `divisionId === targetDivisionId`). SoD
-  intact — the assignee never reviews their own task.
-- **New setting `ALLOW_ASSIGNEE_DIVISION_REVIEW`** (SystemSetting, default `false`): when `true`,
-  extend `canReviewTask` with `OR (task:review_div && divisionId === assignee.divisionId)` so the
-  **Div B** (assignee's home-division) manager may also review/rate. Semantics: **"either may"**,
-  not "both must" (no dual-sign-off deadlock).
-- **Hour adjustment:** today = assignee + Admin + Director (division-neutral). Optionally extend to
-  the WP-owning (Div A) manager, and — under the same flag — the Div B manager. Do **not** give
-  hour-adjust to a manager who has no review right.
+**This replaces the guest-consent subsystem AND the earlier "multi-division tasks in a WP" idea.** It
+is smaller and safer: **no schema change, no config flag**, and it *preserves* the invariant
+`task.targetDivisionId == wp.divisionId` (tasks stay single-division; only the labor pool widens).
+
+### Verified starting point
+- `assignUserToWp` (`wp.controller.ts:679`) compares the target user's division to **the actor's**
+  division, not the WP's — so a **Div B manager can already self-join any WP and add their own Div B
+  staff** to its roster. That mechanic exists; what's missing is that roster membership does not yet
+  grant *execution* rights on the WP's (Div-A-targeted) tasks.
+- Execution is division-locked in exactly three places → the whole change surface:
+  1. `buildUnassignedScope` (`:403`) — Unassigned visibility is `targetDivisionId === own division`.
+  2. `selfAssignTask` (`:1283`) — claim requires `targetDivisionId === own division` (non-Director).
+  3. Assignee locks — `createTaskService` (`:815`), `assignTask` (`:1169`), `reassignTask` — require
+     `assignee.divisionId === actor.divisionId` (or `task:assign_any`).
+
+### The change (backend only, NO schema, NO flag)
+A user U may execute a task T (`T.wpId = W`) when `U.divisionId === T.targetDivisionId` **OR**
+`U ∈ members(W)`. Apply that predicate in the three sites:
+1. `buildUnassignedScope` — add `userId` to its args; widen to
+   `OR: [{ targetDivisionId: own }, { wp: { assignments: { some: { userId } } } }]` (both branches
+   keep `deletedAt: null`, `status: 'Unassigned'`).
+2. `selfAssignTask` — allow the claim when caller is a member of `task.wp` (live query), else keep the
+   division rule.
+3. Assignee locks — allow an assignee who is a member of the task's WP (so the Div A manager/issuer
+   can hand a task directly to a Div B member, and reassign among members).
+- **Unchanged:** task creation, WP-division checks, and — critically — **review/rate/reassign-rights**.
+  Removal from the WP revokes execution instantly (all three are live membership queries).
+
+### Governance — resolves with NO config flag
+- **Review / rate always follow `T.targetDivisionId` = Div A** (`canReviewTask` unchanged). Membership
+  never grants review; the assignee still can't review/rate their own task (SoD intact). The Div B
+  manager "oversees" via the WP feed + roster (transparency), which needs no new right.
+- **Hour adjustment** stays as today (assignee + Admin + Director) — the Div B staffer revises their
+  own booking; no manager-level cross-division change needed.
 
 ### Hours attribution (no new column — derived)
 - **Cost / WP / program rollups** aggregate by **work division** (`Task.wp.divisionId`).
 - **Capacity / utilization** aggregate by **home division** (`TimeEntry.loggedBy.divisionId`).
 - Every division metric in the UI is **explicitly labeled** "hours spent ON div X's work" vs "hours
-  worked BY div X's people". Cross-division contribution view shows the delta.
+  worked BY div X's people". Cross-division contribution view (Phase 0) shows the delta.
+
+### Owner-side consent (the one design decision)
+Because membership now carries execution rights, a Div A WP owner could find Div B staff claiming
+their tasks (a Div B manager can add own-division staff to any WP today). **Recommendation: accept +
+log the cross-division join prominently** — dual-write a WP `SYSTEM_EVENT` on join and show each
+member's home division in the roster. SoD is untouched (no review rights transfer), so the only
+exposure is "who may claim my WP's tasks", which the transparency model already tolerates; Div A sees
+it and can remove. **No approval flow now.** *Optional future:* a `WorkPackage.acceptsExternalHelpers`
+boolean (default `true`) lets an owner lock a sensitive WP — one column, add only if asked.
 
 ### Tests
-`wp.test.ts` / `task.test.ts` guest request→approve→assign happy path + RBAC (only helper-division
-`wp:assign` holder approves); review-rights matrix with the flag off vs on; hours attribution
-assertions (work-division vs home-division).
+`task.test.ts` — a WP member from another division can view + self-claim + be assigned the WP's tasks;
+a non-member from another division still gets 403 on all three; removal from the WP revokes claim/
+visibility. `task.test.ts` review matrix — the Div B assignee cannot review/rate (SoD); the Div A
+manager/issuer can. Hours attribution assertions (work-division vs home-division). No new migration.
 
 ---
 
@@ -381,7 +410,13 @@ assertions (work-division vs home-division).
 - **Rule 1 (plan-first):** this doc + a per-phase file list before coding; migrations described &
   confirmed reversible.
 - **Rule 2 (soft-delete):** `Party`, `Program` carry `deletedAt` → every read filters
-  `deletedAt: null`, including pickers, existence checks, and rollups.
+  `deletedAt: null`, including pickers, existence checks, and rollups. **Use the existing manual-filter
+  pattern + targeted `deletedAt` tests — do NOT introduce a Prisma Client Extension / `$use`
+  middleware to auto-inject the filter.** Verified: the codebase (`lib/prisma.ts`) uses a plain shared
+  client with the pg adapter and **zero** extensions/middleware anywhere; a one-off extension for two
+  models would create a dual paradigm, risk the pg-adapter interaction, and give false safety
+  elsewhere (`$use` is deprecated in Prisma 6). Manual filtering + tests is the discipline that caught
+  the D-1 leak; keep it uniform.
 - **Rule 3 (dual-write):** every status change / significant event → `AuditLog` **and** a `FeedPost`
   `SYSTEM_EVENT` (task/WP/program scope as appropriate). Config-only mutations (tags, party CRUD)
   write a lightweight `AuditLog` row only, consistent with the TemplateSet/Blueprint precedent.
@@ -398,8 +433,9 @@ assertions (work-division vs home-division).
   `canManageDivision`, `canReviewTask` — do not re-hand-roll role-string checks.
 
 ### Suggested new privilege keys
-`program:manage`, `party:manage` (Director/Admin default). Guest approve reuses `wp:assign` in the
-target user's division. `settings:*` unaffected.
+`program:manage`, `party:manage` (Director/Admin default). **Phase 3 adds no new privilege** — it
+reuses existing `wp:assign` (a manager adding their own staff to a WP) and widens task-execution RBAC
+by WP membership. `settings:*` unaffected.
 
 ---
 
@@ -410,7 +446,7 @@ Phase 0  (analytics, no schema)         ──► ship first, standalone, low ri
 Phase 1  (assignment a/b/c)             ──► depends on nothing; high user value
 Phase 2a (Party dimension)              ──► backbone for 2
 Phase 2  (Programs + feed + tags)       ──► depends on 2a
-Phase 3  (guest + configurable review)  ──► depends on 1 (roster); independent of 2
+Phase 3  (WP-scoped execution grant)    ──► RBAC-only, no schema; independent of 1 & 2
 ```
 One phase per PR. Each phase must leave the full backend suite green and `tsc`/lint/`next build`
 clean before the next starts.
@@ -464,9 +500,18 @@ is complete and I confirm it.
 
 ---
 
-## 12. Open items to confirm at build time
-- Guest membership: extra columns on `WorkPackageAssignment` vs a dedicated `WorkPackageGuestRequest`
-  (history separation).
-- Whether Google-Sheet `customer` strings should be auto-resolved to Parties or left as labels.
-- Round-robin cursor persistence (a small counter column vs spawn-count modulo).
-- Program status machine transitions (manual vs derived from member WP statuses).
+## 12. Decisions resolved from the external audit + review (2026-07-02)
+- **Phase 3 model** → **WP-scoped execution grant** (membership grants claim/assign inside that WP).
+  Guest-consent subsystem + `ALLOW_ASSIGNEE_DIVISION_REVIEW` flag **dropped**. RBAC-only, no schema.
+- **Round-robin** → persist `WorkPackage.lastAssignedUserId`, pick next-by-id (not spawn-modulo).
+- **Party sheet sync** → match-and-link only; keep raw string; never auto-create on a typo.
+  Added `@@unique([partyTypeId, code])`.
+- **Program status** → manual field + derived progress indicator (display only).
+- **Soft-delete** → keep the manual-filter + test pattern; **no Prisma Client Extension** (see §9).
+
+### Still open (decide at build time)
+- Phase 3 owner-side control: ship accept-and-log now; add optional `WorkPackage.acceptsExternalHelpers`
+  flag only if an owner-lock is requested.
+- Whether/when to deprecate the `WorkPackage.authority`/`customer` string columns once the Party UI is
+  the primary entry point.
+- Program status transitions: which roles may move a Program to Closed/Inactive.
