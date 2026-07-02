@@ -1826,13 +1826,13 @@ describe('Task Backend (Phase 5.2)', () => {
       await request(app)
         .put(`/api/tasks/${taskId}/deadline`)
         .set('Authorization', `Bearer ${managerToken}`)
-        .send({ deadline: '2026-07-01' });
+        .send({ deadline: '2099-07-01' });
 
       // Request extension
       await request(app)
         .put(`/api/tasks/${taskId}/deadline/request`)
         .set('Authorization', `Bearer ${staffToken}`)
-        .send({ reason: 'Delay', proposedDeadline: '2026-09-01' });
+        .send({ reason: 'Delay', proposedDeadline: '2099-09-01' });
 
       // Deny
       const res = await request(app)
@@ -1843,7 +1843,7 @@ describe('Task Backend (Phase 5.2)', () => {
       expect(res.status).toBe(200);
       expect(res.body.deadlineExtensions[0].decision).toBe('deny');
       // Deadline should remain at the original
-      expect(res.body.deadline).toContain('2026-07-01');
+      expect(res.body.deadline).toContain('2099-07-01');
     });
 
     it('T52: SYSTEM_EVENT logged for request and decision', async () => {
