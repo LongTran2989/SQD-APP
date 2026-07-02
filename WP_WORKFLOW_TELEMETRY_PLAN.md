@@ -473,14 +473,25 @@ governance). **Medium** is acceptable for Phase 0 and the mechanical UI parts of
 `WP_WORKFLOW_TELEMETRY_PLAN.md` lives on `main`. Every phase branches off `main`; if the plan isn't
 there, a phase branch can't read it.
 
-**Per-phase order (branch → work → review → PR → you merge):**
+**Per-phase order (branch → work → review → PR → auto-merge on green):**
 1. **Branch** off the latest `main` — `claude/wp-phase-<N>-<slug>`.
 2. **Work** the checkpoints (C0–C5); full backend suite + `tsc`/lint/`next build` green.
 3. **`/code-review`** (high) on the diff → fix accepted findings → **re-run tests green** → log to
    `CODE_REVIEW_AUDIT_LOG.md` (C6).
 4. **Open the PR** — clean and already self-reviewed; body carries the review summary + test counts.
-   Update `CLAUDE_HANDOVER.md` + the §13 ledger (C7).
-5. **You merge** manually. (Review-before-PR keeps the PR merge-ready — no post-open fix churn.)
+   Update `CLAUDE_HANDOVER.md` + the §13 ledger.
+5. **Auto-merge into `main`** — only if the **MERGE GATE** below fully passes; otherwise STOP and
+   report instead of merging. Squash-merge, delete the branch, then stop (do not start the next phase).
+
+**MERGE GATE (all must hold, or STOP and ask the human):**
+- Full backend Jest suite green **re-run immediately before merge** (not a stale earlier run).
+- `tsc --noEmit` + frontend lint + `next build` clean.
+- `/code-review` completed and **every HIGH/critical finding resolved** — an unresolvable HIGH is a
+  hard STOP (never merge over it).
+- PR is **mergeable with no conflicts** against `main`. If it has drifted, rebase onto `origin/main`
+  and re-run the suite; if conflicts can't be cleanly resolved, STOP.
+- Any CI checks configured on the PR are green.
+- The Rule-1 plan for this phase was explicitly approved by the human (that gate is never skipped).
 
 ### Reusable kickoff prompt — paste the SAME text into every fresh session
 It self-locates the next incomplete phase from the §13 ledger, so you never edit it. It also knows
@@ -517,10 +528,21 @@ commits survive context loss). The full backend Jest suite plus `tsc`/lint/`next
 REVIEW BEFORE PR: run `/code-review` (high) on the diff, fix accepted findings, re-run the suite to
 green, and log findings to CODE_REVIEW_AUDIT_LOG.md (Rule 13).
 
-OPEN PR (only after the review is clean): push the branch and open a PR into main via the GitHub
-tools. The PR body summarizes the change, the code-review outcome, and before/after test counts.
-Do NOT merge — I merge manually. Then update CLAUDE_HANDOVER.md and mark the phase DONE in the §13
-ledger (commit that to the phase branch), and STOP. Do not start the next phase.
+OPEN PR (only after the review is clean): update CLAUDE_HANDOVER.md and mark the phase DONE in the
+§13 ledger (commit those to the phase branch). Push the branch and open a PR into main via the
+GitHub tools; the PR body summarizes the change, the code-review outcome, and before/after test
+counts.
+
+AUTO-MERGE — check the §11 MERGE GATE and merge ONLY if every item passes:
+- backend Jest suite re-run green RIGHT NOW; `tsc --noEmit` + frontend lint + `next build` clean;
+- `/code-review` done with every HIGH/critical finding resolved (an unresolvable HIGH = hard STOP);
+- PR mergeable with no conflicts vs origin/main (if drifted, rebase onto origin/main and re-run the
+  suite; if conflicts won't resolve cleanly, STOP);
+- any PR CI checks green; and the Rule-1 plan for this phase was approved by me.
+If ALL pass: squash-merge the PR into main via the GitHub tools and delete the phase branch. If ANY
+fails: do NOT merge — leave the PR open, post a short comment on what's blocking, and tell me.
+
+Then STOP. Do not start the next phase (paste this prompt again in a fresh session for it).
 ```
 
 ---
@@ -578,10 +600,12 @@ inapplicable ones and note why.
 - [ ] **C5 Tests** — new Jest suites; full backend suite green; test-DB = `sqd_qa_test_db`.
 - [ ] **C6 Self-review (BEFORE PR)** — `/code-review` (high) on the diff; fix accepted findings;
       **re-run the suite to green**; log to `CODE_REVIEW_AUDIT_LOG.md` (Rule 13).
-- [ ] **C7 PR + close-out** — push branch; open a PR into `main` via the GitHub tools (body =
-      change summary + review outcome + before/after test counts); update `CLAUDE_HANDOVER.md`
-      (§2 status, test count, gotchas) + set this phase `DONE` in the ledger. **Do NOT merge** — the
-      human merges manually.
+- [ ] **C7 PR + auto-merge + close-out** — update `CLAUDE_HANDOVER.md` (§2 status, test count,
+      gotchas) + set this phase `DONE` in the ledger; push branch; open a PR into `main` (body =
+      change summary + review outcome + before/after test counts). Then check the §11 **MERGE GATE**
+      and, only if every item passes, **squash-merge the PR into `main`** and delete the branch. If
+      any gate item fails (red tests, unresolved HIGH finding, conflicts, red CI), do **NOT** merge —
+      leave the PR open, comment what's blocking, and stop for the human.
 
 ### Resuming after a context loss (what the fresh session does)
 1. Read this plan (esp. the phase's section + this ledger).
