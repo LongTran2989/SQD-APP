@@ -469,33 +469,49 @@ be acceptable, and even there the AuditLog time-in-status query benefits from Op
 governance). **Medium** is acceptable for Phase 0 and the mechanical UI parts of Phase 1, but
 **High** is the safe default across the board given the non-negotiable rules.
 
-**Per-session guardrails to put in the kickoff prompt:**
+**Per-session guardrails (baked into the reusable prompt below):**
 - Read `CLAUDE.md`, `CLAUDE_HANDOVER.md` (§1,2,3,6,10), `BUSINESS_WORKFLOW.md`, and this plan first.
-- Build **only the named phase**; do not start the next.
+- Work **only the next incomplete phase** in the §13 ledger; do not start the one after.
 - Run `cd backend && npm test` for the baseline **before** coding and confirm green after.
 - Follow Rule 1: list the exact files to change and wait for approval before writing code.
 - `npx prisma generate` after any schema change; migrations reversible + scratch-DB-verified.
-- Update `CLAUDE_HANDOVER.md` when the phase is confirmed complete.
+- **Commit at every checkpoint** (§13) — never batch a whole phase into one commit.
+- Self-run `/code-review` (high) on the diff, fix accepted findings, log to `CODE_REVIEW_AUDIT_LOG.md`.
+- Update `CLAUDE_HANDOVER.md` + the §13 ledger when the phase is confirmed complete.
 
-### Draft kickoff prompt (paste into the fresh session)
+### Reusable kickoff prompt — paste the SAME text into every fresh session
+It self-locates the next incomplete phase from the §13 ledger, so you never edit it. It also knows
+how to **resume a half-finished phase** after a context loss.
 ```
 Read WP_WORKFLOW_TELEMETRY_PLAN.md in the repo root, plus CLAUDE.md, CLAUDE_HANDOVER.md
 (sections 1,2,3,6,10) and BUSINESS_WORKFLOW.md.
 
-Implement **Phase <N>** from WP_WORKFLOW_TELEMETRY_PLAN.md ONLY — do not begin any other phase.
+Open the §13 EXECUTION LEDGER in WP_WORKFLOW_TELEMETRY_PLAN.md and find the FIRST phase whose
+status is not DONE. That is your phase. Work ONLY that phase — do not begin the next one.
 
-Before writing code (Rule 1): run `cd backend && npm test` to confirm the baseline is green,
-then list every file you will change and the exact schema/endpoint/RBAC changes, and wait for my
-approval. For any schema change, describe the migration and confirm it is reversible + non-
-destructive (verify back-fills on a scratch DB).
+FIRST, establish where things stand (this handles a resume after lost context):
+- Run `git log --oneline -20` and `git status` to see which of this phase's §13 checkpoints are
+  already committed.
+- Run `cd backend && npm test` to confirm the current baseline (green before you add anything).
+- If the phase is partly done, CONTINUE from the first unchecked checkpoint — do NOT restart or
+  redo committed work.
 
-Honor every NON-NEGOTIABLE RULE in CLAUDE.md (soft-delete filter on any deletedAt model, dual-write
-AuditLog + FeedPost SYSTEM_EVENT, prisma generate, test DB = sqd_qa_test_db). Reuse the existing
-helpers (hasCrossDivisionReach, canManageDivision, canReviewTask, validateAutoGenConfig,
-createTaskService, createWorkPackageService) — do not re-hand-roll RBAC checks.
+Then, before writing any new code (Rule 1): list every file you will change and the exact
+schema/endpoint/RBAC changes, and wait for my approval. For any schema change, describe the
+migration and confirm it is reversible + non-destructive (verify back-fills on a scratch DB).
 
-The full backend Jest suite must pass before and after. Update CLAUDE_HANDOVER.md when Phase <N>
-is complete and I confirm it.
+Honor every NON-NEGOTIABLE RULE in CLAUDE.md (soft-delete filter on any deletedAt model — and do
+NOT add a Prisma Client Extension for it, see §9; dual-write AuditLog + FeedPost SYSTEM_EVENT;
+prisma generate; test DB = sqd_qa_test_db). Reuse existing helpers (hasCrossDivisionReach,
+canManageDivision, canReviewTask, validateAutoGenConfig, createTaskService,
+createWorkPackageService) — do not re-hand-roll RBAC checks.
+
+Commit at each §13 checkpoint as you go (small commits survive context loss). The full backend
+Jest suite plus `tsc`/lint/`next build` must pass. As the final checkpoint: run `/code-review`
+(high) on the diff, fix accepted findings, and log them to CODE_REVIEW_AUDIT_LOG.md (Rule 13).
+
+When the phase is complete and I confirm it: update CLAUDE_HANDOVER.md AND mark the phase DONE in
+the §13 ledger, then stop. Do not continue to the next phase.
 ```
 
 ---
@@ -515,3 +531,53 @@ is complete and I confirm it.
 - Whether/when to deprecate the `WorkPackage.authority`/`customer` string columns once the Party UI is
   the primary entry point.
 - Program status transitions: which roles may move a Program to Closed/Inactive.
+
+---
+
+## 13. Execution ledger & resumability
+
+**How the workflow runs:** paste the §11 reusable prompt into a fresh session. It reads the ledger
+below, picks the first phase that is not `DONE`, and works only that one. Because progress lives in
+**this committed file + git history**, a session that loses context mid-phase can resume: it reads
+the ledger, runs `git log --oneline` + `npm test` to see which checkpoints are already committed, and
+continues from the first unchecked box. **The builder updates this ledger as it goes** (tick
+checkpoints; set the phase to `DONE` at the end) and commits it — that is what makes the state durable.
+
+### Phase status
+| Phase | Title | Status | PR |
+|-------|-------|--------|----|
+| 0  | Analytics quick wins (no schema) | TODO | — |
+| 1  | Assignment effort (a/b/c)        | TODO | — |
+| 2a | Party dimension                  | TODO | — |
+| 2  | Programs + feed + tags + rollups | TODO | — |
+| 3  | WP-scoped execution grant        | TODO | — |
+
+*(Statuses: `TODO` → `IN PROGRESS` → `DONE`. Update on every session.)*
+
+### Per-phase checkpoint template (each box = one commit)
+Every phase follows the same ordered checkpoints. Commit at each so no work is lost to a context
+reset. Not every box applies to every phase (e.g. Phase 0 and Phase 3 have no migration) — skip
+inapplicable ones and note why.
+
+- [ ] **C0 Baseline** — `npm test` green recorded; Rule-1 file list posted and approved.
+- [ ] **C1 Schema + migration** — `schema.prisma` change, reversible migration, `npx prisma generate`,
+      back-fill verified non-destructive on a scratch DB. *(skip if no schema change)*
+- [ ] **C2 Service/core logic** — services + shared helpers (e.g. `computeUserLoad`), unit-testable.
+- [ ] **C3 Controller + routes** — endpoints, RBAC gates (reuse existing helpers), dual-write (Rule 3).
+- [ ] **C4 Frontend** — API client, components, pages; `tsc`/lint/`next build` clean. *(skip if backend-only)*
+- [ ] **C5 Tests** — new Jest suites; full backend suite green; test-DB = `sqd_qa_test_db`.
+- [ ] **C6 Self-review** — `/code-review` (high) on the diff; fix accepted findings; log to
+      `CODE_REVIEW_AUDIT_LOG.md` (Rule 13).
+- [ ] **C7 Close-out** — update `CLAUDE_HANDOVER.md` (§2 status, test count, gotchas) + set this
+      phase `DONE` in the ledger; open/refresh the PR.
+
+### Resuming after a context loss (what the fresh session does)
+1. Read this plan (esp. the phase's section + this ledger).
+2. `git log --oneline -20` + `git status` → identify the last committed checkpoint.
+3. `cd backend && npm test` → confirm the current green baseline.
+4. Continue from the first unchecked checkpoint — never redo committed work.
+
+### If a phase feels too big for one session
+Split it at the checkpoint boundaries into separate PRs (e.g. Phase 1 → 1a default-roster,
+1b auto-assign, 1c bulk-assign; Phase 2 → Programs, then feed scope, then tags/rollups). Each
+sub-PR still runs C0→C7. Update the ledger with sub-rows if you do this.
